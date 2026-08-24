@@ -1,13 +1,13 @@
 const CACHE_NAME = 'harivision-cache-v1';
 const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/admin.html',
-  '/national.html',
-  '/config.js',
-  '/app.js',
-  '/admin.js',
-  '/manifest.json'
+  './',
+  './index.html',
+  './admin.html',
+  './national.html',
+  './config.js',
+  './app.js',
+  './admin.js',
+  './manifest.json'
 ];
 
 self.addEventListener('install', (event) => {

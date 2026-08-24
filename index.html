@@ -6,12 +6,12 @@
     <title>HariVision | Haribo Broadcasting Union Official Portal</title>
     
     <!-- PWA & iOS Support -->
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#060204">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="HariVision">
-    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -128,7 +128,7 @@
         </div>
 
         <div class="border-t border-amber-500/20 pt-4 flex flex-col gap-2">
-            <a href="/admin" class="flex items-center justify-center gap-2 py-3 px-4 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase tracking-widest rounded-xl transition">
+            <a href="admin.html" class="flex items-center justify-center gap-2 py-3 px-4 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase tracking-widest rounded-xl transition">
                 <span>⚙️</span>
                 <span>Admin Panel</span>
             </a>
@@ -184,7 +184,7 @@
             <button onclick="navigateToView('contests')" class="hover:text-amber-300 transition">Архив</button>
             <button onclick="navigateToView('news')" class="hover:text-amber-300 transition">Новости</button>
             <button onclick="navigateToView('voting')" class="hover:text-amber-300 transition text-amber-400">Голосование</button>
-            <a href="/admin" class="hover:text-amber-300 transition">Admin Panel</a>
+            <a href="admin.html" class="hover:text-amber-300 transition">Admin Panel</a>
         </div>
     </footer>
 
@@ -192,7 +192,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW registration error:', err));
+                navigator.serviceWorker.register('sw.js').catch(err => console.log('SW registration error:', err));
             });
         }
     </script>
