@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>HariVision Admin Panel | Haribo Broadcasting Union</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#060204">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #060204; color: #f8fafc; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); }
+        ::-webkit-scrollbar-thumb { background: rgba(245, 158, 11, 0.25); border-radius: 9999px; }
+        .page-fade { animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="p-3 sm:p-6 md:p-10 min-h-screen select-none relative text-slate-100">
+    
+    <!-- Форма входа -->
+    <div id="auth-panel" class="max-w-md mx-auto my-16 bg-[#0d0408] border border-amber-500/25 p-8 sm:p-10 shadow-2xl rounded-3xl page-fade">
+        <div class="flex items-center justify-center gap-2.5 mb-4">
+            <div class="w-8 h-8 bg-amber-500/10 border border-amber-500/30 flex items-center justify-center rounded-xl">
+                <span class="text-amber-400 font-bold">🔥</span>
+            </div>
+            <span class="text-xs font-black tracking-[0.2em] text-amber-200 uppercase">Firebase Auth</span>
+        </div>
+        <h1 class="text-2xl font-black uppercase tracking-wider text-white mb-2 text-center">HariVision Admin</h1>
+        <p class="text-xs text-amber-200/70 text-center mb-6 font-medium">Авторизация организатора через Firebase Authentication</p>
+
+        <form id="login-form" class="flex flex-col gap-4">
+            <div>
+                <label class="text-[10px] uppercase font-bold text-amber-400 tracking-wider block mb-1.5">Электронная почта (Email)</label>
+                <input type="email" id="email" required placeholder="admin@harivision.org" class="w-full bg-[#060204] border border-amber-500/20 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl">
+            </div>
+            <div>
+                <label class="text-[10px] uppercase font-bold text-amber-400 tracking-wider block mb-1.5">Пароль</label>
+                <input type="password" id="password" required placeholder="••••••••" class="w-full bg-[#060204] border border-amber-500/20 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl">
+            </div>
+            <button type="submit" id="login-submit-btn" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-widest py-3.5 mt-2 transition rounded-xl shadow-lg flex items-center justify-center gap-2">
+                <span>Войти через Firebase</span>
+            </button>
+            <p id="auth-error" class="text-xs text-rose-400 hidden mt-2 text-center bg-rose-950/40 p-2.5 rounded-xl border border-rose-500/20"></p>
+        </form>
+    </div>
+
+    <!-- Основной интерфейс Admin Panel -->
+    <div id="dashboard" class="hidden max-w-6xl mx-auto flex flex-col gap-6 page-fade">
+        <!-- Верхняя панель -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center bg-[#0d0408]/90 border border-amber-500/20 p-6 gap-4 rounded-3xl backdrop-blur-xl">
+            <div>
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Haribo Broadcasting Union</span>
+                    <span class="text-slate-600">•</span>
+                    <span class="text-[10px] text-slate-400 font-mono">Admin Console v2.0</span>
+                </div>
+                <h1 class="text-2xl sm:text-3xl font-black text-white uppercase tracking-wider">HariVision Dashboard</h1>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="/" class="text-xs font-bold uppercase tracking-wider text-amber-400 hover:text-amber-300 bg-amber-500/10 px-4 py-2 rounded-xl border border-amber-500/20 transition">
+                    &larr; На сайт
+                </a>
+                <button id="logout-btn" class="text-xs text-rose-400 hover:text-rose-300 uppercase font-bold bg-rose-950/30 px-4 py-2 rounded-xl border border-rose-500/20 transition">
+                    Выйти
+                </button>
+            </div>
+        </div>
+
+        <!-- Навигационные вкладки разделов Admin Panel -->
+        <div class="flex items-center gap-2 border-b border-amber-500/20 pb-2 overflow-x-auto">
+            <button id="tab-btn-voting" onclick="switchAdminTab('voting')" class="px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition flex items-center gap-2">
+                <span>🗳️</span>
+                <span>Voting (Голосование)</span>
+            </button>
+            <button id="tab-btn-news" onclick="switchAdminTab('news')" class="px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2">
+                <span>📰</span>
+                <span>News (Новости)</span>
+            </button>
+            <button id="tab-btn-contests" onclick="switchAdminTab('contests')" class="px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2">
+                <span>🏆</span>
+                <span>Contests (Конкурсы)</span>
+            </button>
+        </div>
+
+        <!-- ============================================================== -->
+        <!-- РАЗДЕЛ 1: VOTING (СУЩЕСТВУЮЩИЙ ИНТЕРФЕЙС И ЛОГИКА + УПРАВЛЕНИЕ НОМЕРАМИ) -->
+        <!-- ============================================================== -->
+        <div id="section-voting" class="flex flex-col gap-8">
+            <!-- Управление сессией и статистика -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Управление сессией -->
+                <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 flex flex-col justify-between rounded-3xl backdrop-blur-xl">
+                    <div>
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-base font-bold text-white uppercase tracking-wider">Управление сессией Public Vote</h2>
+                            <span id="live-indicator" class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest px-3 py-1 bg-rose-950/40 text-rose-400 border border-rose-500/30 rounded-full">
+                                <span class="w-2 h-2 rounded-full bg-rose-500"></span> Закрыто
+                            </span>
+                        </div>
+                        <div id="timer-display" class="text-sm font-mono text-amber-200/80 mb-6 bg-[#16070b] p-3 rounded-xl border border-amber-500/15">
+                            Голосование завершится через: --:--
+                        </div>
+                        
+                        <div id="open-controls" class="flex flex-col gap-3">
+                            <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Открыть голосование на время</label>
+                            <div class="grid grid-cols-3 gap-2">
+                                <button onclick="openVoting(5)" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-xs font-bold py-2.5 text-white rounded-xl transition">5 мин</button>
+                                <button onclick="openVoting(10)" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-xs font-bold py-2.5 text-white rounded-xl transition">10 мин</button>
+                                <button onclick="openVoting(15)" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-xs font-bold py-2.5 text-white rounded-xl transition">15 мин</button>
+                                <button onclick="openVoting(20)" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-xs font-bold py-2.5 text-white rounded-xl transition">20 мин</button>
+                                <button onclick="openVoting(30)" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-xs font-bold py-2.5 text-white rounded-xl transition">30 мин</button>
+                                <button onclick="openVoting(0)" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-xs font-bold py-2.5 text-white rounded-xl transition">Без лимита</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="close-controls" class="hidden mt-6 flex flex-col gap-2">
+                        <button onclick="closeVoting()" class="w-full bg-rose-700 hover:bg-rose-600 text-white font-extrabold text-xs uppercase tracking-widest py-4 transition rounded-xl shadow-lg">Закрыть голосование</button>
+                    </div>
+                </div>
+
+                <!-- Настройки порога и участники -->
+                <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 flex flex-col justify-between rounded-3xl backdrop-blur-xl">
+                    <div>
+                        <h2 class="text-base font-bold text-white uppercase tracking-wider mb-2">Статистика и Порог</h2>
+                        
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <div class="text-[10px] text-amber-500 uppercase font-bold">Проголосовало зрителей</div>
+                                <div class="text-3xl font-black text-amber-400 font-mono" id="voters-count">0</div>
+                            </div>
+
+                            <!-- Ручной ввод порога -->
+                            <div class="w-48">
+                                <label class="block text-[10px] text-amber-500 uppercase font-bold mb-1">Порог голосов (Ручной)</label>
+                                <input type="number" id="manual-threshold-input" value="0" min="0" oninput="updateManualThreshold(this.value)" class="w-full bg-[#16070b] border border-amber-500/30 px-3 py-1.5 text-white font-mono font-bold text-sm focus:outline-none focus:border-amber-400 rounded-xl" />
+                            </div>
+                        </div>
+
+                        <!-- Список проголосовавших зрителей -->
+                        <div class="border-t border-amber-500/15 pt-3">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Список зрителей (Нажмите для просмотра голоса)</div>
+                                <button onclick="confirmResetAllVotes()" class="text-[9px] text-rose-400 hover:text-rose-300 font-bold uppercase tracking-wider">Очистить голоса</button>
+                            </div>
+                            <div id="voters-list" class="max-h-24 overflow-y-auto flex flex-wrap gap-1.5 pr-1"></div>
+                        </div>
+
+                        <div id="toast-container" class="h-6 flex items-center mt-1"></div>
+                    </div>
+                    <button id="reveal-btn" onclick="revealResults()" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition rounded-xl shadow-lg mt-4">Раскрыть Public Points</button>
+                </div>
+            </div>
+
+            <!-- НАСТРОЙКА ССЫЛКИ НА ВИДЕО ПОВТОРА (RECAP) -->
+            <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 rounded-3xl backdrop-blur-xl flex flex-col gap-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-500/15 pb-3">
+                    <div>
+                        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Видеоповтор выступлений</div>
+                        <h2 class="text-base font-bold text-white uppercase tracking-wider">Ссылка на повтор (Recap Video URL)</h2>
+                    </div>
+                    <span class="text-xs font-mono text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">Экран Public Vote</span>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <input type="text" id="recap-video-url-input" placeholder="https://rutube.ru/play/embed/... или https://www.youtube.com/embed/..." class="flex-grow bg-[#16070b] border border-amber-500/20 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl">
+                    <button onclick="saveRecapUrlFromInput()" class="px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg shrink-0">
+                        Сохранить ссылку
+                    </button>
+                </div>
+                <div id="recap-save-status" class="text-xs text-green-400 hidden font-bold"></div>
+            </div>
+
+            <!-- БЛОК УПРАВЛЕНИЯ НОМЕРАМИ И УЧАСТНИКАМИ (PARTICIPANTS) -->
+            <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 rounded-3xl backdrop-blur-xl flex flex-col gap-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-amber-500/15 pb-4">
+                    <div>
+                        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Номера для голосования</div>
+                        <h2 class="text-base font-bold text-white uppercase tracking-wider">Управление участниками Public Vote</h2>
+                        <p class="text-xs text-slate-400">Добавленные здесь номера сразу появляются для голосования у всех посетителей сайта.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="resetParticipantsDefaults()" class="bg-[#16070b] hover:bg-amber-500/15 border border-amber-500/25 text-amber-300 font-bold text-xs uppercase tracking-wider px-4 py-2.5 rounded-xl transition">
+                            Сбросить (8 по умолч.)
+                        </button>
+                        <button onclick="openParticipantEditorModal()" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-widest px-5 py-2.5 rounded-xl shadow-lg transition">
+                            + Добавить номер
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Список участников карточками -->
+                <div id="admin-participants-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <!-- Dynamic participants injected via JS -->
+                </div>
+            </div>
+
+            <!-- Таблица подсчета Public Points -->
+            <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 overflow-x-auto rounded-3xl backdrop-blur-xl">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Официальный результат</div>
+                        <h2 class="text-base font-bold text-white uppercase tracking-wider">Рейтинг Public Points</h2>
+                    </div>
+                    <div class="text-[10px] text-slate-400 font-mono">
+                        Шкала: 100, 90, 80, 70, 60, 50, 40, 30, 20, 10
+                    </div>
+                </div>
+                <table class="w-full text-left text-xs font-mono">
+                    <thead>
+                        <tr class="border-b border-amber-500/20 text-amber-400">
+                            <th class="pb-3">Номер / Участник</th>
+                            <th class="pb-3">Голоса зрителей</th>
+                            <th class="pb-3">Порог пройден</th>
+                            <th class="pb-3">Место</th>
+                            <th class="pb-3 font-bold text-white">Public Points</th>
+                        </tr>
+                    </thead>
+                    <tbody id="public-table-body" class="divide-y divide-amber-500/10 text-slate-300"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============================================================== -->
+        <!-- РАЗДЕЛ 2: NEWS MANAGEMENT -->
+        <!-- ============================================================== -->
+        <div id="section-news" class="hidden flex flex-col gap-6">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0d0408]/90 border border-amber-500/20 p-6 rounded-3xl backdrop-blur-xl">
+                <div>
+                    <h2 class="text-xl font-bold text-white uppercase tracking-wide">Управление новостями</h2>
+                    <p class="text-xs text-slate-400">Создание, редактирование и удаление публикаций для портала HBU</p>
+                </div>
+                <button onclick="openNewsEditorModal()" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-widest px-6 py-3 rounded-xl shadow-lg transition">
+                    + Добавить новость
+                </button>
+            </div>
+
+            <!-- Список существующих новостей -->
+            <div id="admin-news-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Injected via JS -->
+            </div>
+        </div>
+
+        <!-- ============================================================== -->
+        <!-- РАЗДЕЛ 3: CONTESTS MANAGEMENT -->
+        <!-- ============================================================== -->
+        <div id="section-contests" class="hidden flex flex-col gap-6">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0d0408]/90 border border-amber-500/20 p-6 rounded-3xl backdrop-blur-xl">
+                <div>
+                    <h2 class="text-xl font-bold text-white uppercase tracking-wide">Управление конкурсами и сезонами</h2>
+                    <p class="text-xs text-slate-400">Добавление новых выпусков, редактирование стран, тем, открыток и победителей</p>
+                </div>
+                <button onclick="openContestEditorModal()" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-widest px-6 py-3 rounded-xl shadow-lg transition">
+                    + Создать новый сезон
+                </button>
+            </div>
+
+            <!-- ВЫБОР БАННЕРА НА ГЛАВНОМ ЭКРАНЕ (HOME) -->
+            <div class="bg-[#0d0408]/90 border border-amber-500/30 p-6 rounded-3xl backdrop-blur-xl flex flex-col gap-4 shadow-xl">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-500/15 pb-3">
+                    <div>
+                        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Главный экран портала</div>
+                        <h3 class="text-base font-bold text-white uppercase tracking-wider">Выбор баннера на главное меню</h3>
+                    </div>
+                    <span id="current-banner-badge" class="text-xs font-mono text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
+                        Авто: Последний завершённый
+                    </span>
+                </div>
+                <p class="text-xs text-slate-300">
+                    Укажите, информация о каком конкурсе должна высвечиваться в интерактивном баннере на главной странице сайта:
+                </p>
+                <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                    <select id="banner-contest-select" class="flex-grow bg-[#16070b] border border-amber-500/30 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl">
+                        <option value="auto">🌟 Автоматически: Последний завершённый сезон</option>
+                        <option value="auto-live">🔴 Автоматически: Текущий активный (Live)</option>
+                    </select>
+                    <button onclick="saveFeaturedBannerFromSelect()" class="px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg shrink-0">
+                        Применить баннер
+                    </button>
+                </div>
+                <div id="banner-save-status" class="text-xs text-green-400 font-bold hidden"></div>
+            </div>
+
+            <!-- Список конкурсов -->
+            <div id="admin-contests-list" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Injected via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- МОДАЛЬНЫЕ ОКНА -->
+    <!-- ============================================================== -->
+
+    <!-- Модальное окно просмотра распределения зрителя (Существующее) -->
+    <div id="vote-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-lg p-6 flex flex-col gap-4 rounded-3xl shadow-2xl">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <h3 id="modal-voter-name" class="text-base font-bold text-white uppercase">Детали голоса</h3>
+                <button onclick="closeVoteModal()" class="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+            
+            <div id="modal-allocations" class="space-y-1.5 max-h-48 overflow-y-auto pr-1"></div>
+
+            <div class="flex gap-3 pt-4 border-t border-amber-500/20">
+                <button id="reset-vote-btn" class="flex-1 bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs uppercase py-3 transition rounded-xl">Обнулить этот голос</button>
+                <button onclick="closeVoteModal()" class="bg-[#16070b] text-slate-300 font-bold text-xs uppercase py-3 px-6 transition rounded-xl">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно создания / редактирования новости -->
+    <div id="news-editor-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 flex flex-col gap-4 rounded-3xl shadow-2xl">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <h3 id="news-editor-title" class="text-lg font-bold text-white uppercase">Редактирование новости</h3>
+                <button onclick="closeNewsEditorModal()" class="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <form id="news-form" class="flex flex-col gap-4">
+                <input type="hidden" id="news-edit-id" />
+                
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Заголовок</label>
+                    <input type="text" id="news-input-title" required class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Категория / Тег</label>
+                        <select id="news-input-category" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400">
+                            <option value="Конкурс">Конкурс</option>
+                            <option value="Анонс">Анонс</option>
+                            <option value="Архив">Архив</option>
+                            <option value="Организация">Организация</option>
+                            <option value="Шоу">Шоу</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Дата публикации</label>
+                        <input type="text" id="news-input-date" required placeholder="Например: 24 августа 2026" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Изображение публикации (Обложка)</label>
+                    
+                    <div class="bg-[#16070b] border border-amber-500/25 p-3.5 rounded-2xl flex flex-col gap-3">
+                        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <!-- Кнопка выбора файла / галереи -->
+                            <label class="cursor-pointer bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow shrink-0">
+                                <span>📁 Загрузить из галереи / файл</span>
+                                <input type="file" id="news-input-file" accept="image/*" class="hidden" onchange="handleNewsImageFileUpload(event)" />
+                            </label>
+                            <div class="text-[10px] text-slate-400 text-center sm:text-left">
+                                <span>или вставьте прямую ссылку (URL):</span>
+                            </div>
+                        </div>
+
+                        <input type="text" id="news-input-image" placeholder="https://images.unsplash.com/... или base64" oninput="updateNewsImagePreview(this.value)" class="w-full bg-[#0a0305] border border-amber-500/20 px-3.5 py-2 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 font-mono" />
+
+                        <!-- Зона Drag & Drop и превью -->
+                        <div id="news-image-dropzone" ondragover="handleNewsImageDragOver(event)" ondragleave="handleNewsImageDragLeave(event)" ondrop="handleNewsImageDrop(event)" class="relative border border-dashed border-amber-500/30 rounded-xl p-3 bg-[#0a0305]/60 flex flex-col items-center justify-center min-h-[100px] overflow-hidden group transition">
+                            <div id="news-image-placeholder" class="flex flex-col items-center gap-1.5 text-slate-400 pointer-events-none py-2">
+                                <span class="text-2xl">🖼️</span>
+                                <span class="text-[10px] text-center font-medium">Перетащите картинку сюда или выберите из галереи устройства</span>
+                            </div>
+                            <img id="news-image-preview" src="" alt="Preview" class="hidden max-h-56 w-full object-cover rounded-lg shadow-md border border-amber-500/20" />
+                            <button type="button" id="news-image-remove-btn" onclick="clearNewsImage()" class="hidden absolute top-2 right-2 px-2.5 py-1 bg-rose-950/90 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-[10px] font-bold uppercase rounded-lg transition shadow-lg">
+                                ✕ Удалить фото
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Ссылка на видео (Embed URL / Rutube / YouTube)</label>
+                    <input type="url" id="news-input-video" placeholder="https://rutube.ru/play/embed/..." class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Краткий анонс (Summary)</label>
+                    <textarea id="news-input-summary" rows="2" required class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400"></textarea>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Полный текст статьи</label>
+                    <textarea id="news-input-content" rows="6" required class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 leading-relaxed"></textarea>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-3 border-t border-amber-500/20">
+                    <button type="button" onclick="closeNewsEditorModal()" class="px-5 py-2.5 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl">Отмена</button>
+                    <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg">Сохранить новость</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Модальное окно создания / редактирования конкурса -->
+    <div id="contest-editor-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 flex flex-col gap-4 rounded-3xl shadow-2xl">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <h3 id="contest-editor-title" class="text-lg font-bold text-white uppercase">Редактирование сезона HariVision</h3>
+                <button onclick="closeContestEditorModal()" class="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <form id="contest-form" class="flex flex-col gap-4">
+                <input type="hidden" id="contest-edit-id" />
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="sm:col-span-2">
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Название конкурса</label>
+                        <input type="text" id="contest-input-title" required placeholder="HariVision Winter 2027" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Статус</label>
+                        <select id="contest-input-status" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400">
+                            <option value="upcoming">Предстоящий</option>
+                            <option value="live">Прямой эфир (Live)</option>
+                            <option value="completed">Завершён</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Слоган / Тема</label>
+                        <input type="text" id="contest-input-slogan" placeholder="Heart of Performance" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Дата проведения</label>
+                        <input type="text" id="contest-input-date" placeholder="24 августа 2026" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Город и Страна проведения</label>
+                        <input type="text" id="contest-input-city" placeholder="Вена, Австрия" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Арена / Зал</label>
+                        <input type="text" id="contest-input-venue" placeholder="Starlight Symphony Dome" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Ведущие (через запятую)</label>
+                    <input type="text" id="contest-input-hosts" placeholder="Виктория К., Анна М." class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Описание и история сезона</label>
+                    <textarea id="contest-input-desc" rows="3" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400"></textarea>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Ссылка на полную видеозапись (Embed URL)</label>
+                    <input type="url" id="contest-input-video" placeholder="https://rutube.ru/play/embed/..." class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                </div>
+
+                <!-- Блок победителя -->
+                <div class="bg-[#16070b] p-4 rounded-2xl border border-amber-500/20">
+                    <h4 class="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2">🏆 Данные победителя (если конкурс завершён)</h4>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div>
+                            <label class="text-[9px] text-slate-400 uppercase font-bold">Страна</label>
+                            <input type="text" id="contest-winner-country" placeholder="Германия" class="w-full bg-[#0a0305] border border-amber-500/20 px-3 py-1.5 text-xs text-white rounded-lg" />
+                        </div>
+                        <div>
+                            <label class="text-[9px] text-slate-400 uppercase font-bold">Исполнитель</label>
+                            <input type="text" id="contest-winner-artist" placeholder="Elena & The Echoes" class="w-full bg-[#0a0305] border border-amber-500/20 px-3 py-1.5 text-xs text-white rounded-lg" />
+                        </div>
+                        <div>
+                            <label class="text-[9px] text-slate-400 uppercase font-bold">Песня</label>
+                            <input type="text" id="contest-winner-song" placeholder="Neon Heartbeat" class="w-full bg-[#0a0305] border border-amber-500/20 px-3 py-1.5 text-xs text-white rounded-lg" />
+                        </div>
+                        <div>
+                            <label class="text-[9px] text-slate-400 uppercase font-bold">Баллы</label>
+                            <input type="number" id="contest-winner-points" placeholder="240" class="w-full bg-[#0a0305] border border-amber-500/20 px-3 py-1.5 text-xs text-white rounded-lg" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Блок "What do we know so far?" -->
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">
+                        Факты “What do we know so far?” (каждый факт с новой строки)
+                    </label>
+                    <textarea id="contest-input-details" rows="3" placeholder="Подтверждено участие 12 стран&#10;Новая сцена с LED куполом&#10;Прием заявок открыт" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400"></textarea>
+                </div>
+
+                <!-- Раздел: Участники и страны этого сезона -->
+                <div class="bg-[#16070b]/90 border border-amber-500/25 p-5 rounded-2xl flex flex-col gap-4">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-amber-500/20 pb-3">
+                        <div>
+                            <h4 class="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <span>🌍</span>
+                                <span>Участники и страны этого сезона</span>
+                            </h4>
+                            <p class="text-[10px] text-slate-400 mt-0.5">Добавляйте и редактируйте страны, артистов, песни и результаты для этого конкурса</p>
+                        </div>
+                        <div class="flex items-center gap-2 w-full sm:w-auto">
+                            <button type="button" onclick="importActiveParticipantsToCurrentContest()" class="px-3 py-1.5 bg-[#0a0305] hover:bg-amber-500/10 border border-amber-500/30 text-amber-300 font-bold text-[10px] uppercase rounded-lg transition">
+                                📥 Импорт из финалистов
+                            </button>
+                            <button type="button" onclick="addParticipantToCurrentContest()" class="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-[10px] uppercase rounded-lg transition shadow">
+                                + Добавить страну
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="contest-participants-editor-list" class="flex flex-col gap-3 max-h-72 overflow-y-auto pr-1">
+                        <!-- Динамический список участников сезона -->
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-3 pt-3 border-t border-amber-500/20">
+                    <button type="button" onclick="closeContestEditorModal()" class="px-5 py-2.5 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl">Отмена</button>
+                    <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg">Сохранить сезон</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Модальное окно безопасного подтверждения действий (замена window.confirm) -->
+    <div id="admin-confirm-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-md p-6 sm:p-7 flex flex-col gap-4 rounded-3xl shadow-2xl page-fade">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-2xl bg-rose-950/60 border border-rose-500/30 flex items-center justify-center text-lg">
+                    ⚠️
+                </div>
+                <div>
+                    <h3 id="admin-confirm-title" class="text-base font-black text-white uppercase tracking-wide">Подтверждение действия</h3>
+                    <p id="admin-confirm-message" class="text-xs text-slate-300 mt-1 leading-relaxed"></p>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 pt-4 border-t border-amber-500/20 mt-2">
+                <button type="button" onclick="closeAdminConfirmModal()" class="px-5 py-2.5 bg-[#16070b] hover:bg-white/5 text-slate-300 font-bold text-xs uppercase rounded-xl transition">
+                    Отмена
+                </button>
+                <button type="button" id="admin-confirm-submit-btn" class="px-6 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase rounded-xl transition shadow-lg">
+                    Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно создания / редактирования номера (участника) -->
+    <div id="participant-editor-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 flex flex-col gap-4 rounded-3xl shadow-2xl">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <h3 id="participant-editor-title" class="text-lg font-bold text-white uppercase">Добавить номер для голосования</h3>
+                <button onclick="closeParticipantEditorModal()" class="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <form id="participant-form" class="flex flex-col gap-4">
+                <input type="hidden" id="participant-edit-id" />
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Порядковый номер</label>
+                        <input type="number" id="participant-input-number" required min="1" max="99" placeholder="1" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                    <div class="sm:col-span-2">
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Название / Отображение в списке</label>
+                        <input type="text" id="participant-input-name" required placeholder="Number 1 (или имя артиста)" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="sm:col-span-2">
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Страна</label>
+                        <input type="text" id="participant-input-country" placeholder="Австрия" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Флаг (emoji)</label>
+                        <input type="text" id="participant-input-flag" placeholder="🇦🇹" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 text-center text-base" />
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Исполнитель / Артист</label>
+                        <input type="text" id="participant-input-artist" placeholder="Elena & The Echoes" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Название песни</label>
+                        <input type="text" id="participant-input-song" placeholder="Golden Radiance" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Ссылка на видео (Embed URL / Thank you video)</label>
+                    <input type="text" id="participant-input-video" placeholder="videos/thank_you_p1.mp4 или https://..." class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Презентация / Открытка (опционально)</label>
+                    <input type="text" id="participant-input-postcard" placeholder="Открытка: Дворец Шёнбрунн и симфония огней" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                </div>
+
+                <div class="flex justify-end gap-3 pt-3 border-t border-amber-500/20">
+                    <button type="button" onclick="closeParticipantEditorModal()" class="px-5 py-2.5 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl">Отмена</button>
+                    <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg">Сохранить номер</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module" src="admin.js"></script>
+</body>
+</html>

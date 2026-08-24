@@ -1,0 +1,6 @@
+{
+  "name": "HariVision Voting",
+  "description": "Public and national voting platform for HariVision Performance Contest 2026",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

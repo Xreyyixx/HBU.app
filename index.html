@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>HariVision | Haribo Broadcasting Union Official Portal</title>
+    
+    <!-- PWA & iOS Support -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#060204">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="HariVision">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #060204;
+            color: #f8fafc;
+            overflow-x: hidden;
+        }
+        .page-fade { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .heart-poly { filter: drop-shadow(0 2px 8px rgba(245, 158, 11, 0.45)); }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); }
+        ::-webkit-scrollbar-thumb { background: rgba(245, 158, 11, 0.25); border-radius: 9999px; }
+        .amber-glow { box-shadow: 0 0 25px rgba(245, 158, 11, 0.2); }
+        .gold-border { border-color: rgba(245, 158, 11, 0.25); }
+    </style>
+</head>
+<body class="relative min-h-screen flex flex-col justify-between p-3 sm:p-5 md:p-8 select-none text-slate-100">
+    <canvas id="bg-canvas" class="fixed inset-0 w-full h-full pointer-events-none z-0"></canvas>
+
+    <!-- Top Header Bar -->
+    <header class="relative z-30 w-full max-w-6xl mx-auto flex items-center justify-between py-2 sm:py-3 mb-4 md:mb-6 border-b border-amber-500/15">
+        <div class="flex items-center gap-3 cursor-pointer" onclick="navigateToView('home')">
+            <div class="w-7 h-7 flex items-center justify-center bg-amber-500/10 border border-amber-500/30 rounded-xl">
+                <svg class="w-4 h-4 heart-poly" viewBox="0 0 24 24" fill="none">
+                    <polygon points="12,6 7.5,3.5 3,7.5 12,12.5" fill="#f59e0b" opacity="0.9" />
+                    <polygon points="12,6 12,12.5 21,7.5 16.5,3.5" fill="#fbbf24" opacity="1.0" />
+                    <polygon points="3,7.5 12,21.5 12,12.5" fill="#d97706" opacity="0.75" />
+                    <polygon points="21,7.5 12,12.5 12,21.5" fill="#f59e0b" opacity="0.85" />
+                </svg>
+            </div>
+            <div>
+                <span class="text-xs font-black tracking-[0.22em] text-amber-200 uppercase">HARIVISION</span>
+                <span class="hidden sm:inline-block text-[9px] font-bold text-amber-500/70 tracking-widest uppercase ml-1.5 px-2 py-0.5 bg-amber-500/5 rounded-full border border-amber-500/10">HBU Official</span>
+            </div>
+        </div>
+
+        <!-- Desktop Navigation Bar -->
+        <nav class="hidden md:flex items-center gap-1.5 text-xs font-bold tracking-wider uppercase">
+            <button id="nav-btn-home" onclick="navigateToView('home')" class="px-3.5 py-1.5 rounded-full text-amber-300 hover:text-white hover:bg-amber-500/10 transition">Главная</button>
+            <button id="nav-btn-contests" onclick="navigateToView('contests')" class="px-3.5 py-1.5 rounded-full text-slate-300 hover:text-amber-300 hover:bg-amber-500/10 transition">Архив конкурсов</button>
+            <button id="nav-btn-news" onclick="navigateToView('news')" class="px-3.5 py-1.5 rounded-full text-slate-300 hover:text-amber-300 hover:bg-amber-500/10 transition">Новости</button>
+            <button id="nav-btn-voting" onclick="navigateToView('voting')" class="px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black shadow-md transition">🗳️ Голосование</button>
+        </nav>
+
+        <!-- Right Side Actions & Hamburger Menu Button -->
+        <div class="flex items-center gap-2.5">
+            <div id="header-vote-badge" class="hidden sm:flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-3 py-1.5 rounded-full border border-amber-500/20">
+                <span class="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></span>
+                <span>Public Vote</span>
+            </div>
+
+            <!-- Hamburger Button -->
+            <button id="menu-toggle-btn" onclick="toggleSideMenu()" class="w-10 h-10 flex flex-col items-center justify-center gap-1 bg-[#16070b] hover:bg-amber-500/20 active:scale-95 border border-amber-500/25 rounded-2xl transition shadow-lg text-amber-300 focus:outline-none" aria-label="Открыть меню">
+                <span class="w-4 h-0.5 bg-amber-300 rounded-full transition-all"></span>
+                <span class="w-4 h-0.5 bg-amber-300 rounded-full transition-all"></span>
+                <span class="w-4 h-0.5 bg-amber-300 rounded-full transition-all"></span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Side Navigation Drawer (Offcanvas Menu) -->
+    <div id="side-menu-overlay" onclick="toggleSideMenu(false)" class="fixed inset-0 bg-black/80 backdrop-blur-md z-40 hidden transition-opacity duration-300"></div>
+    <aside id="side-menu-drawer" class="fixed top-0 right-0 h-full w-80 max-w-[85vw] bg-[#0d0408]/95 backdrop-blur-2xl border-l border-amber-500/20 z-50 transform translate-x-full transition-transform duration-300 ease-out flex flex-col justify-between p-6 shadow-2xl">
+        <div class="flex flex-col gap-6">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-4">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 bg-amber-500/10 border border-amber-500/30 flex items-center justify-center rounded-xl">
+                        <svg class="w-5 h-5 heart-poly" viewBox="0 0 24 24" fill="none">
+                            <polygon points="12,6 7.5,3.5 3,7.5 12,12.5" fill="#f59e0b" opacity="0.9" />
+                            <polygon points="12,6 12,12.5 21,7.5 16.5,3.5" fill="#fbbf24" opacity="1.0" />
+                            <polygon points="3,7.5 12,21.5 12,12.5" fill="#d97706" opacity="0.75" />
+                            <polygon points="21,7.5 12,12.5 12,21.5" fill="#f59e0b" opacity="0.85" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-xs font-black tracking-widest text-white uppercase">HariVision</div>
+                        <div class="text-[9px] font-bold text-amber-400 uppercase">Haribo Broadcasting Union</div>
+                    </div>
+                </div>
+                <button onclick="toggleSideMenu(false)" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white bg-[#16070b] border border-amber-500/20 rounded-xl transition font-bold text-sm">✕</button>
+            </div>
+
+            <!-- Menu Navigation Links -->
+            <nav class="flex flex-col gap-2">
+                <button onclick="navigateToView('home'); toggleSideMenu(false);" class="flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-[#16070b] hover:bg-amber-500/15 border border-amber-500/15 text-left text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-amber-300 transition">
+                    <span class="text-base">🏠</span>
+                    <span>Главное меню</span>
+                </button>
+
+                <div class="border border-amber-500/15 bg-[#16070b]/60 rounded-2xl p-3">
+                    <button onclick="navigateToView('contests'); toggleSideMenu(false);" class="flex items-center justify-between w-full text-left text-xs font-bold uppercase tracking-wider text-amber-300 mb-2">
+                        <span class="flex items-center gap-2"><span>🏆</span> Прошлые конкурсы</span>
+                        <span class="text-[10px] text-amber-500/70 font-mono">Архив &rarr;</span>
+                    </button>
+                    <div id="side-menu-contests-list" class="flex flex-col gap-1.5 pl-6 border-l border-amber-500/20 my-1">
+                        <!-- Dynamic Contest links will be injected here -->
+                    </div>
+                </div>
+
+                <button onclick="navigateToView('news'); toggleSideMenu(false);" class="flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-[#16070b] hover:bg-amber-500/15 border border-amber-500/15 text-left text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-amber-300 transition">
+                    <span class="text-base">📰</span>
+                    <span>Новости HBU</span>
+                </button>
+
+                <button onclick="navigateToView('voting'); toggleSideMenu(false);" class="flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-left text-xs font-black uppercase tracking-wider transition shadow-lg">
+                    <span class="text-base">🗳️</span>
+                    <span>Public Vote (Голосование)</span>
+                </button>
+            </nav>
+        </div>
+
+        <div class="border-t border-amber-500/20 pt-4 flex flex-col gap-2">
+            <a href="/admin" class="flex items-center justify-center gap-2 py-3 px-4 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase tracking-widest rounded-xl transition">
+                <span>⚙️</span>
+                <span>Admin Panel</span>
+            </a>
+            <div class="text-[10px] text-center text-slate-500 font-mono mt-1">
+                © 2026 Haribo Broadcasting Union
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Dynamic Content Container -->
+    <main class="relative z-10 w-full max-w-6xl mx-auto flex flex-col flex-grow my-auto">
+        <!-- Main Application View Container -->
+        <div id="portal-view-container" class="w-full">
+            <!-- Dynamic views: Home, Contests, News, Voting will be rendered here -->
+        </div>
+    </main>
+
+    <!-- News Article Modal -->
+    <div id="news-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-5">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 flex flex-col gap-5 rounded-3xl shadow-[0_20px_70px_rgba(0,0,0,0.9)] page-fade">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <span id="modal-news-tag" class="text-[10px] font-bold uppercase tracking-widest px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full"></span>
+                <button onclick="closeNewsModal()" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white bg-[#16070b] border border-amber-500/20 rounded-xl transition font-bold text-sm">✕</button>
+            </div>
+            
+            <div id="modal-news-media" class="w-full rounded-2xl overflow-hidden border border-amber-500/20 hidden"></div>
+            
+            <div>
+                <span id="modal-news-date" class="text-[10px] font-mono text-amber-400/80 block mb-1"></span>
+                <h2 id="modal-news-title" class="text-xl sm:text-2xl font-black text-white uppercase tracking-wide leading-snug"></h2>
+            </div>
+
+            <div id="modal-news-content" class="text-xs sm:text-sm text-slate-300 leading-relaxed space-y-3 font-normal whitespace-pre-line"></div>
+
+            <!-- Реакции на новость -->
+            <div id="modal-news-reactions" class="pt-4 border-t border-amber-500/20"></div>
+
+            <div class="pt-2 flex justify-end">
+                <button onclick="closeNewsModal()" class="px-6 py-2.5 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-200 font-bold text-xs uppercase tracking-wider rounded-xl transition">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="relative z-10 w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between py-6 mt-8 border-t border-amber-500/15 text-[10px] text-slate-500 gap-3">
+        <div class="flex items-center gap-2">
+            <span class="font-bold text-amber-400/90 uppercase tracking-widest">Haribo Broadcasting Union</span>
+            <span>•</span>
+            <span>HariVision Performance Contest 2026</span>
+        </div>
+        <div class="flex items-center gap-4 text-slate-400">
+            <button onclick="navigateToView('home')" class="hover:text-amber-300 transition">Главная</button>
+            <button onclick="navigateToView('contests')" class="hover:text-amber-300 transition">Архив</button>
+            <button onclick="navigateToView('news')" class="hover:text-amber-300 transition">Новости</button>
+            <button onclick="navigateToView('voting')" class="hover:text-amber-300 transition text-amber-400">Голосование</button>
+            <a href="/admin" class="hover:text-amber-300 transition">Admin Panel</a>
+        </div>
+    </footer>
+
+    <!-- Service Worker for PWA -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW registration error:', err));
+            });
+        }
+    </script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>

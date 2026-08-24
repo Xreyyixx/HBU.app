@@ -1,0 +1,437 @@
+{
+  "contests": [
+    {
+      "id": "july-2026",
+      "title": "HariVision July 2026",
+      "edition": "July 2026",
+      "status": "completed",
+      "slogan": "United by Cringe",
+      "date": "8 июля 2026",
+      "hostCity": "Памир, THE KUR",
+      "venue": "Haribo Grand Arena",
+      "hosts": [
+        "RODION"
+      ],
+      "description": "Первый летний выпуск HariVision 2026 года, объединивший ярчайшие выступления и инновационную сцену. Конкурс открыл новую эру в истории Haribo Broadcasting Union.",
+      "videoUrl": "https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA",
+      "recapUrl": "https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA",
+      "winner": {
+        "country": "THE KUR",
+        "artist": "RODION",
+        "song": "Tattoo",
+        "points": 74
+      },
+      "countries": [
+        {
+          "id": "c1",
+          "country": "Германия",
+          "flag": "🇩🇪",
+          "artist": "Elena & The Echoes",
+          "song": "Neon Heartbeat",
+          "rank": 1,
+          "points": 240,
+          "postcard": "Открытка: Гамбургский порт на рассвете"
+        },
+        {
+          "id": "c2",
+          "country": "Франция",
+          "flag": "🇫🇷",
+          "artist": "Julian Vane",
+          "song": "Lumière d'Or",
+          "rank": 2,
+          "points": 190,
+          "postcard": "Открытка: Ночной Париж и неоновые огни"
+        },
+        {
+          "id": "c3",
+          "country": "Италия",
+          "flag": "🇮🇹",
+          "artist": "Chiara Bellini",
+          "song": "Sinfonia Solare",
+          "rank": 3,
+          "points": 175,
+          "postcard": "Открытка: Тосканские холмы и побережье"
+        },
+        {
+          "id": "c4",
+          "country": "Испания",
+          "flag": "🇪🇸",
+          "artist": "Mateo Cruz",
+          "song": "Fuego Eterno",
+          "rank": 4,
+          "points": 140,
+          "postcard": "Открытка: Солнечная Севилья"
+        },
+        {
+          "id": "c5",
+          "country": "Швеция",
+          "flag": "🇸🇪",
+          "artist": "Astrid Lind",
+          "song": "Nordic Glow",
+          "rank": 5,
+          "points": 120,
+          "postcard": "Открытка: Стокгольмские архипелаги"
+        },
+        {
+          "id": "c6",
+          "country": "Польша",
+          "flag": "🇵🇱",
+          "artist": "Marek Kowal",
+          "song": "Echoes of Dawn",
+          "rank": 6,
+          "points": 95,
+          "postcard": "Открытка: Варшавский старый город"
+        }
+      ],
+      "knownDetails": []
+    },
+    {
+      "id": "august-2026",
+      "title": "HariVision August 2026",
+      "edition": "August 2026",
+      "status": "completed",
+      "slogan": "United by Cringe",
+      "date": "5 августа 2026",
+      "hostCity": "Памир, THE KUR",
+      "venue": "Haribo Grand Arena",
+      "hosts": [
+        "RODION"
+      ],
+      "description": "Главное событие августа 2026 года! 8 финалистов борются за хрустальное полигональное сердце HariVision.",
+      "videoUrl": "https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA",
+      "recapUrl": "https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA",
+      "winner": {
+        "country": "THE KUR",
+        "artist": "RODION",
+        "song": "Euphoria",
+        "points": 64
+      },
+      "countries": [
+        {
+          "id": "p1",
+          "country": "Австрия",
+          "flag": "🇦🇹",
+          "artist": "Participant 1",
+          "song": "Golden Radiance",
+          "rank": null,
+          "points": null,
+          "postcard": "Дворец Шёнбрунн и симфония огней"
+        },
+        {
+          "id": "p2",
+          "country": "Нидерланды",
+          "flag": "🇳🇱",
+          "artist": "Participant 2",
+          "song": "Amsterdam Pulse",
+          "rank": null,
+          "points": null,
+          "postcard": "Каналы Амстердама в лучах заката"
+        },
+        {
+          "id": "p3",
+          "country": "Норвегия",
+          "flag": "🇳🇴",
+          "artist": "Participant 3",
+          "song": "Aurora Chords",
+          "rank": null,
+          "points": null,
+          "postcard": "Северное сияние над фьордами"
+        },
+        {
+          "id": "p4",
+          "country": "Великобритания",
+          "flag": "🇬🇧",
+          "artist": "Participant 4",
+          "song": "London Sky",
+          "rank": null,
+          "points": null,
+          "postcard": "Вечерний берег Темзы"
+        },
+        {
+          "id": "p5",
+          "country": "Швейцария",
+          "flag": "🇨🇭",
+          "artist": "Participant 5",
+          "song": "Alpine Whisper",
+          "rank": null,
+          "points": null,
+          "postcard": "Вершины Альп и зеркальные озера"
+        },
+        {
+          "id": "p6",
+          "country": "Финляндия",
+          "flag": "🇫🇮",
+          "artist": "Participant 6",
+          "song": "Midnight Sun",
+          "rank": null,
+          "points": null,
+          "postcard": "Хельсинки и озерный край"
+        },
+        {
+          "id": "p7",
+          "country": "Португалия",
+          "flag": "🇵🇹",
+          "artist": "Participant 7",
+          "song": "Oceano Dourado",
+          "rank": null,
+          "points": null,
+          "postcard": "Атлантические утесы Лиссабона"
+        },
+        {
+          "id": "p8",
+          "country": "Бельгия",
+          "flag": "🇧🇪",
+          "artist": "Participant 8",
+          "song": "Velvet Dreams",
+          "rank": null,
+          "points": null,
+          "postcard": "Гранд-Плас в сиянии прожекторов"
+        }
+      ],
+      "knownDetails": [
+        "Все 8 финалистов утвердили сценические постановки и визуальные эффекты.",
+        "Система Public Vote открыта для всех зрителей с лимитом 10 голосов.",
+        "Шкала распределения: 100, 90, 80, 70, 60, 50, 40, 30, 20, 10 очков."
+      ]
+    },
+    {
+      "id": "autumn-2026",
+      "title": "HariVision Autumn 2026",
+      "edition": "Autumn 2026",
+      "status": "upcoming",
+      "slogan": "Amber Twilight",
+      "date": "Октябрь / Ноябрь 2026",
+      "hostCity": "Прага, Чехия",
+      "venue": "Amber Palace Arena",
+      "hosts": [
+        "Объявление в сентябре 2026"
+      ],
+      "description": "Осенний сезон HariVision откроет новую главу с расширенным составом участников, обновленной технологией голографической сцены и масштабным шоу Haribo Broadcasting Union.",
+      "videoUrl": "",
+      "recapUrl": "",
+      "winner": null,
+      "countries": [
+        {
+          "id": "a1",
+          "country": "Чехия (Хозяева)",
+          "flag": "🇨🇿",
+          "artist": "TBD",
+          "song": "TBD",
+          "rank": null,
+          "points": null,
+          "postcard": "Пражский град и Карлов мост"
+        },
+        {
+          "id": "a2",
+          "country": "Германия",
+          "flag": "🇩🇪",
+          "artist": "TBD",
+          "song": "TBD",
+          "rank": null,
+          "points": null,
+          "postcard": "Берлинский модерн"
+        },
+        {
+          "id": "a3",
+          "country": "Франция",
+          "flag": "🇫🇷",
+          "artist": "TBD",
+          "song": "TBD",
+          "rank": null,
+          "points": null,
+          "postcard": "Лазурный берег"
+        },
+        {
+          "id": "a4",
+          "country": "Италия",
+          "flag": "🇮🇹",
+          "artist": "TBD",
+          "song": "TBD",
+          "rank": null,
+          "points": null,
+          "postcard": "Венецианская лагуна"
+        },
+        {
+          "id": "a5",
+          "country": "Швеция",
+          "flag": "🇸🇪",
+          "artist": "TBD",
+          "song": "TBD",
+          "rank": null,
+          "points": null,
+          "postcard": "Северные леса"
+        },
+        {
+          "id": "a6",
+          "country": "Испания",
+          "flag": "🇪🇸",
+          "artist": "TBD",
+          "song": "TBD",
+          "rank": null,
+          "points": null,
+          "postcard": "Мадридские площади"
+        },
+        {
+          "id": "a7",
+          "country": "Япония (Специальный гость)",
+          "flag": "🇯🇵",
+          "artist": "TBD",
+          "song": "TBD",
+          "rank": null,
+          "points": null,
+          "postcard": "Токио Неон"
+        },
+        {
+          "id": "a8",
+          "country": "Австралия (Ассоциированный член)",
+          "flag": "🇦🇺",
+          "artist": "TBD",
+          "song": "TBD",
+          "rank": null,
+          "points": null,
+          "postcard": "Сиднейская гавань"
+        }
+      ],
+      "knownDetails": [
+        "Подтверждено участие 12 стран-вещателей Haribo Broadcasting Union.",
+        "Прием заявок на национальные отборы открыт до 15 сентября 2026 года.",
+        "Место проведения: Прага, многофункциональная арена Amber Palace.",
+        "Концепция сцены: 360-градусный купол с динамическим янтарным освещением.",
+        "Главные ведущие шоу будут объявлены на специальной пресс-конференции HBU."
+      ]
+    }
+  ],
+  "news": [
+    {
+      "id": "news-1",
+      "title": "Грандиозный старт финала HariVision August 2026: открыто голосование зрителей",
+      "date": "24 августа 2026",
+      "category": "Конкурс",
+      "tag": "Финал",
+      "summary": "Официальный портал Haribo Broadcasting Union запустил систему Public Vote для финала августовского сезона.",
+      "coverImage": "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=1200&auto=format&fit=crop",
+      "videoUrl": "https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA",
+      "content": "Сегодня Haribo Broadcasting Union дал старт главному музыкальному событию августа — HariVision August 2026 под слоганом «Heart of Performance». \n        \nВосемь сильнейших участников представили свои уникальные номера. Зрители со всего мира могут принять участие в формировании итогового результата через систему Public Vote. Каждый зритель получает 10 голосов, которые можно распределить между полюбившимися выступлениями (до 5 голосов за один номер).\n\nИтоги голосования будут переведены в официальные Public Points по шкале HBU: 100, 90, 80, 70, 60, 50, 40, 30, 20, 10 очков.",
+      "reactions": {}
+    },
+    {
+      "id": "news-2",
+      "title": "Haribo Broadcasting Union раскрывает детали предстоящего сезона Autumn 2026",
+      "date": "22 августа 2026",
+      "category": "Анонс",
+      "tag": "Анонс",
+      "summary": "Осенний сезон HariVision пройдет в Праге под слоганом «Amber Twilight» с рекордным составом стран-участниц.",
+      "coverImage": "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=1200&auto=format&fit=crop",
+      "videoUrl": "",
+      "content": "Исполнительный комитет HBU утвердил город-хозяин следующего сезона — им станет Прага, столица Чехии. Сцена разместится на великолепной арене Amber Palace, которая предложит революционную визуальную концепцию с 360-градусным янтарным светом.",
+      "reactions": {}
+    },
+    {
+      "id": "news-3",
+      "title": "Итоги HariVision July 2026: Германия завоевала хрустальное сердце конкурса",
+      "date": "19 июля 2026",
+      "category": "Архив",
+      "tag": "Итоги",
+      "summary": "Дуэт Elena & The Echoes одержал победу в драматической борьбе с композицией «Neon Heartbeat».",
+      "coverImage": "https://images.unsplash.com/photo-1465847899084-d164df4dedc6?q=80&w=1200&auto=format&fit=crop",
+      "videoUrl": "https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA",
+      "content": "Июльский выпуск HariVision 2026 вошел в историю как один из самых напряженных конкурсов HBU. Представители Германии набрали 240 баллов, опередив Францию всего на 50 очков в зрительском голосовании.\n\nПолная запись финального шоу и все выступления доступны в архиве официального портала HariVision.",
+      "reactions": {}
+    }
+  ],
+  "participants": [
+    {
+      "id": "p1",
+      "number": 1,
+      "name": "Number 1",
+      "country": "THE KUR",
+      "flag": "🇦🇹",
+      "artist": "Participant 1",
+      "song": "Golden Radiance",
+      "videoUrl": "videos/thank_you_p1.mp4",
+      "postcard": ""
+    },
+    {
+      "id": "p2",
+      "number": 2,
+      "name": "Number 2",
+      "country": "Нидерланды",
+      "flag": "🇳🇱",
+      "artist": "Participant 2",
+      "song": "Amsterdam Pulse",
+      "videoUrl": "videos/thank_you_p2.mp4"
+    },
+    {
+      "id": "p3",
+      "number": 3,
+      "name": "Number 3",
+      "country": "Норвегия",
+      "flag": "🇳🇴",
+      "artist": "Participant 3",
+      "song": "Aurora Chords",
+      "videoUrl": "videos/thank_you_p3.mp4"
+    },
+    {
+      "id": "p4",
+      "number": 4,
+      "name": "Number 4",
+      "country": "Великобритания",
+      "flag": "🇬🇧",
+      "artist": "Participant 4",
+      "song": "London Sky",
+      "videoUrl": "videos/thank_you_p4.mp4"
+    },
+    {
+      "id": "p5",
+      "number": 5,
+      "name": "Number 5",
+      "country": "Швейцария",
+      "flag": "🇨🇭",
+      "artist": "Participant 5",
+      "song": "Alpine Whisper",
+      "videoUrl": "videos/thank_you_p5.mp4"
+    },
+    {
+      "id": "p6",
+      "number": 6,
+      "name": "Number 6",
+      "country": "Финляндия",
+      "flag": "🇫🇮",
+      "artist": "Participant 6",
+      "song": "Midnight Sun",
+      "videoUrl": "videos/thank_you_p6.mp4"
+    },
+    {
+      "id": "p7",
+      "number": 7,
+      "name": "Number 7",
+      "country": "Португалия",
+      "flag": "🇵🇹",
+      "artist": "Participant 7",
+      "song": "Oceano Dourado",
+      "videoUrl": "videos/thank_you_p7.mp4"
+    },
+    {
+      "id": "p8",
+      "number": 8,
+      "name": "Number 8",
+      "country": "Бельгия",
+      "flag": "🇧🇪",
+      "artist": "Participant 8",
+      "song": "Velvet Dreams",
+      "videoUrl": "videos/thank_you_p8.mp4"
+    }
+  ],
+  "votingState": {
+    "status": "closed",
+    "endsAt": null,
+    "sessionId": "session_1787599214120",
+    "openedAt": "2026-08-24T20:27:07.321Z"
+  },
+  "votes": [],
+  "manualThreshold": 0,
+  "revealMode": false,
+  "recapVideoUrl": "https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA",
+  "featuredContestId": "autumn-2026",
+  "adminPassword": "admin"
+}
