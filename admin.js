@@ -18,7 +18,8 @@ import {
     loginAdminServer,
     verifyAdminSession,
     deleteVote, 
-    resetAllVotes 
+    resetAllVotes,
+    safeJsonStringify 
 } from './data-service.js';
 
 let appState = {
@@ -1073,7 +1074,7 @@ window.openContestEditorModal = function(contestId) {
             document.getElementById('contest-input-details').value = (c.knownDetails || []).join('\n');
 
             // Загружаем список участников сезона
-            currentEditingContestParticipants = JSON.parse(JSON.stringify(c.countries || c.participants || []));
+            currentEditingContestParticipants = JSON.parse(safeJsonStringify(c.countries || c.participants || [], '[]'));
         }
     } else {
         titleEl.innerText = "Создание нового сезона";

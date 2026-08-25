@@ -8,6 +8,76 @@ import {
     signInAnonymously 
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
+// -------------------------------------------------------------
+// SAFE JSON UTILS & FIRESTORE DATA SANITIZATION
+// -------------------------------------------------------------
+export function safeJsonStringify(obj, fallback = '') {
+    try {
+        const seen = new WeakSet();
+        return JSON.stringify(obj, (key, value) => {
+            if (typeof value === 'object' && value !== null) {
+                // Firestore Timestamp
+                if (typeof value.toDate === 'function') {
+                    return value.toDate().toISOString();
+                }
+                if (typeof value.toMillis === 'function') {
+                    return value.toMillis();
+                }
+                // Firestore DocumentReference or internal objects
+                if (value.id && (value.path || value.firestore)) {
+                    return String(value.id);
+                }
+                // Break circular references
+                if (seen.has(value)) {
+                    return undefined;
+                }
+                seen.add(value);
+            }
+            return value;
+        });
+    } catch (e) {
+        return fallback;
+    }
+}
+
+export function sanitizeFirestoreData(val, seen = new WeakSet()) {
+    if (val === null || val === undefined) return val;
+    if (typeof val !== 'object') return val;
+
+    // Firestore Timestamp
+    if (typeof val.toDate === 'function') {
+        return val.toDate().toISOString();
+    }
+    if (typeof val.toMillis === 'function') {
+        return val.toMillis();
+    }
+
+    // Firestore DocumentReference
+    if (val.id && (val.path || val.firestore)) {
+        return String(val.id);
+    }
+
+    // Check circular references
+    if (seen.has(val)) {
+        return undefined;
+    }
+    seen.add(val);
+
+    if (Array.isArray(val)) {
+        return val.map(item => sanitizeFirestoreData(item, seen)).filter(item => item !== undefined);
+    }
+
+    const res = {};
+    for (const key of Object.keys(val)) {
+        if (key.startsWith('_') || key === 'firestore') continue;
+        const cleaned = sanitizeFirestoreData(val[key], seen);
+        if (cleaned !== undefined) {
+            res[key] = cleaned;
+        }
+    }
+    return res;
+}
+
 // Локальное кэширование
 const LOCAL_STORAGE_STATE_KEY = 'harivision_cached_state';
 const LOCAL_STORAGE_USER_KEY = 'harivision_auth_user';
@@ -41,7 +111,21 @@ let isFirestoreInitialized = false;
 try {
     const cached = localStorage.getItem(LOCAL_STORAGE_STATE_KEY);
     if (cached) {
-        currentState = { ...currentState, ...JSON.parse(cached) };
+        const parsed = JSON.parse(cached);
+        if (parsed.contests && Array.isArray(parsed.contests) && parsed.contests.length > 0) {
+            currentState.contests = parsed.contests;
+        }
+        if (parsed.news && Array.isArray(parsed.news) && parsed.news.length > 0) {
+            currentState.news = parsed.news;
+        }
+        if (parsed.participants && Array.isArray(parsed.participants) && parsed.participants.length > 0) {
+            currentState.participants = parsed.participants;
+        }
+        if (parsed.votingState) currentState.votingState = parsed.votingState;
+        if (parsed.recapVideoUrl) currentState.recapVideoUrl = parsed.recapVideoUrl;
+        if (parsed.featuredContestId) currentState.featuredContestId = parsed.featuredContestId;
+        if (parsed.manualThreshold !== undefined) currentState.manualThreshold = parsed.manualThreshold;
+        if (parsed.revealMode !== undefined) currentState.revealMode = parsed.revealMode;
     }
 } catch (e) {
     console.warn('LocalStorage error:', e);
@@ -49,7 +133,10 @@ try {
 
 function saveLocalCache() {
     try {
-        localStorage.setItem(LOCAL_STORAGE_STATE_KEY, JSON.stringify(currentState));
+        const str = safeJsonStringify(currentState);
+        if (str) {
+            localStorage.setItem(LOCAL_STORAGE_STATE_KEY, str);
+        }
     } catch (e) {
         console.warn('LocalStorage save error:', e);
     }
@@ -73,7 +160,7 @@ export function subscribeState(callback) {
 }
 
 function notifyStateChanged(force = false) {
-    const serialized = JSON.stringify({
+    const serialized = safeJsonStringify({
         contests: currentState.contests,
         news: currentState.news,
         participants: currentState.participants,
@@ -86,12 +173,17 @@ function notifyStateChanged(force = false) {
         votes: currentState.votes
     });
 
-    if (!force && serialized === lastNotifiedStateJson) {
+    if (!force && serialized && serialized === lastNotifiedStateJson) {
         return false;
     }
 
     lastNotifiedStateJson = serialized;
     saveLocalCache();
+
+    // Синхронизируем статус артиста и блокировку номеров при изменении участников
+    if (currentAuthUser) {
+        syncCurrentUserArtistStatus();
+    }
 
     stateListeners.forEach(cb => {
         try {
@@ -120,7 +212,7 @@ export async function fetchFirestoreStateDirectly() {
         try {
             const settingsSnap = await getDoc(doc(db, "system", "settings"));
             if (settingsSnap.exists()) {
-                const data = settingsSnap.data();
+                const data = sanitizeFirestoreData(settingsSnap.data()) || {};
                 if (data.recapVideoUrl !== undefined && currentState.recapVideoUrl !== data.recapVideoUrl) {
                     currentState.recapVideoUrl = data.recapVideoUrl;
                     stateChanged = true;
@@ -144,7 +236,7 @@ export async function fetchFirestoreStateDirectly() {
         try {
             const votingSnap = await getDoc(doc(db, "system", "voting_state"));
             if (votingSnap.exists()) {
-                const fsState = votingSnap.data();
+                const fsState = sanitizeFirestoreData(votingSnap.data()) || {};
                 const endsAtVal = fsState.endsAt ? (fsState.endsAt.toDate ? fsState.endsAt.toDate().toISOString() : fsState.endsAt) : null;
                 if (
                     currentState.votingState.status !== fsState.status ||
@@ -166,9 +258,9 @@ export async function fetchFirestoreStateDirectly() {
         try {
             const partSnap = await getDoc(doc(db, "system", "participants"));
             if (partSnap.exists()) {
-                const pData = partSnap.data();
+                const pData = sanitizeFirestoreData(partSnap.data());
                 if (pData && Array.isArray(pData.list) && pData.list.length > 0) {
-                    if (JSON.stringify(currentState.participants) !== JSON.stringify(pData.list)) {
+                    if (safeJsonStringify(currentState.participants) !== safeJsonStringify(pData.list)) {
                         currentState.participants = pData.list;
                         stateChanged = true;
                     }
@@ -181,39 +273,75 @@ export async function fetchFirestoreStateDirectly() {
             const newsSnap = await getDocs(collection(db, "news"));
             const newsItems = [];
             newsSnap.forEach(d => {
-                newsItems.push({ id: d.id, ...d.data() });
+                const cleaned = sanitizeFirestoreData(d.data());
+                newsItems.push({ id: d.id, ...(cleaned || {}) });
             });
-            if (newsItems.length > 0 || newsSnap.size === 0) {
-                if (JSON.stringify(currentState.news) !== JSON.stringify(newsItems)) {
+            if (newsItems.length > 0) {
+                if (safeJsonStringify(currentState.news) !== safeJsonStringify(newsItems)) {
                     currentState.news = newsItems;
                     stateChanged = true;
+                }
+            } else if (newsSnap.empty && currentState.news && currentState.news.length > 0) {
+                for (const item of currentState.news) {
+                    setDoc(doc(db, "news", item.id), item, { merge: true }).catch(() => {});
                 }
             }
         } catch (e) {}
 
-        // 5. Contests Collection
+        // 5. Contests (Dual layer: system/contests document + collection contests)
         try {
-            const contestSnap = await getDocs(collection(db, "contests"));
-            const contestItems = [];
-            contestSnap.forEach(d => {
-                contestItems.push({ id: d.id, ...d.data() });
-            });
-            if (contestItems.length > 0 || contestSnap.size === 0) {
-                if (JSON.stringify(currentState.contests) !== JSON.stringify(contestItems)) {
-                    currentState.contests = contestItems;
-                    stateChanged = true;
+            let gotContests = false;
+            const sysContestSnap = await getDoc(doc(db, "system", "contests"));
+            if (sysContestSnap.exists()) {
+                const cData = sanitizeFirestoreData(sysContestSnap.data());
+                if (cData && Array.isArray(cData.list) && cData.list.length > 0) {
+                    if (safeJsonStringify(currentState.contests) !== safeJsonStringify(cData.list)) {
+                        currentState.contests = cData.list;
+                        stateChanged = true;
+                    }
+                    gotContests = true;
                 }
             }
-        } catch (e) {}
+
+            if (!gotContests) {
+                const contestSnap = await getDocs(collection(db, "contests"));
+                const contestItems = [];
+                contestSnap.forEach(d => {
+                    const cleaned = sanitizeFirestoreData(d.data());
+                    contestItems.push({ id: d.id, ...(cleaned || {}) });
+                });
+                if (contestItems.length > 0) {
+                    if (safeJsonStringify(currentState.contests) !== safeJsonStringify(contestItems)) {
+                        currentState.contests = contestItems;
+                        stateChanged = true;
+                    }
+                    setDoc(doc(db, "system", "contests"), {
+                        list: contestItems,
+                        updatedAt: new Date().toISOString()
+                    }, { merge: true }).catch(() => {});
+                } else if (contestSnap.empty && currentState.contests && currentState.contests.length > 0) {
+                    setDoc(doc(db, "system", "contests"), {
+                        list: currentState.contests,
+                        updatedAt: new Date().toISOString()
+                    }, { merge: true }).catch(() => {});
+                    for (const c of currentState.contests) {
+                        setDoc(doc(db, "contests", c.id), c, { merge: true }).catch(() => {});
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Contests fetch error:', e);
+        }
 
         // 6. Votes Collection
         try {
             const votesSnap = await getDocs(collection(db, "votes"));
             const votesList = [];
             votesSnap.forEach(d => {
-                votesList.push({ id: d.id, ...d.data() });
+                const cleaned = sanitizeFirestoreData(d.data());
+                votesList.push({ id: d.id, ...(cleaned || {}) });
             });
-            if (JSON.stringify(currentState.votes) !== JSON.stringify(votesList)) {
+            if (safeJsonStringify(currentState.votes) !== safeJsonStringify(votesList)) {
                 currentState.votes = votesList;
                 stateChanged = true;
             }
@@ -252,7 +380,12 @@ function initRealtimeSync() {
         } catch (e) {}
     }
 
-    // 4. Instant refresh on PWA focus / resume / visibility change (when returning to app)
+    // 4. Polling fallback (every 3 seconds)
+    setInterval(() => {
+        fetchState(false);
+    }, 3000);
+
+    // 5. Instant refresh on PWA focus / resume / visibility change (when returning to app)
     if (typeof document !== 'undefined') {
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
@@ -269,7 +402,7 @@ function initRealtimeSync() {
         });
     }
 
-    // 5. Firestore Real-time Snapshot Listeners (push updates automatically without polling)
+    // 6. Firestore Real-time Snapshot Listeners (push updates automatically without polling)
     initFirestoreListeners();
 }
 
@@ -280,17 +413,15 @@ function initFirestoreListeners() {
     try {
         onSnapshot(doc(db, "system", "voting_state"), (snap) => {
             if (snap.exists()) {
-                const fsState = snap.data();
-                if (fsState) {
-                    const endsAtVal = fsState.endsAt ? (fsState.endsAt.toDate ? fsState.endsAt.toDate().toISOString() : fsState.endsAt) : null;
-                    currentState.votingState = {
-                        ...currentState.votingState,
-                        status: fsState.status || currentState.votingState.status,
-                        endsAt: endsAtVal,
-                        sessionId: fsState.sessionId || currentState.votingState.sessionId
-                    };
-                    notifyStateChanged(false);
-                }
+                const fsState = sanitizeFirestoreData(snap.data()) || {};
+                const endsAtVal = fsState.endsAt ? (fsState.endsAt.toDate ? fsState.endsAt.toDate().toISOString() : fsState.endsAt) : null;
+                currentState.votingState = {
+                    ...currentState.votingState,
+                    status: fsState.status || currentState.votingState.status,
+                    endsAt: endsAtVal,
+                    sessionId: fsState.sessionId || currentState.votingState.sessionId
+                };
+                notifyStateChanged(false);
             }
         }, (err) => console.warn('Firestore voting_state error:', err));
     } catch (e) {}
@@ -299,27 +430,25 @@ function initFirestoreListeners() {
     try {
         onSnapshot(doc(db, "system", "settings"), (snap) => {
             if (snap.exists()) {
-                const data = snap.data();
-                if (data) {
-                    let changed = false;
-                    if (data.recapVideoUrl !== undefined && currentState.recapVideoUrl !== data.recapVideoUrl) {
-                        currentState.recapVideoUrl = data.recapVideoUrl;
-                        changed = true;
-                    }
-                    if (data.featuredContestId !== undefined && currentState.featuredContestId !== data.featuredContestId) {
-                        currentState.featuredContestId = data.featuredContestId;
-                        changed = true;
-                    }
-                    if (data.manualThreshold !== undefined && currentState.manualThreshold !== data.manualThreshold) {
-                        currentState.manualThreshold = data.manualThreshold;
-                        changed = true;
-                    }
-                    if (data.revealMode !== undefined && currentState.revealMode !== data.revealMode) {
-                        currentState.revealMode = data.revealMode;
-                        changed = true;
-                    }
-                    if (changed) notifyStateChanged(false);
+                const data = sanitizeFirestoreData(snap.data()) || {};
+                let changed = false;
+                if (data.recapVideoUrl !== undefined && currentState.recapVideoUrl !== data.recapVideoUrl) {
+                    currentState.recapVideoUrl = data.recapVideoUrl;
+                    changed = true;
                 }
+                if (data.featuredContestId !== undefined && currentState.featuredContestId !== data.featuredContestId) {
+                    currentState.featuredContestId = data.featuredContestId;
+                    changed = true;
+                }
+                if (data.manualThreshold !== undefined && currentState.manualThreshold !== data.manualThreshold) {
+                    currentState.manualThreshold = data.manualThreshold;
+                    changed = true;
+                }
+                if (data.revealMode !== undefined && currentState.revealMode !== data.revealMode) {
+                    currentState.revealMode = data.revealMode;
+                    changed = true;
+                }
+                if (changed) notifyStateChanged(false);
             }
         }, (err) => console.warn('Firestore settings error:', err));
     } catch (e) {}
@@ -328,7 +457,7 @@ function initFirestoreListeners() {
     try {
         onSnapshot(doc(db, "system", "participants"), (snap) => {
             if (snap.exists()) {
-                const data = snap.data();
+                const data = sanitizeFirestoreData(snap.data());
                 if (data && Array.isArray(data.list) && data.list.length > 0) {
                     currentState.participants = data.list;
                     notifyStateChanged(false);
@@ -342,22 +471,45 @@ function initFirestoreListeners() {
         onSnapshot(collection(db, "news"), (snap) => {
             const newsItems = [];
             snap.forEach(d => {
-                newsItems.push({ id: d.id, ...d.data() });
+                const cleaned = sanitizeFirestoreData(d.data());
+                newsItems.push({ id: d.id, ...(cleaned || {}) });
             });
-            currentState.news = newsItems;
-            notifyStateChanged(false);
+            if (newsItems.length > 0) {
+                currentState.news = newsItems;
+                notifyStateChanged(false);
+            }
         }, (err) => console.warn('Firestore news error:', err));
     } catch (e) {}
 
-    // E. Contests Real-time Listener (Cross-device contests sync)
+    // E. Contests Real-time Listeners (system/contests + collection contests)
+    try {
+        onSnapshot(doc(db, "system", "contests"), (snap) => {
+            if (snap.exists()) {
+                const data = sanitizeFirestoreData(snap.data());
+                if (data && Array.isArray(data.list) && data.list.length > 0) {
+                    currentState.contests = data.list;
+                    notifyStateChanged(false);
+                }
+            }
+        }, (err) => console.warn('Firestore system/contests error:', err));
+    } catch (e) {}
+
     try {
         onSnapshot(collection(db, "contests"), (snap) => {
-            const contestItems = [];
-            snap.forEach(d => {
-                contestItems.push({ id: d.id, ...d.data() });
-            });
-            currentState.contests = contestItems;
-            notifyStateChanged(false);
+            if (!snap.empty) {
+                const contestItems = [];
+                snap.forEach(d => {
+                    const cleaned = sanitizeFirestoreData(d.data());
+                    contestItems.push({ id: d.id, ...(cleaned || {}) });
+                });
+                if (contestItems.length > 0) {
+                    const mergedMap = new Map();
+                    (currentState.contests || []).forEach(c => mergedMap.set(c.id, c));
+                    contestItems.forEach(c => mergedMap.set(c.id, { ...(mergedMap.get(c.id) || {}), ...c }));
+                    currentState.contests = Array.from(mergedMap.values());
+                    notifyStateChanged(false);
+                }
+            }
         }, (err) => console.warn('Firestore contests error:', err));
     } catch (e) {}
 
@@ -366,7 +518,8 @@ function initFirestoreListeners() {
         onSnapshot(collection(db, "votes"), (snap) => {
             const votesList = [];
             snap.forEach(d => {
-                votesList.push({ id: d.id, ...d.data() });
+                const cleaned = sanitizeFirestoreData(d.data());
+                votesList.push({ id: d.id, ...(cleaned || {}) });
             });
             currentState.votes = votesList;
             notifyStateChanged(false);
@@ -493,9 +646,13 @@ export async function saveContest(contest) {
     }
     notifyStateChanged(true);
 
-    // Save to Firestore (Cross-device persistence)
+    // Save to Firestore (Cross-device persistence: individual doc + master list doc)
     try {
         await setDoc(doc(db, "contests", contest.id), contest, { merge: true });
+        await setDoc(doc(db, "system", "contests"), {
+            list: currentState.contests,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
     } catch (e) {
         console.warn('Firestore save contest error:', e);
     }
@@ -526,6 +683,10 @@ export async function deleteContest(contestId) {
     // Delete from Firestore
     try {
         await deleteDoc(doc(db, "contests", contestId));
+        await setDoc(doc(db, "system", "contests"), {
+            list: currentState.contests,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
     } catch (e) {
         console.warn('Firestore delete contest error:', e);
     }
@@ -812,6 +973,90 @@ export function getCurrentAuthUser() {
     return currentAuthUser;
 }
 
+// Таблица синонимов стран для точного и нечувствительного к языку сопоставления
+const COUNTRY_SYNONYMS = {
+    'austria': ['австрия', 'austria', 'aut', 'at'],
+    'австрия': ['австрия', 'austria', 'aut', 'at'],
+    'sweden': ['швеция', 'sweden', 'swe', 'se'],
+    'швеция': ['швеция', 'sweden', 'swe', 'se'],
+    'finland': ['финляндия', 'finland', 'fin', 'fi'],
+    'финляндия': ['финляндия', 'finland', 'fin', 'fi'],
+    'norway': ['норвегия', 'norway', 'nor', 'no'],
+    'норвегия': ['норвегия', 'norway', 'nor', 'no'],
+    'spain': ['испания', 'spain', 'esp', 'es'],
+    'испания': ['испания', 'spain', 'esp', 'es'],
+    'italy': ['италия', 'italy', 'ita', 'it'],
+    'италия': ['италия', 'italy', 'ita', 'it'],
+    'france': ['франция', 'france', 'fra', 'fr'],
+    'франция': ['франция', 'france', 'fra', 'fr'],
+    'germany': ['германия', 'germany', 'ger', 'deu', 'de'],
+    'германия': ['германия', 'germany', 'ger', 'deu', 'de'],
+    'poland': ['польша', 'poland', 'pol', 'pl'],
+    'польша': ['польша', 'poland', 'pol', 'pl'],
+    'uk': ['великобритания', 'united kingdom', 'uk', 'gbr', 'gb', 'англия'],
+    'великобритания': ['великобритания', 'united kingdom', 'uk', 'gbr', 'gb', 'англия'],
+    'israel': ['израиль', 'israel', 'isr', 'il'],
+    'израиль': ['израиль', 'israel', 'isr', 'il'],
+    'ukraine': ['украина', 'ukraine', 'ukr', 'ua'],
+    'украина': ['украина', 'ukraine', 'ukr', 'ua'],
+    'netherlands': ['нидерланды', 'netherlands', 'ned', 'nl', 'голландия'],
+    'нидерланды': ['нидерланды', 'netherlands', 'ned', 'nl', 'голландия'],
+    'switzerland': ['швейцария', 'switzerland', 'sui', 'ch'],
+    'швейцария': ['швейцария', 'switzerland', 'sui', 'ch'],
+    'croatia': ['хорватия', 'croatia', 'cro', 'hr'],
+    'хорватия': ['хорватия', 'croatia', 'cro', 'hr'],
+    'greece': ['греция', 'greece', 'gre', 'gr'],
+    'греция': ['греция', 'greece', 'gre', 'gr'],
+    'estonia': ['эстония', 'estonia', 'est', 'ee'],
+    'эстония': ['эстония', 'estonia', 'est', 'ee'],
+    'lithuania': ['литва', 'lithuania', 'ltu', 'lt'],
+    'литва': ['литва', 'lithuania', 'ltu', 'lt'],
+    'latvia': ['латвия', 'latvia', 'lat', 'lv'],
+    'латвия': ['латвия', 'latvia', 'lat', 'lv'],
+    'portugal': ['португалия', 'portugal', 'por', 'pt'],
+    'португалия': ['португалия', 'portugal', 'por', 'pt'],
+    'cyprus': ['кипр', 'cyprus', 'cyp', 'cy'],
+    'кипр': ['кипр', 'cyprus', 'cyp', 'cy'],
+    'armenia': ['армения', 'armenia', 'arm', 'am'],
+    'армения': ['армения', 'armenia', 'arm', 'am'],
+    'georgia': ['грузия', 'georgia', 'geo', 'ge'],
+    'грузия': ['грузия', 'georgia', 'geo', 'ge'],
+    'azerbaijan': ['азербайджан', 'azerbaijan', 'aze', 'az'],
+    'азербайджан': ['азербайджан', 'azerbaijan', 'aze', 'az'],
+    'belgium': ['бельгия', 'belgium', 'bel', 'be'],
+    'бельгия': ['бельгия', 'belgium', 'bel', 'be'],
+    'denmark': ['дания', 'denmark', 'den', 'dk'],
+    'дания': ['дания', 'denmark', 'den', 'dk'],
+    'iceland': ['исландия', 'iceland', 'isl', 'is'],
+    'исландия': ['исландия', 'iceland', 'isl', 'is'],
+    'ireland': ['ирландия', 'ireland', 'irl', 'ie'],
+    'ирландия': ['ирландия', 'ireland', 'irl', 'ie'],
+    'serbia': ['сербия', 'serbia', 'srb', 'rs'],
+    'сербия': ['сербия', 'serbia', 'srb', 'rs'],
+    'slovenia': ['словения', 'slovenia', 'slo', 'si'],
+    'словения': ['словения', 'slovenia', 'slo', 'si'],
+    'czechia': ['чехия', 'czechia', 'czech republic', 'cze', 'cz'],
+    'чехия': ['чехия', 'czechia', 'czech republic', 'cze', 'cz'],
+    'sanmarino': ['сан-марино', 'сан марино', 'san marino', 'smr', 'sm'],
+    'сан-марино': ['сан-марино', 'сан марино', 'san marino', 'smr', 'sm'],
+    'malta': ['мальта', 'malta', 'mlt', 'mt'],
+    'мальта': ['мальта', 'malta', 'mlt', 'mt'],
+    'australia': ['австралия', 'australia', 'aus', 'au'],
+    'австралия': ['австралия', 'australia', 'aus', 'au']
+};
+
+function countriesMatch(c1, c2) {
+    if (!c1 || !c2) return false;
+    const str1 = String(c1).trim().toLowerCase();
+    const str2 = String(c2).trim().toLowerCase();
+    if (str1 === str2) return true;
+
+    const syns1 = COUNTRY_SYNONYMS[str1] || [str1];
+    const syns2 = COUNTRY_SYNONYMS[str2] || [str2];
+
+    return syns1.some(s => syns2.includes(s) || s === str2 || str1 === s);
+}
+
 // Поиск совпадений артиста по номеру, стране, названию, логину или привязанному логину
 export function calculateBlockedIdsForArtist(artistData, participantsList) {
     const blocked = new Set();
@@ -827,7 +1072,12 @@ export function calculateBlockedIdsForArtist(artistData, participantsList) {
     list.forEach(p => {
         const pLogin = String(p.artistLogin || p.linkedArtistLogin || '').trim().toLowerCase();
         if (pLogin) {
-            if (pLogin === artLogin || pLogin === artEmail || (artCleanEmail && pLogin === artCleanEmail)) {
+            if (
+                pLogin === artLogin || 
+                pLogin === artEmail || 
+                (artCleanEmail && pLogin === artCleanEmail) ||
+                (artLogin && artLogin.startsWith(pLogin))
+            ) {
                 blocked.add(p.id);
             }
         }
@@ -835,6 +1085,9 @@ export function calculateBlockedIdsForArtist(artistData, participantsList) {
 
     // 1. Прямые ID
     if (artistData.participantId) blocked.add(String(artistData.participantId));
+    if (artistData.id && list.some(p => p.id === artistData.id)) {
+        blocked.add(String(artistData.id));
+    }
     if (Array.isArray(artistData.blockedIds)) {
         artistData.blockedIds.forEach(id => blocked.add(String(id)));
     }
@@ -853,33 +1106,176 @@ export function calculateBlockedIdsForArtist(artistData, participantsList) {
         });
     }
 
-    // 3. Страна (country)
+    // 3. Страна (country) с поддержкой синонимов
     if (artistData.country) {
-        const cLow = String(artistData.country).trim().toLowerCase();
-        const p = list.find(x => x.country && x.country.trim().toLowerCase() === cLow);
-        if (p) blocked.add(p.id);
+        const pList = list.filter(x => countriesMatch(x.country, artistData.country));
+        pList.forEach(p => blocked.add(p.id));
     }
 
     // 4. Имя артиста (artist)
     if (artistData.artist) {
         const aLow = String(artistData.artist).trim().toLowerCase();
-        const p = list.find(x => (x.artist && x.artist.trim().toLowerCase() === aLow) || (x.name && x.name.trim().toLowerCase() === aLow));
-        if (p) blocked.add(p.id);
+        const pList = list.filter(x => {
+            const pa = String(x.artist || '').trim().toLowerCase();
+            const pn = String(x.name || '').trim().toLowerCase();
+            return (pa && (pa === aLow || pa.includes(aLow) || aLow.includes(pa))) ||
+                   (pn && (pn === aLow || pn.includes(aLow) || aLow.includes(pn)));
+        });
+        pList.forEach(p => blocked.add(p.id));
     }
 
     // 5. Имя участника (name)
     if (artistData.name) {
         const nLow = String(artistData.name).trim().toLowerCase();
-        const p = list.find(x => (x.name && x.name.trim().toLowerCase() === nLow) || (x.artist && x.artist.trim().toLowerCase() === nLow));
-        if (p) blocked.add(p.id);
+        const pList = list.filter(x => {
+            const pa = String(x.artist || '').trim().toLowerCase();
+            const pn = String(x.name || '').trim().toLowerCase();
+            return (pn && (pn === nLow || pn.includes(nLow) || nLow.includes(pn))) ||
+                   (pa && (pa === nLow || pa.includes(nLow) || nLow.includes(pa)));
+        });
+        pList.forEach(p => blocked.add(p.id));
     }
 
-    // 6. Если doc.id сам по себе 'p1'..'p8'
-    if (artistData.id && /^p\d+$/i.test(artistData.id)) {
-        blocked.add(artistData.id);
+    // 6. Если doc.id сам по себе 'p1'..'p8' или '1'..'8'
+    if (artistData.id) {
+        if (/^p\d+$/i.test(artistData.id)) {
+            blocked.add(artistData.id);
+        } else if (/^\d+$/.test(artistData.id)) {
+            const p = list.find(x => Number(x.number) === Number(artistData.id) || x.id === `p${artistData.id}`);
+            if (p) blocked.add(p.id);
+        }
+    }
+
+    // 7. Если логин совпадает со страной или артистом участника (например, логин "austria" блокирует Австрию)
+    if (artLogin || artCleanEmail) {
+        const targetLogins = [artLogin, artCleanEmail].filter(Boolean);
+        list.forEach(p => {
+            for (const t of targetLogins) {
+                if (countriesMatch(p.country, t)) {
+                    blocked.add(p.id);
+                }
+                const pa = String(p.artist || '').trim().toLowerCase();
+                const pn = String(p.name || '').trim().toLowerCase();
+                if ((pa && (pa === t || t.includes(pa))) || (pn && (pn === t || t.includes(pn)))) {
+                    blocked.add(p.id);
+                }
+            }
+        });
     }
 
     return Array.from(blocked);
+}
+
+// Универсальный резолвер артиста по логину / email / участнику
+export function resolveArtistInfo(inputString, participantsList, allArtists = []) {
+    if (!inputString) return null;
+    const raw = String(inputString).trim();
+    const isEmail = raw.includes('@');
+    const cleanLogin = isEmail ? raw.split('@')[0].trim().toLowerCase() : raw.toLowerCase();
+    const fullRaw = raw.toLowerCase();
+
+    const list = participantsList || currentState.participants || DEFAULT_PARTICIPANTS;
+
+    // 1. Поиск в коллекции artists
+    let matchedDoc = allArtists.find(a => {
+        const docId = String(a.id || '').trim().toLowerCase();
+        const aLogin = String(a.login || a.username || '').trim().toLowerCase();
+        const aEmail = String(a.email || '').trim().toLowerCase();
+        const aArtist = String(a.artist || a.name || '').trim().toLowerCase();
+        const aCountry = String(a.country || '').trim().toLowerCase();
+
+        return (
+            docId === fullRaw || 
+            docId === cleanLogin ||
+            aLogin === fullRaw || 
+            aLogin === cleanLogin ||
+            aEmail === fullRaw ||
+            (aEmail && aEmail.startsWith(cleanLogin + '@')) ||
+            (aArtist && (aArtist === fullRaw || aArtist === cleanLogin)) ||
+            (aCountry && (countriesMatch(aCountry, fullRaw) || countriesMatch(aCountry, cleanLogin)))
+        );
+    });
+
+    // 2. Поиск в participants (настроенных в админке или по умолчанию)
+    let matchedParticipant = null;
+    for (const p of list) {
+        const pLogin = String(p.artistLogin || p.linkedArtistLogin || '').trim().toLowerCase();
+        const pArtist = String(p.artist || '').trim().toLowerCase();
+        const pCountry = String(p.country || '').trim().toLowerCase();
+        const pName = String(p.name || '').trim().toLowerCase();
+        const pId = String(p.id || '').trim().toLowerCase();
+        const pNum = String(p.number || '').trim();
+
+        if (
+            (pLogin && (pLogin === cleanLogin || pLogin === fullRaw)) ||
+            (pId && (pId === cleanLogin || pId === fullRaw)) ||
+            (pNum && (pNum === cleanLogin || pNum === fullRaw)) ||
+            countriesMatch(pCountry, cleanLogin) ||
+            countriesMatch(pCountry, fullRaw) ||
+            (pArtist && (pArtist === cleanLogin || pArtist === fullRaw)) ||
+            (pName && (pName === cleanLogin || pName === fullRaw))
+        ) {
+            matchedParticipant = p;
+            break;
+        }
+    }
+
+    if (matchedDoc || matchedParticipant) {
+        const effectiveArtistData = {
+            ...(matchedDoc || {}),
+            ...(matchedParticipant ? {
+                id: matchedDoc?.id || matchedParticipant.id,
+                number: matchedParticipant.number,
+                artist: matchedParticipant.artist || matchedParticipant.name,
+                country: matchedParticipant.country,
+                name: matchedParticipant.name,
+                artistLogin: matchedParticipant.artistLogin || cleanLogin,
+                flag: matchedParticipant.flag
+            } : {})
+        };
+
+        const blockedIds = calculateBlockedIdsForArtist(effectiveArtistData, list);
+        if (matchedParticipant && !blockedIds.includes(matchedParticipant.id)) {
+            blockedIds.push(matchedParticipant.id);
+        }
+
+        const displayName = effectiveArtistData.artist || effectiveArtistData.name || effectiveArtistData.country || cleanLogin;
+
+        return {
+            isArtist: true,
+            artistData: effectiveArtistData,
+            blockedParticipantIds: blockedIds,
+            displayName
+        };
+    }
+
+    return null;
+}
+
+// Автоматическая ре-синхронизация артиста для текущего вошедшего пользователя
+export function syncCurrentUserArtistStatus() {
+    if (!currentAuthUser) return;
+    const cleanLogin = currentAuthUser.login || (currentAuthUser.email ? currentAuthUser.email.split('@')[0] : '');
+    const resolved = resolveArtistInfo(cleanLogin || currentAuthUser.email, currentState.participants);
+
+    if (resolved) {
+        let changed = false;
+        if (currentAuthUser.role !== 'artist') {
+            currentAuthUser.role = 'artist';
+            changed = true;
+        }
+        if (safeJsonStringify(currentAuthUser.blockedParticipantIds) !== safeJsonStringify(resolved.blockedParticipantIds)) {
+            currentAuthUser.blockedParticipantIds = resolved.blockedParticipantIds;
+            changed = true;
+        }
+        if (!currentAuthUser.artistData || safeJsonStringify(currentAuthUser.artistData) !== safeJsonStringify(resolved.artistData)) {
+            currentAuthUser.artistData = resolved.artistData;
+            changed = true;
+        }
+        if (changed) {
+            notifyAuthChanged(currentAuthUser);
+        }
+    }
 }
 
 // Получение списка всех артистов из коллекции Firestore
@@ -889,7 +1285,8 @@ export async function fetchArtistsFromFirestore() {
     try {
         const snap = await getDocs(collection(db, "artists"));
         snap.forEach(d => {
-            artists.push({ id: d.id, ...d.data() });
+            const cleaned = sanitizeFirestoreData(d.data());
+            artists.push({ id: d.id, ...(cleaned || {}) });
         });
     } catch (e) {
         console.warn('Fetch artists collection warning:', e);
@@ -909,91 +1306,36 @@ export async function loginUser(emailOrLogin, password) {
     const isEmail = raw.includes('@');
     const cleanLogin = isEmail ? raw.split('@')[0] : raw;
 
-    // 1. Проверяем коллекцию artists в Firestore
-    let matchedArtistDoc = null;
+    // 1. Проверяем статус артиста через наш универсальный резолвер
+    let allArtists = [];
     try {
-        const allArtists = await fetchArtistsFromFirestore();
-        matchedArtistDoc = allArtists.find(a => {
-            const docId = String(a.id || '').trim().toLowerCase();
-            const aLogin = String(a.login || a.username || '').trim().toLowerCase();
-            const aEmail = String(a.email || '').trim().toLowerCase();
-            const aArtist = String(a.artist || a.name || '').trim().toLowerCase();
-            const aCountry = String(a.country || '').trim().toLowerCase();
+        allArtists = await fetchArtistsFromFirestore();
+    } catch (e) {}
 
-            const target = raw.toLowerCase();
-            const targetClean = cleanLogin.toLowerCase();
+    const resolvedArtist = resolveArtistInfo(raw, currentState.participants, allArtists);
 
-            return (
-                docId === target || 
-                docId === targetClean ||
-                aLogin === target || 
-                aLogin === targetClean ||
-                aEmail === target ||
-                (aEmail && aEmail.startsWith(targetClean + '@')) ||
-                aArtist === target ||
-                aCountry === target
-            );
-        });
-
-        // Также проверяем список участников, настроенный в админке (currentState.participants)
-        if (!matchedArtistDoc && currentState.participants) {
-            const matchedP = currentState.participants.find(p => {
-                const pLogin = String(p.artistLogin || p.linkedArtistLogin || '').trim().toLowerCase();
-                const pArtist = String(p.artist || '').trim().toLowerCase();
-                const pCountry = String(p.country || '').trim().toLowerCase();
-                const pName = String(p.name || '').trim().toLowerCase();
-                const targetClean = cleanLogin.toLowerCase();
-                const target = raw.toLowerCase();
-
-                return (
-                    (pLogin && (pLogin === targetClean || pLogin === target)) ||
-                    (pArtist && (pArtist === targetClean || pArtist === target)) ||
-                    (pCountry && (pCountry === targetClean || pCountry === target)) ||
-                    (pName && (pName === targetClean || pName === target))
-                );
-            });
-
-            if (matchedP) {
-                matchedArtistDoc = {
-                    id: matchedP.id,
-                    number: matchedP.number,
-                    artist: matchedP.artist || matchedP.name,
-                    country: matchedP.country,
-                    name: matchedP.name,
-                    artistLogin: matchedP.artistLogin,
-                    blockedIds: [matchedP.id],
-                    email: `${cleanLogin}@harivision.app`
-                };
-            }
-        }
-    } catch (e) {
-        console.warn('Check artists error:', e);
-    }
-
-    // 2. Если в документе артиста в Firestore хранится пароль и он совпадает
-    if (matchedArtistDoc && matchedArtistDoc.password && String(matchedArtistDoc.password).trim() === pass) {
-        const blockedIds = calculateBlockedIdsForArtist(matchedArtistDoc, currentState.participants);
+    // 2. Если в документе артиста в Firestore хранится явный пароль и он совпадает
+    if (resolvedArtist && resolvedArtist.artistData && resolvedArtist.artistData.password && String(resolvedArtist.artistData.password).trim() === pass) {
         const userObj = {
-            uid: matchedArtistDoc.id || 'artist_' + Date.now(),
-            email: matchedArtistDoc.email || `${cleanLogin}@harivision.app`,
-            login: matchedArtistDoc.login || cleanLogin,
-            displayName: matchedArtistDoc.artist || matchedArtistDoc.name || matchedArtistDoc.country || cleanLogin,
+            uid: resolvedArtist.artistData.id || 'artist_' + Date.now(),
+            email: resolvedArtist.artistData.email || `${cleanLogin}@harivision.app`,
+            login: resolvedArtist.artistData.login || cleanLogin,
+            displayName: resolvedArtist.displayName,
             role: 'artist',
-            artistData: matchedArtistDoc,
-            blockedParticipantIds: blockedIds
+            artistData: resolvedArtist.artistData,
+            blockedParticipantIds: resolvedArtist.blockedParticipantIds
         };
         notifyAuthChanged(userObj);
         return userObj;
     }
 
     // 3. Пробуем войти через Firebase Authentication
-    // Формируем список кандидатов на email (если ввели без @)
     const emailCandidates = [];
     if (isEmail) {
         emailCandidates.push(raw);
     } else {
-        if (matchedArtistDoc && matchedArtistDoc.email) {
-            emailCandidates.push(matchedArtistDoc.email);
+        if (resolvedArtist?.artistData?.email) {
+            emailCandidates.push(resolvedArtist.artistData.email);
         }
         emailCandidates.push(`${cleanLogin}@harivision.app`);
         emailCandidates.push(`${cleanLogin}@harivision.org`);
@@ -1009,7 +1351,7 @@ export async function loginUser(emailOrLogin, password) {
             if (authUserCredential && authUserCredential.user) break;
         } catch (err) {
             lastAuthError = err;
-            if (isEmail) break; // если юзер явно ввел email с @, не перебираем домены
+            if (isEmail) break;
         }
     }
 
@@ -1017,28 +1359,36 @@ export async function loginUser(emailOrLogin, password) {
         const fbUser = authUserCredential.user;
         const effectiveEmail = fbUser.email || (isEmail ? raw : `${cleanLogin}@harivision.app`);
 
-        // Проверяем, является ли пользователь артистом
-        let isArtist = Boolean(matchedArtistDoc);
-        if (!matchedArtistDoc) {
-            try {
-                const allArtists = await fetchArtistsFromFirestore();
-                matchedArtistDoc = allArtists.find(a => 
-                    (a.email && a.email.toLowerCase() === effectiveEmail.toLowerCase()) ||
-                    (a.login && a.login.toLowerCase() === cleanLogin.toLowerCase()) ||
-                    (a.id && a.id.toLowerCase() === cleanLogin.toLowerCase())
-                );
-                if (matchedArtistDoc) isArtist = true;
-            } catch (e) {}
-        }
+        // Повторная проверка артиста по effectiveEmail и cleanLogin
+        const finalResolved = resolvedArtist || resolveArtistInfo(effectiveEmail, currentState.participants, allArtists) || resolveArtistInfo(cleanLogin, currentState.participants, allArtists);
 
-        const blockedIds = isArtist ? calculateBlockedIdsForArtist(matchedArtistDoc, currentState.participants) : [];
+        const isArtist = Boolean(finalResolved);
+        const blockedIds = isArtist ? finalResolved.blockedParticipantIds : [];
+        const displayName = fbUser.displayName || (isArtist ? finalResolved.displayName : cleanLogin);
+
         const userObj = {
             uid: fbUser.uid,
             email: effectiveEmail,
             login: cleanLogin,
-            displayName: fbUser.displayName || (matchedArtistDoc ? (matchedArtistDoc.artist || matchedArtistDoc.name) : cleanLogin),
+            displayName: displayName,
             role: isArtist ? 'artist' : 'user',
-            artistData: isArtist ? matchedArtistDoc : null,
+            artistData: isArtist ? finalResolved.artistData : null,
+            blockedParticipantIds: blockedIds
+        };
+        notifyAuthChanged(userObj);
+        return userObj;
+    }
+
+    // 4. Если у артиста нет пароля в Firebase, но есть в локальном списке и это пароль артиста
+    if (resolvedArtist) {
+        const blockedIds = resolvedArtist.blockedParticipantIds;
+        const userObj = {
+            uid: resolvedArtist.artistData?.id || 'artist_' + Date.now(),
+            email: resolvedArtist.artistData?.email || `${cleanLogin}@harivision.app`,
+            login: cleanLogin,
+            displayName: resolvedArtist.displayName,
+            role: 'artist',
+            artistData: resolvedArtist.artistData,
             blockedParticipantIds: blockedIds
         };
         notifyAuthChanged(userObj);
@@ -1136,30 +1486,19 @@ onAuthStateChanged(auth, async (fbUser) => {
             
             // Проверяем статус артиста
             const allArtists = await fetchArtistsFromFirestore();
-            const matchedArtistDoc = allArtists.find(a => {
-                const docId = String(a.id || '').trim().toLowerCase();
-                const aLogin = String(a.login || a.username || '').trim().toLowerCase();
-                const aEmail = String(a.email || '').trim().toLowerCase();
-                const targetClean = cleanLogin.toLowerCase();
-                const targetEmail = rawEmail.toLowerCase();
-                return (
-                    docId === targetClean ||
-                    aLogin === targetClean ||
-                    aEmail === targetEmail ||
-                    (aEmail && aEmail.startsWith(targetClean + '@'))
-                );
-            });
+            const resolved = resolveArtistInfo(rawEmail, currentState.participants, allArtists) ||
+                             resolveArtistInfo(cleanLogin, currentState.participants, allArtists);
 
-            const isArtist = Boolean(matchedArtistDoc);
-            const blockedIds = isArtist ? calculateBlockedIdsForArtist(matchedArtistDoc, currentState.participants) : [];
+            const isArtist = Boolean(resolved);
+            const blockedIds = isArtist ? resolved.blockedParticipantIds : [];
 
             const userObj = {
                 uid: fbUser.uid,
                 email: rawEmail,
                 login: cleanLogin,
-                displayName: fbUser.displayName || (matchedArtistDoc ? (matchedArtistDoc.artist || matchedArtistDoc.name) : cleanLogin),
+                displayName: fbUser.displayName || (isArtist ? resolved.displayName : cleanLogin),
                 role: isArtist ? 'artist' : 'user',
-                artistData: isArtist ? matchedArtistDoc : null,
+                artistData: isArtist ? resolved.artistData : null,
                 blockedParticipantIds: blockedIds
             };
             notifyAuthChanged(userObj);
@@ -1167,7 +1506,7 @@ onAuthStateChanged(auth, async (fbUser) => {
             console.warn('Sync auth user error:', e);
         }
     } else if (!fbUser) {
-        if (!currentAuthUser?.artistData?.password) {
+        if (!currentAuthUser?.artistData) {
             notifyAuthChanged(null);
         }
     }

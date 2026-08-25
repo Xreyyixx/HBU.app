@@ -9,7 +9,8 @@ import {
     registerUser,
     logoutUser,
     getCurrentAuthUser,
-    calculateBlockedIdsForArtist
+    calculateBlockedIdsForArtist,
+    safeJsonStringify
 } from './data-service.js';
 
 // Доступные эмодзи-реакции
@@ -1551,7 +1552,7 @@ subscribeState((state) => {
     }
 
     // Проверяем, изменился ли контент (новости, конкурсы, баннер, участники)
-    const currentContentHash = JSON.stringify({
+    const currentContentHash = safeJsonStringify({
         contests: contestsData,
         news: newsData,
         participants: participantsData,
