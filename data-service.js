@@ -481,6 +481,15 @@ function initFirestoreListeners() {
                 currentState.contests = contestItems;
                 notifyStateChanged(false);
                 syncCurrentUserArtistStatus();
+            } else if (snap.empty) {
+                // Если в Firestore пока нет сезонов, используем базовые и записываем их в базу
+                if (!currentState.contests || currentState.contests.length === 0) {
+                    currentState.contests = INITIAL_CONTESTS;
+                    notifyStateChanged(false);
+                }
+                INITIAL_CONTESTS.forEach(c => {
+                    setDoc(doc(db, "contests", c.id), c, { merge: true }).catch(() => {});
+                });
             }
         }, (err) => console.warn('Firestore contests error:', err));
     } catch (e) {}
@@ -1059,12 +1068,72 @@ const COUNTRY_SYNONYMS = {
     'казахстан': ['казахстан', 'kazakhstan', 'kaz', 'kz']
 };
 
+function transliterateRuToEn(text) {
+    if (!text) return '';
+    const ruToEn = {
+        'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
+        'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o',
+        'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts',
+        'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'
+    };
+    return String(text)
+        .toLowerCase()
+        .split('')
+        .map(char => ruToEn[char] !== undefined ? ruToEn[char] : char)
+        .join('');
+}
+
+function transliterateEnToRu(text) {
+    if (!text) return '';
+    const map = [
+        ['sch', 'щ'], ['sh', 'ш'], ['ch', 'ч'], ['ts', 'ц'], ['zh', 'ж'],
+        ['yo', 'ё'], ['yu', 'ю'], ['ya', 'я'], ['ph', 'ф'], ['kh', 'х'],
+        ['a', 'а'], ['b', 'б'], ['v', 'в'], ['w', 'в'], ['g', 'г'], ['d', 'д'],
+        ['e', 'е'], ['z', 'з'], ['i', 'и'], ['j', 'й'], ['y', 'й'], ['k', 'к'],
+        ['l', 'л'], ['m', 'м'], ['n', 'н'], ['o', 'о'], ['p', 'п'], ['r', 'р'],
+        ['s', 'с'], ['t', 'т'], ['u', 'у'], ['f', 'ф'], ['h', 'х'], ['c', 'к'],
+        ['x', 'кс'], ['q', 'к']
+    ];
+    let res = String(text).toLowerCase();
+    for (const [en, ru] of map) {
+        res = res.replaceAll(en, ru);
+    }
+    return res;
+}
+
 function normalizeString(s) {
     return String(s || '')
         .toLowerCase()
         .replace(/ё/g, 'е')
         .replace(/[^a-zа-я0-9\s]/gi, ' ')
         .trim();
+}
+
+function getNormalizedVariants(rawStr) {
+    if (!rawStr) return [];
+    const base = normalizeString(rawStr);
+    const set = new Set();
+    if (base) set.add(base);
+
+    // Добавляем очищенные от пробелов
+    const noSpace = base.replace(/\s+/g, '');
+    if (noSpace) set.add(noSpace);
+
+    // Транслитерация Ru -> En
+    const enTrans = normalizeString(transliterateRuToEn(rawStr));
+    if (enTrans) {
+        set.add(enTrans);
+        set.add(enTrans.replace(/\s+/g, ''));
+    }
+
+    // Транслитерация En -> Ru
+    const ruTrans = normalizeString(transliterateEnToRu(rawStr));
+    if (ruTrans) {
+        set.add(ruTrans);
+        set.add(ruTrans.replace(/\s+/g, ''));
+    }
+
+    return Array.from(set);
 }
 
 function extractKeywords(str) {
@@ -1278,19 +1347,36 @@ export function resolveArtistInfo(inputString, participantsList, allArtists = nu
     const list = participantsList || currentState.participants || DEFAULT_PARTICIPANTS;
     const artistsCollection = (allArtists && allArtists.length > 0) ? allArtists : (currentState.artists || []);
 
-    // 1. Поиск артиста в коллекции Firestore
+    // 1. Поиск артиста в коллекции Firestore (с учетом транслитерации и частичных совпадений)
+    const loginVariants = getNormalizedVariants(cleanLogin);
+    if (raw && !loginVariants.includes(normalizeString(raw))) {
+        loginVariants.push(normalizeString(raw));
+    }
+
     let matchedDoc = (artistsCollection || []).find(a => {
         const docId = String(a.id || '').trim().toLowerCase();
         const aLogin = normalizeString(a.login || a.username || '');
         const aEmail = String(a.email || '').trim().toLowerCase();
-        const aArtist = normalizeString(a.artist || a.name || '');
+        const aArtist = normalizeString(a.artist || a.name || a.stageName || a.title || '');
         const aCountry = String(a.country || '').trim();
 
+        // 1.1 Прямое совпадение по ID документа или логину
         if (docId === fullRaw || docId === cleanLogin || normalizeString(docId) === normLogin) return true;
-        if (aLogin && (aLogin === normLogin || aLogin === fullRaw)) return true;
-        if (aEmail && (aEmail === fullRaw || aEmail.startsWith(cleanLogin + '@'))) return true;
+        if (loginVariants.some(v => v === normalizeString(docId) || v === docId)) return true;
+        if (aLogin && loginVariants.some(v => v === aLogin)) return true;
+        if (aEmail && (aEmail === fullRaw || aEmail.startsWith(cleanLogin + '@') || aEmail.includes(cleanLogin))) return true;
+
+        // 1.2 Совпадение по имени артиста (включая транслитерацию)
+        if (aArtist) {
+            const artistVariants = getNormalizedVariants(a.artist || a.name || a.stageName || a.title || '');
+            if (loginVariants.some(lv => artistVariants.some(av => lv === av || (lv.length >= 3 && av.length >= 3 && (lv.startsWith(av) || av.startsWith(lv)))))) {
+                return true;
+            }
+        }
+
+        // 1.3 Совпадение по стране
         if (aCountry && countriesMatch(aCountry, cleanLogin)) return true;
-        if (aArtist && aArtist.length >= 3 && !aArtist.startsWith('number') && aArtist === normLogin) return true;
+
         return false;
     });
 
