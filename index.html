@@ -61,8 +61,13 @@
         </nav>
 
         <!-- Right Side Actions & Hamburger Menu Button -->
-        <div class="flex items-center gap-2.5">
-            <div id="header-vote-badge" class="hidden sm:flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-3 py-1.5 rounded-full border border-amber-500/20">
+        <div class="flex items-center gap-2 sm:gap-2.5">
+            <!-- User / Artist Auth Header Badge / Button -->
+            <div id="header-auth-container" class="flex items-center">
+                <!-- Dynamically populated: Login Button or User Profile Badge -->
+            </div>
+
+            <div id="header-vote-badge" class="hidden lg:flex items-center gap-1.5 text-[10px] font-bold tracking-widest text-amber-400 uppercase bg-amber-500/10 px-3 py-1.5 rounded-full border border-amber-500/20">
                 <span class="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></span>
                 <span>Public Vote</span>
             </div>
@@ -79,7 +84,7 @@
     <!-- Side Navigation Drawer (Offcanvas Menu) -->
     <div id="side-menu-overlay" onclick="toggleSideMenu(false)" class="fixed inset-0 bg-black/80 backdrop-blur-md z-40 hidden transition-opacity duration-300"></div>
     <aside id="side-menu-drawer" class="fixed top-0 right-0 h-full w-80 max-w-[85vw] bg-[#0d0408]/95 backdrop-blur-2xl border-l border-amber-500/20 z-50 transform translate-x-full transition-transform duration-300 ease-out flex flex-col justify-between p-6 shadow-2xl">
-        <div class="flex flex-col gap-6">
+        <div class="flex flex-col gap-5 overflow-y-auto">
             <div class="flex items-center justify-between border-b border-amber-500/20 pb-4">
                 <div class="flex items-center gap-2.5">
                     <div class="w-8 h-8 bg-amber-500/10 border border-amber-500/30 flex items-center justify-center rounded-xl">
@@ -96,6 +101,11 @@
                     </div>
                 </div>
                 <button onclick="toggleSideMenu(false)" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white bg-[#16070b] border border-amber-500/20 rounded-xl transition font-bold text-sm">✕</button>
+            </div>
+
+            <!-- Profile / Auth Card in Drawer -->
+            <div id="side-menu-auth-container" class="w-full">
+                <!-- Dynamically rendered auth widget -->
             </div>
 
             <!-- Menu Navigation Links -->
@@ -169,6 +179,80 @@
             <div class="pt-2 flex justify-end">
                 <button onclick="closeNewsModal()" class="px-6 py-2.5 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-200 font-bold text-xs uppercase tracking-wider rounded-xl transition">Закрыть</button>
             </div>
+        </div>
+    </div>
+
+    <!-- User & Artist Auth Modal (Вход / Регистрация) -->
+    <div id="auth-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-5">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-md p-6 sm:p-8 flex flex-col gap-5 rounded-3xl shadow-[0_20px_70px_rgba(0,0,0,0.9)] page-fade">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 bg-amber-500/10 border border-amber-500/30 flex items-center justify-center rounded-xl">
+                        <span class="text-amber-400 text-sm">👤</span>
+                    </div>
+                    <span class="text-xs font-black tracking-widest text-white uppercase" id="auth-modal-title">Авторизация</span>
+                </div>
+                <button onclick="closeAuthModal()" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white bg-[#16070b] border border-amber-500/20 rounded-xl transition font-bold text-sm">✕</button>
+            </div>
+
+            <!-- Subtitle Prompt -->
+            <div id="auth-modal-prompt" class="text-xs text-amber-200/80 font-medium">
+                Войдите под своим логином или зарегистрируйтесь для участия в голосовании.
+            </div>
+
+            <!-- Tabs: Вход / Регистрация -->
+            <div class="flex bg-[#16070b] p-1 rounded-2xl border border-amber-500/20">
+                <button id="auth-tab-login" onclick="switchAuthTab('login')" class="flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition">
+                    Вход
+                </button>
+                <button id="auth-tab-register" onclick="switchAuthTab('register')" class="flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-white transition">
+                    Регистрация
+                </button>
+            </div>
+
+            <!-- Error container -->
+            <div id="auth-form-error" class="hidden text-xs text-rose-400 bg-rose-950/40 p-3 rounded-xl border border-rose-500/30 font-medium"></div>
+
+            <!-- Tab 1: Form Login -->
+            <form id="auth-login-form" onsubmit="handleAuthLoginSubmit(event)" class="flex flex-col gap-3.5">
+                <div>
+                    <label class="block text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1.5">Логин или Email</label>
+                    <input type="text" id="auth-login-identifier" required placeholder="Введите ваш логин или почту..." class="w-full bg-[#16070b] border border-amber-500/20 px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 rounded-xl" />
+                    <span class="text-[10px] text-slate-500 mt-1 block">Артисты могут вводить логин без @ (например, austria или p1)</span>
+                </div>
+
+                <div>
+                    <label class="block text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1.5">Пароль</label>
+                    <input type="password" id="auth-login-password" required placeholder="••••••••" class="w-full bg-[#16070b] border border-amber-500/20 px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 rounded-xl" />
+                </div>
+
+                <button type="submit" id="auth-login-submit-btn" class="w-full mt-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-widest py-3.5 transition shadow-lg rounded-xl">
+                    Войти
+                </button>
+            </form>
+
+            <!-- Tab 2: Form Register -->
+            <form id="auth-register-form" onsubmit="handleAuthRegisterSubmit(event)" class="hidden flex flex-col gap-3.5">
+                <div>
+                    <label class="block text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1.5">Ваше имя / Никнейм</label>
+                    <input type="text" id="auth-register-name" placeholder="Как вас называть..." class="w-full bg-[#16070b] border border-amber-500/20 px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 rounded-xl" />
+                </div>
+
+                <div>
+                    <label class="block text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1.5">Email или логин</label>
+                    <input type="text" id="auth-register-identifier" required placeholder="user@example.com или nickname..." class="w-full bg-[#16070b] border border-amber-500/20 px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 rounded-xl" />
+                </div>
+
+                <div>
+                    <label class="block text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1.5">Пароль (минимум 6 символов)</label>
+                    <input type="password" id="auth-register-password" required minlength="6" placeholder="••••••••" class="w-full bg-[#16070b] border border-amber-500/20 px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 rounded-xl" />
+                </div>
+
+                <button type="submit" id="auth-register-submit-btn" class="w-full mt-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-widest py-3.5 transition shadow-lg rounded-xl">
+                    Зарегистрироваться
+                </button>
+            </form>
         </div>
     </div>
 

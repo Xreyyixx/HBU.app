@@ -1,8 +1,26 @@
-import { db, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS } from './config.js';
+import { db, auth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS } from './config.js';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { 
+    signInWithEmailAndPassword, 
+    createUserWithEmailAndPassword, 
+    signOut, 
+    onAuthStateChanged, 
+    signInAnonymously 
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 // Локальное кэширование
 const LOCAL_STORAGE_STATE_KEY = 'harivision_cached_state';
+const LOCAL_STORAGE_USER_KEY = 'harivision_auth_user';
+
+let currentAuthUser = null;
+try {
+    const cachedUser = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
+    if (cachedUser) {
+        currentAuthUser = JSON.parse(cachedUser);
+    }
+} catch (e) {
+    console.warn('User cache read error:', e);
+}
 
 let currentState = {
     contests: INITIAL_CONTESTS,
@@ -754,6 +772,406 @@ export async function toggleNewsReaction(newsId, emoji, action = 'add') {
         }
     } catch (e) {}
 }
+
+// -------------------------------------------------------------
+// ПОЛЬЗОВАТЕЛЬСКАЯ АВТОРИЗАЦИЯ, РЕГИСТРАЦИЯ И СТАТУС АРТИСТА
+// -------------------------------------------------------------
+const authListeners = new Set();
+
+export function subscribeAuth(callback) {
+    authListeners.add(callback);
+    try {
+        callback(currentAuthUser);
+    } catch (e) {
+        console.warn('Auth callback err:', e);
+    }
+    return () => {
+        authListeners.delete(callback);
+    };
+}
+
+function notifyAuthChanged(user) {
+    currentAuthUser = user;
+    try {
+        if (user) {
+            localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(user));
+        } else {
+            localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+        }
+    } catch (e) {}
+    authListeners.forEach(cb => {
+        try {
+            cb(currentAuthUser);
+        } catch (e) {
+            console.error('Auth listener error:', e);
+        }
+    });
+}
+
+export function getCurrentAuthUser() {
+    return currentAuthUser;
+}
+
+// Поиск совпадений артиста по номеру, стране, названию, логину или привязанному логину
+export function calculateBlockedIdsForArtist(artistData, participantsList) {
+    const blocked = new Set();
+    const list = participantsList || currentState.participants || DEFAULT_PARTICIPANTS;
+    
+    if (!artistData) return [];
+
+    const artLogin = String(artistData.login || artistData.username || artistData.id || '').trim().toLowerCase();
+    const artEmail = String(artistData.email || '').trim().toLowerCase();
+    const artCleanEmail = artEmail.split('@')[0];
+
+    // 0. Прямая привязка логина на уровне участника из админки (p.artistLogin / p.linkedArtistLogin)
+    list.forEach(p => {
+        const pLogin = String(p.artistLogin || p.linkedArtistLogin || '').trim().toLowerCase();
+        if (pLogin) {
+            if (pLogin === artLogin || pLogin === artEmail || (artCleanEmail && pLogin === artCleanEmail)) {
+                blocked.add(p.id);
+            }
+        }
+    });
+
+    // 1. Прямые ID
+    if (artistData.participantId) blocked.add(String(artistData.participantId));
+    if (Array.isArray(artistData.blockedIds)) {
+        artistData.blockedIds.forEach(id => blocked.add(String(id)));
+    }
+    
+    // 2. Номера участников (number: 1..99)
+    if (artistData.number !== undefined && artistData.number !== null) {
+        const targetNum = Number(artistData.number);
+        const p = list.find(x => Number(x.number) === targetNum || x.id === `p${targetNum}`);
+        if (p) blocked.add(p.id);
+    }
+    if (Array.isArray(artistData.blockedNumbers)) {
+        artistData.blockedNumbers.forEach(n => {
+            const targetNum = Number(n);
+            const p = list.find(x => Number(x.number) === targetNum || x.id === `p${targetNum}`);
+            if (p) blocked.add(p.id);
+        });
+    }
+
+    // 3. Страна (country)
+    if (artistData.country) {
+        const cLow = String(artistData.country).trim().toLowerCase();
+        const p = list.find(x => x.country && x.country.trim().toLowerCase() === cLow);
+        if (p) blocked.add(p.id);
+    }
+
+    // 4. Имя артиста (artist)
+    if (artistData.artist) {
+        const aLow = String(artistData.artist).trim().toLowerCase();
+        const p = list.find(x => (x.artist && x.artist.trim().toLowerCase() === aLow) || (x.name && x.name.trim().toLowerCase() === aLow));
+        if (p) blocked.add(p.id);
+    }
+
+    // 5. Имя участника (name)
+    if (artistData.name) {
+        const nLow = String(artistData.name).trim().toLowerCase();
+        const p = list.find(x => (x.name && x.name.trim().toLowerCase() === nLow) || (x.artist && x.artist.trim().toLowerCase() === nLow));
+        if (p) blocked.add(p.id);
+    }
+
+    // 6. Если doc.id сам по себе 'p1'..'p8'
+    if (artistData.id && /^p\d+$/i.test(artistData.id)) {
+        blocked.add(artistData.id);
+    }
+
+    return Array.from(blocked);
+}
+
+// Получение списка всех артистов из коллекции Firestore
+export async function fetchArtistsFromFirestore() {
+    if (!db) return [];
+    const artists = [];
+    try {
+        const snap = await getDocs(collection(db, "artists"));
+        snap.forEach(d => {
+            artists.push({ id: d.id, ...d.data() });
+        });
+    } catch (e) {
+        console.warn('Fetch artists collection warning:', e);
+    }
+    return artists;
+}
+
+// Авторизация пользователя или артиста
+export async function loginUser(emailOrLogin, password) {
+    const raw = (emailOrLogin || '').trim();
+    const pass = (password || '').trim();
+
+    if (!raw || !pass) {
+        throw new Error('Пожалуйста, введите логин/email и пароль');
+    }
+
+    const isEmail = raw.includes('@');
+    const cleanLogin = isEmail ? raw.split('@')[0] : raw;
+
+    // 1. Проверяем коллекцию artists в Firestore
+    let matchedArtistDoc = null;
+    try {
+        const allArtists = await fetchArtistsFromFirestore();
+        matchedArtistDoc = allArtists.find(a => {
+            const docId = String(a.id || '').trim().toLowerCase();
+            const aLogin = String(a.login || a.username || '').trim().toLowerCase();
+            const aEmail = String(a.email || '').trim().toLowerCase();
+            const aArtist = String(a.artist || a.name || '').trim().toLowerCase();
+            const aCountry = String(a.country || '').trim().toLowerCase();
+
+            const target = raw.toLowerCase();
+            const targetClean = cleanLogin.toLowerCase();
+
+            return (
+                docId === target || 
+                docId === targetClean ||
+                aLogin === target || 
+                aLogin === targetClean ||
+                aEmail === target ||
+                (aEmail && aEmail.startsWith(targetClean + '@')) ||
+                aArtist === target ||
+                aCountry === target
+            );
+        });
+
+        // Также проверяем список участников, настроенный в админке (currentState.participants)
+        if (!matchedArtistDoc && currentState.participants) {
+            const matchedP = currentState.participants.find(p => {
+                const pLogin = String(p.artistLogin || p.linkedArtistLogin || '').trim().toLowerCase();
+                const pArtist = String(p.artist || '').trim().toLowerCase();
+                const pCountry = String(p.country || '').trim().toLowerCase();
+                const pName = String(p.name || '').trim().toLowerCase();
+                const targetClean = cleanLogin.toLowerCase();
+                const target = raw.toLowerCase();
+
+                return (
+                    (pLogin && (pLogin === targetClean || pLogin === target)) ||
+                    (pArtist && (pArtist === targetClean || pArtist === target)) ||
+                    (pCountry && (pCountry === targetClean || pCountry === target)) ||
+                    (pName && (pName === targetClean || pName === target))
+                );
+            });
+
+            if (matchedP) {
+                matchedArtistDoc = {
+                    id: matchedP.id,
+                    number: matchedP.number,
+                    artist: matchedP.artist || matchedP.name,
+                    country: matchedP.country,
+                    name: matchedP.name,
+                    artistLogin: matchedP.artistLogin,
+                    blockedIds: [matchedP.id],
+                    email: `${cleanLogin}@harivision.app`
+                };
+            }
+        }
+    } catch (e) {
+        console.warn('Check artists error:', e);
+    }
+
+    // 2. Если в документе артиста в Firestore хранится пароль и он совпадает
+    if (matchedArtistDoc && matchedArtistDoc.password && String(matchedArtistDoc.password).trim() === pass) {
+        const blockedIds = calculateBlockedIdsForArtist(matchedArtistDoc, currentState.participants);
+        const userObj = {
+            uid: matchedArtistDoc.id || 'artist_' + Date.now(),
+            email: matchedArtistDoc.email || `${cleanLogin}@harivision.app`,
+            login: matchedArtistDoc.login || cleanLogin,
+            displayName: matchedArtistDoc.artist || matchedArtistDoc.name || matchedArtistDoc.country || cleanLogin,
+            role: 'artist',
+            artistData: matchedArtistDoc,
+            blockedParticipantIds: blockedIds
+        };
+        notifyAuthChanged(userObj);
+        return userObj;
+    }
+
+    // 3. Пробуем войти через Firebase Authentication
+    // Формируем список кандидатов на email (если ввели без @)
+    const emailCandidates = [];
+    if (isEmail) {
+        emailCandidates.push(raw);
+    } else {
+        if (matchedArtistDoc && matchedArtistDoc.email) {
+            emailCandidates.push(matchedArtistDoc.email);
+        }
+        emailCandidates.push(`${cleanLogin}@harivision.app`);
+        emailCandidates.push(`${cleanLogin}@harivision.org`);
+        emailCandidates.push(`${cleanLogin}@gmail.com`);
+    }
+
+    let authUserCredential = null;
+    let lastAuthError = null;
+
+    for (const emailTry of emailCandidates) {
+        try {
+            authUserCredential = await signInWithEmailAndPassword(auth, emailTry, pass);
+            if (authUserCredential && authUserCredential.user) break;
+        } catch (err) {
+            lastAuthError = err;
+            if (isEmail) break; // если юзер явно ввел email с @, не перебираем домены
+        }
+    }
+
+    if (authUserCredential && authUserCredential.user) {
+        const fbUser = authUserCredential.user;
+        const effectiveEmail = fbUser.email || (isEmail ? raw : `${cleanLogin}@harivision.app`);
+
+        // Проверяем, является ли пользователь артистом
+        let isArtist = Boolean(matchedArtistDoc);
+        if (!matchedArtistDoc) {
+            try {
+                const allArtists = await fetchArtistsFromFirestore();
+                matchedArtistDoc = allArtists.find(a => 
+                    (a.email && a.email.toLowerCase() === effectiveEmail.toLowerCase()) ||
+                    (a.login && a.login.toLowerCase() === cleanLogin.toLowerCase()) ||
+                    (a.id && a.id.toLowerCase() === cleanLogin.toLowerCase())
+                );
+                if (matchedArtistDoc) isArtist = true;
+            } catch (e) {}
+        }
+
+        const blockedIds = isArtist ? calculateBlockedIdsForArtist(matchedArtistDoc, currentState.participants) : [];
+        const userObj = {
+            uid: fbUser.uid,
+            email: effectiveEmail,
+            login: cleanLogin,
+            displayName: fbUser.displayName || (matchedArtistDoc ? (matchedArtistDoc.artist || matchedArtistDoc.name) : cleanLogin),
+            role: isArtist ? 'artist' : 'user',
+            artistData: isArtist ? matchedArtistDoc : null,
+            blockedParticipantIds: blockedIds
+        };
+        notifyAuthChanged(userObj);
+        return userObj;
+    }
+
+    // Если ничего не подошло
+    let errMsg = 'Неверный логин или пароль';
+    if (lastAuthError) {
+        if (lastAuthError.code === 'auth/wrong-password' || lastAuthError.code === 'auth/invalid-credential') {
+            errMsg = 'Неверный пароль или email';
+        } else if (lastAuthError.code === 'auth/user-not-found') {
+            errMsg = 'Пользователь с таким логином не найден. Зарегистрируйтесь, если у вас еще нет аккаунта.';
+        } else if (lastAuthError.code === 'auth/too-many-requests') {
+            errMsg = 'Слишком много попыток входа. Попробуйте позже.';
+        }
+    }
+    throw new Error(errMsg);
+}
+
+// Регистрация нового зрителя
+export async function registerUser(emailOrLogin, password, displayName = '') {
+    const raw = (emailOrLogin || '').trim();
+    const pass = (password || '').trim();
+    const name = (displayName || '').trim();
+
+    if (!raw || !pass) {
+        throw new Error('Пожалуйста, заполните все обязательные поля');
+    }
+    if (pass.length < 6) {
+        throw new Error('Пароль должен содержать не менее 6 символов');
+    }
+
+    const isEmail = raw.includes('@');
+    const cleanLogin = isEmail ? raw.split('@')[0] : raw;
+    const finalEmail = isEmail ? raw : `${cleanLogin}@harivision.app`;
+    const finalName = name || cleanLogin;
+
+    try {
+        const cred = await createUserWithEmailAndPassword(auth, finalEmail, pass);
+        const fbUser = cred.user;
+
+        // Сохраняем профиль в Firestore collection "users"
+        try {
+            await setDoc(doc(db, "users", fbUser.uid), {
+                uid: fbUser.uid,
+                email: finalEmail,
+                login: cleanLogin,
+                displayName: finalName,
+                role: 'user',
+                createdAt: new Date().toISOString()
+            }, { merge: true });
+        } catch (e) {}
+
+        const userObj = {
+            uid: fbUser.uid,
+            email: finalEmail,
+            login: cleanLogin,
+            displayName: finalName,
+            role: 'user',
+            artistData: null,
+            blockedParticipantIds: []
+        };
+        notifyAuthChanged(userObj);
+        return userObj;
+    } catch (err) {
+        console.error('Registration error:', err);
+        let msg = 'Ошибка регистрации';
+        if (err.code === 'auth/email-already-in-use') {
+            msg = 'Пользователь с таким логином или почтой уже существует. Пожалуйста, войдите.';
+        } else if (err.code === 'auth/weak-password') {
+            msg = 'Слишком простой пароль. Используйте минимум 6 символов.';
+        } else if (err.code === 'auth/invalid-email') {
+            msg = 'Некорректный формат email.';
+        }
+        throw new Error(msg);
+    }
+}
+
+// Выход из аккаунта
+export async function logoutUser() {
+    try {
+        await signOut(auth);
+        await signInAnonymously(auth);
+    } catch (e) {}
+    notifyAuthChanged(null);
+}
+
+// Автоматическая синхронизация сессии Firebase Auth
+onAuthStateChanged(auth, async (fbUser) => {
+    if (fbUser && !fbUser.isAnonymous) {
+        try {
+            const rawEmail = fbUser.email || '';
+            const cleanLogin = rawEmail.includes('@') ? rawEmail.split('@')[0] : (fbUser.displayName || 'user');
+            
+            // Проверяем статус артиста
+            const allArtists = await fetchArtistsFromFirestore();
+            const matchedArtistDoc = allArtists.find(a => {
+                const docId = String(a.id || '').trim().toLowerCase();
+                const aLogin = String(a.login || a.username || '').trim().toLowerCase();
+                const aEmail = String(a.email || '').trim().toLowerCase();
+                const targetClean = cleanLogin.toLowerCase();
+                const targetEmail = rawEmail.toLowerCase();
+                return (
+                    docId === targetClean ||
+                    aLogin === targetClean ||
+                    aEmail === targetEmail ||
+                    (aEmail && aEmail.startsWith(targetClean + '@'))
+                );
+            });
+
+            const isArtist = Boolean(matchedArtistDoc);
+            const blockedIds = isArtist ? calculateBlockedIdsForArtist(matchedArtistDoc, currentState.participants) : [];
+
+            const userObj = {
+                uid: fbUser.uid,
+                email: rawEmail,
+                login: cleanLogin,
+                displayName: fbUser.displayName || (matchedArtistDoc ? (matchedArtistDoc.artist || matchedArtistDoc.name) : cleanLogin),
+                role: isArtist ? 'artist' : 'user',
+                artistData: isArtist ? matchedArtistDoc : null,
+                blockedParticipantIds: blockedIds
+            };
+            notifyAuthChanged(userObj);
+        } catch (e) {
+            console.warn('Sync auth user error:', e);
+        }
+    } else if (!fbUser) {
+        if (!currentAuthUser?.artistData?.password) {
+            notifyAuthChanged(null);
+        }
+    }
+});
 
 export async function loginAdminServer(emailOrUsername, password) {
     const res = await fetch('/api/admin/login', {

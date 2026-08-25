@@ -1,9 +1,23 @@
 import { db, DEFAULT_PARTICIPANTS, TOTAL_USER_VOTES, MAX_VOTES_PER_PARTICIPANT } from './config.js';
 import { doc, onSnapshot, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { subscribeState, submitVote as submitVoteToService, toggleNewsReaction } from './data-service.js';
+import { 
+    subscribeState, 
+    submitVote as submitVoteToService, 
+    toggleNewsReaction,
+    subscribeAuth,
+    loginUser,
+    registerUser,
+    logoutUser,
+    getCurrentAuthUser,
+    calculateBlockedIdsForArtist
+} from './data-service.js';
 
 // Доступные эмодзи-реакции
 const AVAILABLE_EMOJIS = ['❤️', '🔥', '👏', '🏆', '🤩', '⚡'];
+
+// Состояние авторизованного пользователя
+let currentAuthUser = null;
+let pendingAuthAction = null; // 'voting' or null
 
 // Страновые ограничения для национального голосования
 const COUNTRY_RESTRICTIONS = {
@@ -231,6 +245,241 @@ if (canvas && ctx) {
 }
 
 // -------------------------------------------------------------
+// АВТОРИЗАЦИЯ, ЛИЧНЫЙ КАБИНЕТ И СТАТУС АРТИСТА В ИНТЕРФЕЙСЕ
+// -------------------------------------------------------------
+function renderAuthHeaderAndDrawer() {
+    const headerContainer = document.getElementById('header-auth-container');
+    const drawerContainer = document.getElementById('side-menu-auth-container');
+
+    // 1. Шапка сайта (правый верхний угол)
+    if (headerContainer) {
+        if (!currentAuthUser) {
+            headerContainer.innerHTML = `
+                <button onclick="openAuthModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#16070b] hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold transition shadow-sm cursor-pointer select-none">
+                    <span class="text-sm">👤</span>
+                    <span class="hidden sm:inline">Войти</span>
+                </button>
+            `;
+        } else if (currentAuthUser.role === 'artist') {
+            headerContainer.innerHTML = `
+                <div class="flex items-center gap-1.5 bg-[#16070b] border border-amber-500/35 px-2.5 sm:px-3 py-1 rounded-full shadow-sm">
+                    <span class="text-xs">🎤</span>
+                    <div class="flex flex-col text-left">
+                        <span class="text-[11px] sm:text-xs font-black text-amber-300 max-w-[90px] sm:max-w-[120px] truncate leading-tight">${currentAuthUser.displayName}</span>
+                        <span class="text-[7px] sm:text-[8px] text-amber-400 font-bold uppercase tracking-wider leading-tight">Артист</span>
+                    </div>
+                    <button onclick="handleLogout()" title="Выйти из аккаунта" class="ml-1 text-slate-400 hover:text-rose-400 text-xs font-bold p-0.5 transition cursor-pointer">✕</button>
+                </div>
+            `;
+        } else {
+            headerContainer.innerHTML = `
+                <div class="flex items-center gap-1.5 bg-[#16070b] border border-amber-500/20 px-2.5 sm:px-3 py-1 rounded-full shadow-sm">
+                    <span class="text-xs">👤</span>
+                    <div class="flex flex-col text-left">
+                        <span class="text-[11px] sm:text-xs font-bold text-amber-200 max-w-[90px] sm:max-w-[120px] truncate leading-tight">${currentAuthUser.displayName}</span>
+                        <span class="text-[7px] sm:text-[8px] text-slate-400 font-bold uppercase tracking-wider leading-tight">Зритель</span>
+                    </div>
+                    <button onclick="handleLogout()" title="Выйти" class="ml-1 text-slate-400 hover:text-rose-400 text-xs font-bold p-0.5 transition cursor-pointer">✕</button>
+                </div>
+            `;
+        }
+    }
+
+    // 2. Боковое меню (Side Drawer)
+    if (drawerContainer) {
+        if (!currentAuthUser) {
+            drawerContainer.innerHTML = `
+                <div class="bg-[#16070b] border border-amber-500/20 p-4 rounded-2xl flex flex-col gap-3">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-sm">👤</div>
+                        <div>
+                            <div class="text-xs font-bold text-white uppercase tracking-wider">Личный кабинет</div>
+                            <div class="text-[10px] text-amber-400/80">Для зрителей и артистов</div>
+                        </div>
+                    </div>
+                    <button onclick="toggleSideMenu(false); openAuthModal();" class="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-md">
+                        Войти / Регистрация
+                    </button>
+                </div>
+            `;
+        } else if (currentAuthUser.role === 'artist') {
+            drawerContainer.innerHTML = `
+                <div class="bg-[#16070b] border border-amber-500/30 p-4 rounded-2xl flex flex-col gap-2.5">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2.5">
+                            <div class="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-sm">🎤</div>
+                            <div>
+                                <div class="text-xs font-black text-white uppercase">${currentAuthUser.displayName}</div>
+                                <div class="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Аккаунт Артиста</div>
+                            </div>
+                        </div>
+                        <span class="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-black rounded-full uppercase">Artist</span>
+                    </div>
+                    <div class="text-[10px] text-amber-200/80 bg-[#0a0305] p-2.5 rounded-xl border border-amber-500/15 leading-relaxed">
+                        <span class="text-amber-400 font-bold block mb-0.5">🛡️ Правило честного конкурса:</span>
+                        Голосование за свой номер автоматически заблокировано.
+                    </div>
+                    <button onclick="handleLogout()" class="w-full py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-bold text-xs uppercase tracking-wider rounded-xl transition">
+                        Выйти из аккаунта
+                    </button>
+                </div>
+            `;
+        } else {
+            drawerContainer.innerHTML = `
+                <div class="bg-[#16070b] border border-amber-500/20 p-4 rounded-2xl flex flex-col gap-2.5">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2.5">
+                            <div class="w-8 h-8 rounded-xl bg-slate-800 border border-amber-500/20 flex items-center justify-center text-sm">👤</div>
+                            <div>
+                                <div class="text-xs font-bold text-white uppercase">${currentAuthUser.displayName}</div>
+                                <div class="text-[10px] text-slate-400 truncate max-w-[140px]">${currentAuthUser.email || 'Зритель HBU'}</div>
+                            </div>
+                        </div>
+                        <span class="px-2 py-0.5 bg-slate-800 text-slate-300 text-[9px] font-bold rounded-full uppercase">Зритель</span>
+                    </div>
+                    <button onclick="handleLogout()" class="w-full py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-bold text-xs uppercase tracking-wider rounded-xl transition">
+                        Выйти из аккаунта
+                    </button>
+                </div>
+            `;
+        }
+    }
+}
+
+// Управление модальным окном авторизации
+window.openAuthModal = function(reason = '') {
+    pendingAuthAction = reason;
+    const modal = document.getElementById('auth-modal');
+    const promptEl = document.getElementById('auth-modal-prompt');
+    const errorEl = document.getElementById('auth-form-error');
+    if (errorEl) errorEl.classList.add('hidden');
+
+    if (promptEl) {
+        if (reason === 'voting') {
+            promptEl.innerText = 'Для участия в голосовании необходимо войти под логином артиста или зарегистрироваться как зритель.';
+        } else {
+            promptEl.innerText = 'Войдите под своим логином или зарегистрируйтесь для участия в жизни конкурса.';
+        }
+    }
+    if (modal) modal.classList.remove('hidden');
+};
+
+window.closeAuthModal = function() {
+    const modal = document.getElementById('auth-modal');
+    if (modal) modal.classList.add('hidden');
+};
+
+window.switchAuthTab = function(tab) {
+    const tabLogin = document.getElementById('auth-tab-login');
+    const tabRegister = document.getElementById('auth-tab-register');
+    const formLogin = document.getElementById('auth-login-form');
+    const formRegister = document.getElementById('auth-register-form');
+    const errorEl = document.getElementById('auth-form-error');
+    if (errorEl) errorEl.classList.add('hidden');
+
+    if (tab === 'login') {
+        tabLogin.className = 'flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition';
+        tabRegister.className = 'flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-white transition';
+        formLogin.classList.remove('hidden');
+        formRegister.classList.add('hidden');
+    } else {
+        tabRegister.className = 'flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition';
+        tabLogin.className = 'flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-white transition';
+        formRegister.classList.remove('hidden');
+        formLogin.classList.add('hidden');
+    }
+};
+
+window.handleAuthLoginSubmit = async function(event) {
+    event.preventDefault();
+    const idEl = document.getElementById('auth-login-identifier');
+    const passEl = document.getElementById('auth-login-password');
+    const btnEl = document.getElementById('auth-login-submit-btn');
+    const errorEl = document.getElementById('auth-form-error');
+    if (errorEl) errorEl.classList.add('hidden');
+
+    const originalText = btnEl ? btnEl.innerText : 'Войти';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerText = 'Проверка данных...';
+    }
+
+    try {
+        const user = await loginUser(idEl.value, passEl.value);
+        closeAuthModal();
+        if (pendingAuthAction === 'voting') {
+            pendingAuthAction = null;
+            navigateToView('voting');
+        }
+    } catch (err) {
+        if (errorEl) {
+            errorEl.innerText = err.message || 'Ошибка входа. Проверьте правильность логина и пароля.';
+            errorEl.classList.remove('hidden');
+        }
+    } finally {
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.innerText = originalText;
+        }
+    }
+};
+
+window.handleAuthRegisterSubmit = async function(event) {
+    event.preventDefault();
+    const nameEl = document.getElementById('auth-register-name');
+    const idEl = document.getElementById('auth-register-identifier');
+    const passEl = document.getElementById('auth-register-password');
+    const btnEl = document.getElementById('auth-register-submit-btn');
+    const errorEl = document.getElementById('auth-form-error');
+    if (errorEl) errorEl.classList.add('hidden');
+
+    const originalText = btnEl ? btnEl.innerText : 'Зарегистрироваться';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerText = 'Создание аккаунта...';
+    }
+
+    try {
+        const user = await registerUser(idEl.value, passEl.value, nameEl ? nameEl.value : '');
+        closeAuthModal();
+        if (pendingAuthAction === 'voting') {
+            pendingAuthAction = null;
+            navigateToView('voting');
+        }
+    } catch (err) {
+        if (errorEl) {
+            errorEl.innerText = err.message || 'Ошибка регистрации';
+            errorEl.classList.remove('hidden');
+        }
+    } finally {
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.innerText = originalText;
+        }
+    }
+};
+
+window.handleLogout = async function() {
+    if (confirm('Вы уверены, что хотите выйти из аккаунта?')) {
+        await logoutUser();
+        userName = '';
+        renderVotingCard();
+    }
+};
+
+// Подписка на изменение статуса авторизации
+subscribeAuth((user) => {
+    currentAuthUser = user;
+    if (user && user.displayName) {
+        userName = user.displayName;
+    }
+    renderAuthHeaderAndDrawer();
+    if (currentPortalView === 'voting') {
+        renderVotingCard();
+    }
+});
+
+// -------------------------------------------------------------
 // НАВИГАЦИЯ И БОКОВОЕ МЕНЮ
 // -------------------------------------------------------------
 window.toggleSideMenu = function(force) {
@@ -349,6 +598,20 @@ window.selectRepresentative = function(repName) {
 };
 
 window.changeVote = function(participantId, delta) {
+    // Если пользователь не вошел, открываем модальное окно авторизации
+    if (!currentAuthUser) {
+        openAuthModal('voting');
+        return;
+    }
+
+    // Если артист пытается голосовать за свой номер
+    if (currentAuthUser.role === 'artist') {
+        const blockedIds = currentAuthUser.blockedParticipantIds || calculateBlockedIdsForArtist(currentAuthUser.artistData, participantsData);
+        if (blockedIds.includes(participantId)) {
+            return;
+        }
+    }
+
     const current = userAllocations[participantId] || 0;
     const used = getUsedVotesCount();
 
@@ -383,9 +646,14 @@ function updateVoteUIOnly(targetParticipantId) {
         submitBtn.innerText = `Отправить ${usedVotes} ${usedVotes === 1 ? 'голос' : (usedVotes < 5 ? 'голоса' : 'голосов')}`;
     }
 
-    // Обновляем конкретный номер или все
     const participants = participantsData || DEFAULT_PARTICIPANTS;
+    const artistBlockedIds = (currentAuthUser && currentAuthUser.role === 'artist') 
+        ? (currentAuthUser.blockedParticipantIds || calculateBlockedIdsForArtist(currentAuthUser.artistData, participants))
+        : [];
+
     participants.forEach(p => {
+        if (artistBlockedIds.includes(p.id)) return;
+
         const count = userAllocations[p.id] || 0;
         const countEl = document.getElementById(`vote-count-${p.id}`);
         if (countEl) {
@@ -419,8 +687,14 @@ window.navigateToVotingSubPage = function(subPage) {
 };
 
 window.submitVote = async function() {
+    // 1. Проверка авторизации
+    if (!currentAuthUser) {
+        openAuthModal('voting');
+        return;
+    }
+
     const inputName = document.getElementById('voter-name-input');
-    const nameValue = inputName ? inputName.value.trim() : userName.trim();
+    const nameValue = inputName ? inputName.value.trim() : (currentAuthUser.displayName || userName.trim());
 
     if (!nameValue) {
         alert("Пожалуйста, введите ваше имя перед отправкой голоса.");
@@ -432,10 +706,24 @@ window.submitVote = async function() {
         return;
     }
 
+    // 2. Блокировка собственных номеров для артиста
+    if (currentAuthUser.role === 'artist') {
+        const blockedIds = currentAuthUser.blockedParticipantIds || calculateBlockedIdsForArtist(currentAuthUser.artistData, participantsData);
+        blockedIds.forEach(bid => {
+            if (userAllocations[bid]) delete userAllocations[bid];
+        });
+    }
+
     const totalUsed = getUsedVotesCount();
     if (totalUsed === 0) {
         alert("Пожалуйста, отдайте хотя бы 1 голос перед отправкой.");
         return;
+    }
+
+    const submitBtn = document.getElementById('submit-vote-btn');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Отправка голосов...';
     }
 
     try {
@@ -445,10 +733,14 @@ window.submitVote = async function() {
             totalVotesGiven: totalUsed,
             isNational: isNational,
             representative: selectedRepresentative || null,
-            sessionId: systemState.sessionId
+            sessionId: systemState.sessionId,
+            userId: currentAuthUser.uid,
+            userEmail: currentAuthUser.email,
+            userRole: currentAuthUser.role,
+            artistName: currentAuthUser.role === 'artist' ? currentAuthUser.displayName : null
         };
 
-        // Отправка на бэкенд
+        // Отправка на бэкенд и в Firestore
         await submitVoteToService(votePayload);
 
         // Mirror Firestore
@@ -462,7 +754,11 @@ window.submitVote = async function() {
         localStorage.setItem('harivision_voted_session', systemState.sessionId || 'active');
         renderVotingCard();
     } catch (e) {
-        alert("Ошибка при отправке голоса: " + e.message);
+        alert("Ошибка при отправке голоса: " + (e.message || e));
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerText = `Отправить ${totalUsed} голосов`;
+        }
     }
 };
 
@@ -996,8 +1292,34 @@ function renderVotingCard() {
                 <div class="text-xs md:text-sm font-bold text-amber-400 uppercase tracking-widest mb-8">${isNational ? 'Национальное голосование участников' : 'Public Voting | August 2026'}</div>
                 <div class="w-full max-w-md bg-[#16070b]/90 border border-amber-500/20 p-8 rounded-2xl">
                     <h2 class="text-lg font-bold text-white uppercase tracking-wider mb-2">${isNational ? 'Голосование жителей стран' : 'Голосование зрителей'}</h2>
-                    <p class="text-xs text-slate-300 font-medium mb-8 leading-relaxed">Вам доступно 10 голосов. Распределите их между номерами (до 5 голосов одному выступлению).</p>
-                    <button onclick="navigateToVotingSubPage('recap')" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition shadow-lg rounded-xl">Начать голосование</button>
+                    <p class="text-xs text-slate-300 font-medium mb-6 leading-relaxed">Вам доступно 10 голосов. Распределите их между номерами (до 5 голосов одному выступлению).</p>
+                    
+                    ${!currentAuthUser ? `
+                        <div class="mb-5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-left">
+                            <div class="text-xs font-bold text-amber-300 mb-0.5">Требуется вход в аккаунт</div>
+                            <div class="text-[11px] text-slate-300">Для артистов действует запрет голосования за свой номер. Для зрителей доступна быстрая регистрация.</div>
+                        </div>
+                    ` : (currentAuthUser.role === 'artist' ? `
+                        <div class="mb-5 p-3 rounded-xl bg-amber-500/15 border border-amber-500/35 text-left flex items-center justify-between">
+                            <div>
+                                <div class="text-xs font-black text-amber-300 uppercase">🎤 ${currentAuthUser.displayName}</div>
+                                <div class="text-[10px] text-amber-400/90 font-medium">Аккаунт Артиста: свой номер будет заблокирован</div>
+                            </div>
+                            <button onclick="handleLogout()" class="text-[10px] text-slate-400 hover:text-rose-400 uppercase font-bold transition">Сменить</button>
+                        </div>
+                    ` : `
+                        <div class="mb-5 p-3 rounded-xl bg-[#0a0305] border border-amber-500/20 text-left flex items-center justify-between">
+                            <div>
+                                <div class="text-xs font-bold text-white uppercase">👤 ${currentAuthUser.displayName}</div>
+                                <div class="text-[10px] text-slate-400">Аккаунт Зрителя: доступны все номера</div>
+                            </div>
+                            <button onclick="handleLogout()" class="text-[10px] text-slate-400 hover:text-rose-400 uppercase font-bold transition">Сменить</button>
+                        </div>
+                    `)}
+
+                    <button onclick="${currentAuthUser ? `navigateToVotingSubPage('recap')` : `openAuthModal('voting')`}" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition shadow-lg rounded-xl cursor-pointer">
+                        ${currentAuthUser ? 'Начать голосование' : 'Войти и начать голосование'}
+                    </button>
                 </div>
             </div>
         `;
@@ -1015,7 +1337,7 @@ function renderVotingCard() {
                     <iframe class="w-full h-full" src="${recapUrl}" frameborder="0" allow="clipboard-write; autoplay" webkitAllowFullScreen mozallowfullscreen allowfullscreen></iframe>
                 </div>
                 <div class="flex flex-col md:flex-row gap-4 pt-2">
-                    <button onclick="navigateToVotingSubPage('voting')" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition shadow-lg rounded-xl">
+                    <button onclick="${currentAuthUser ? `navigateToVotingSubPage('voting')` : `openAuthModal('voting')`}" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition shadow-lg rounded-xl cursor-pointer">
                         Перейти к голосованию &rarr;
                     </button>
                 </div>
@@ -1044,10 +1366,17 @@ function renderVotingCard() {
             return;
         }
 
-        const blockedIds = (isNational && selectedRepresentative) ? (COUNTRY_RESTRICTIONS[selectedRepresentative]?.blockedIds || []) : [];
+        const participants = participantsData || DEFAULT_PARTICIPANTS;
+        let blockedIds = [];
+
+        if (isNational && selectedRepresentative) {
+            blockedIds = COUNTRY_RESTRICTIONS[selectedRepresentative]?.blockedIds || [];
+        } else if (currentAuthUser && currentAuthUser.role === 'artist') {
+            blockedIds = currentAuthUser.blockedParticipantIds || calculateBlockedIdsForArtist(currentAuthUser.artistData, participants);
+        }
+
         const usedVotes = getUsedVotesCount();
         const remainingVotes = TOTAL_USER_VOTES - usedVotes;
-        const participants = participantsData || DEFAULT_PARTICIPANTS;
 
         card.innerHTML = `
             <div class="flex flex-col gap-5 page-fade">
@@ -1067,11 +1396,38 @@ function renderVotingCard() {
                         <span>Страна: <strong>${selectedRepresentative}</strong></span>
                         <button onclick="selectRepresentative(null)" class="text-[10px] uppercase font-bold text-amber-400 hover:underline">Сменить</button>
                     </div>
-                ` : ''}
+                ` : (currentAuthUser ? (currentAuthUser.role === 'artist' ? `
+                    <div class="flex items-center justify-between bg-amber-500/15 border border-amber-500/35 p-3 rounded-xl">
+                        <div class="flex items-center gap-2">
+                            <span class="text-base">🎤</span>
+                            <div>
+                                <div class="text-xs font-black text-amber-300 uppercase">${currentAuthUser.displayName} <span class="text-[9px] bg-amber-500 text-slate-950 font-black px-1.5 py-0.2 rounded uppercase ml-1">Артист</span></div>
+                                <div class="text-[10px] text-amber-400/90">Ваш номер отмечен значком 🚫 и заблокирован</div>
+                            </div>
+                        </div>
+                        <button onclick="handleLogout()" class="text-[10px] uppercase font-bold text-slate-400 hover:text-rose-400 transition">Сменить</button>
+                    </div>
+                ` : `
+                    <div class="flex items-center justify-between bg-[#16070b] border border-amber-500/20 p-3 rounded-xl">
+                        <div class="flex items-center gap-2">
+                            <span class="text-base">👤</span>
+                            <div>
+                                <div class="text-xs font-bold text-white uppercase">${currentAuthUser.displayName} <span class="text-[9px] bg-slate-800 text-slate-300 font-bold px-1.5 py-0.2 rounded uppercase ml-1">Зритель</span></div>
+                                <div class="text-[10px] text-slate-400">Доступно голосование за любые номера</div>
+                            </div>
+                        </div>
+                        <button onclick="handleLogout()" class="text-[10px] uppercase font-bold text-slate-400 hover:text-rose-400 transition">Сменить</button>
+                    </div>
+                `) : `
+                    <div class="flex items-center justify-between bg-amber-500/10 border border-amber-500/25 p-3 text-xs text-amber-200 rounded-xl">
+                        <span>Для отправки голоса необходимо авторизоваться</span>
+                        <button onclick="openAuthModal('voting')" class="text-xs uppercase font-black text-slate-950 bg-amber-500 px-3 py-1 rounded-lg hover:bg-amber-400 transition shadow">Войти</button>
+                    </div>
+                `)}
 
                 <div class="bg-[#16070b] border border-amber-500/20 p-3.5 rounded-xl">
                     <label class="block text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1.5">Ваше имя / Псевдоним</label>
-                    <input type="text" id="voter-name-input" value="${userName}" oninput="updateUserName(this.value)" placeholder="Введите ваше имя..." class="w-full bg-[#0a0305] border border-amber-500/20 px-3.5 py-2 text-xs text-white focus:outline-none focus:border-amber-400 rounded-lg" />
+                    <input type="text" id="voter-name-input" value="${currentAuthUser ? currentAuthUser.displayName : userName}" oninput="updateUserName(this.value)" placeholder="Введите ваше имя..." class="w-full bg-[#0a0305] border border-amber-500/20 px-3.5 py-2 text-xs text-white focus:outline-none focus:border-amber-400 rounded-lg" />
                 </div>
 
                 <div class="bg-[#16070b] border border-amber-500/20 p-3.5 rounded-xl flex items-center justify-between">
@@ -1084,13 +1440,32 @@ function renderVotingCard() {
 
                 <div class="space-y-2 max-h-[290px] overflow-y-auto pr-1">
                     ${participants.map((p, idx) => {
-                        if (blockedIds.includes(p.id)) return '';
+                        const isBlocked = blockedIds.includes(p.id);
+                        const displayNumber = p.number || (idx + 1);
+                        const displayName = p.name || `Number ${displayNumber}`;
+
+                        if (isBlocked) {
+                            return `
+                                <div id="vote-row-${p.id}" class="flex items-center justify-between bg-[#120408]/80 border border-rose-500/25 p-3 rounded-xl opacity-75">
+                                    <div class="flex items-center gap-3 truncate min-w-0 pr-2">
+                                        <span class="text-xs font-mono font-bold text-slate-500 px-2 py-0.5 bg-slate-900 rounded border border-slate-800">#${displayNumber}</span>
+                                        ${p.flag ? `<span class="text-base opacity-70">${p.flag}</span>` : ''}
+                                        <div class="truncate">
+                                            <div class="text-sm font-bold text-slate-300 truncate">${displayName}</div>
+                                            ${p.song ? `<div class="text-[11px] text-slate-400 italic truncate">«${p.song}» ${p.artist ? '— ' + p.artist : ''}</div>` : ''}
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex items-center gap-2 shrink-0">
+                                        <span class="text-[10px] font-bold text-rose-300 bg-rose-950/70 border border-rose-500/30 px-2.5 py-1 rounded-lg">🚫 Свой номер</span>
+                                    </div>
+                                </div>
+                            `;
+                        }
 
                         const count = userAllocations[p.id] || 0;
                         const canAdd = remainingVotes > 0 && count < MAX_VOTES_PER_PARTICIPANT;
                         const canSub = count > 0;
-                        const displayNumber = p.number || (idx + 1);
-                        const displayName = p.name || `Number ${displayNumber}`;
 
                         return `
                             <div id="vote-row-${p.id}" class="flex items-center justify-between bg-[#16070b] border ${count > 0 ? 'border-amber-500/40 bg-amber-500/5' : 'border-amber-500/15'} p-3 rounded-xl transition">
@@ -1114,7 +1489,7 @@ function renderVotingCard() {
                 </div>
 
                 <div class="pt-2 border-t border-amber-500/15">
-                    <button id="submit-vote-btn" onclick="submitVote()" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-3.5 transition shadow-lg rounded-xl">
+                    <button id="submit-vote-btn" onclick="submitVote()" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-3.5 transition shadow-lg rounded-xl cursor-pointer">
                         Отправить ${usedVotes} ${usedVotes === 1 ? 'голос' : (usedVotes < 5 ? 'голоса' : 'голосов')}
                     </button>
                 </div>

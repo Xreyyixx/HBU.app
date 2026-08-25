@@ -351,7 +351,8 @@ function renderAdminParticipants() {
                 
                 <h3 class="text-sm font-bold text-white uppercase truncate">${p.name || `Number ${p.number}`}</h3>
                 <div class="text-xs text-amber-300 font-medium truncate">${p.country || 'Без страны'} • ${p.artist || 'Артист не указан'}</div>
-                <div class="text-[11px] text-slate-400 italic truncate mb-2">«${p.song || 'Песня не указана'}»</div>
+                <div class="text-[11px] text-slate-400 italic truncate mb-1">«${p.song || 'Песня не указана'}»</div>
+                ${p.artistLogin ? `<div class="text-[9px] text-amber-400/90 font-mono bg-[#0a0305] px-2 py-0.5 rounded border border-amber-500/20 truncate">🔑 Логин: ${p.artistLogin}</div>` : ''}
             </div>
 
             <div class="pt-3 border-t border-amber-500/15 flex items-center justify-between gap-2 mt-2">
@@ -383,6 +384,7 @@ window.openParticipantEditorModal = function(participantId) {
             document.getElementById('participant-input-flag').value = p.flag || '';
             document.getElementById('participant-input-artist').value = p.artist || '';
             document.getElementById('participant-input-song').value = p.song || '';
+            document.getElementById('participant-input-artist-login').value = p.artistLogin || p.linkedArtistLogin || '';
             document.getElementById('participant-input-video').value = p.videoUrl || '';
             document.getElementById('participant-input-postcard').value = p.postcard || '';
         }
@@ -392,6 +394,7 @@ window.openParticipantEditorModal = function(participantId) {
         document.getElementById('participant-edit-id').value = '';
         document.getElementById('participant-input-number').value = nextNum;
         document.getElementById('participant-input-name').value = `Number ${nextNum}`;
+        document.getElementById('participant-input-artist-login').value = '';
     }
 
     modal.classList.remove('hidden');
@@ -410,6 +413,7 @@ document.getElementById('participant-form').addEventListener('submit', async (e)
     const flag = document.getElementById('participant-input-flag').value.trim() || '🏳️';
     const artist = document.getElementById('participant-input-artist').value.trim();
     const song = document.getElementById('participant-input-song').value.trim();
+    const artistLogin = document.getElementById('participant-input-artist-login').value.trim();
     const videoUrl = document.getElementById('participant-input-video').value.trim();
     const postcard = document.getElementById('participant-input-postcard').value.trim();
 
@@ -421,6 +425,7 @@ document.getElementById('participant-form').addEventListener('submit', async (e)
         flag,
         artist: artist || '',
         song: song || '',
+        artistLogin: artistLogin || '',
         videoUrl: videoUrl || `videos/thank_you_${id || 'p' + number}.mp4`,
         postcard
     };
