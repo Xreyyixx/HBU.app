@@ -1,7 +1,7 @@
 // Firebase Web SDK v10 (Modular)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { getAuth } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 // Insert your real Firebase project configuration here
 const firebaseConfig = {
@@ -16,6 +16,18 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
+
+// Анонимная авторизация для обычных зрителей и PWA ярлыков
+export async function ensureFirebaseAuth() {
+    try {
+        if (!auth.currentUser) {
+            await signInAnonymously(auth);
+        }
+    } catch (e) {
+        console.warn('Anonymous auth note:', e);
+    }
+}
+ensureFirebaseAuth();
 
 export const TOTAL_USER_VOTES = 10;
 export const MAX_VOTES_PER_PARTICIPANT = 5;

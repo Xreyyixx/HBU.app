@@ -14,6 +14,7 @@ import {
     saveRecapVideoUrl,
     saveFeaturedBanner,
     syncAllToFirestore,
+    fetchFirestoreStateDirectly,
     loginAdminServer,
     verifyAdminSession,
     deleteVote, 
@@ -81,9 +82,9 @@ function setAdminAuthenticated(authenticated) {
 onAuthStateChanged(auth, async (user) => {
     if (user) {
         setAdminAuthenticated(true);
-        // Фоновая синхронизация с облаком при входе
+        // Загрузка свежего состояния из облака при входе
         try {
-            await syncAllToFirestore();
+            await fetchFirestoreStateDirectly();
         } catch (e) {}
     } else {
         setAdminAuthenticated(false);

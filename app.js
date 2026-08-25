@@ -1178,7 +1178,7 @@ subscribeState((state) => {
     // Проверяем, изменился ли контент (новости, конкурсы, баннер, участники)
     const currentContentHash = JSON.stringify({
         contests: contestsData,
-        news: (newsData || []).map(n => ({ id: n.id, title: n.title, date: n.date, likes: n.likes, fire: n.fire, hearts: n.hearts })),
+        news: newsData,
         participants: participantsData,
         recapUrl: systemState.recapVideoUrl,
         featuredId: systemState.featuredContestId,

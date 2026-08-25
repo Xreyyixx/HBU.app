@@ -161,11 +161,11 @@ export async function fetchFirestoreStateDirectly() {
         // 4. News Collection
         try {
             const newsSnap = await getDocs(collection(db, "news"));
-            if (!newsSnap.empty) {
-                const newsItems = [];
-                newsSnap.forEach(d => {
-                    newsItems.push({ id: d.id, ...d.data() });
-                });
+            const newsItems = [];
+            newsSnap.forEach(d => {
+                newsItems.push({ id: d.id, ...d.data() });
+            });
+            if (newsItems.length > 0 || newsSnap.size === 0) {
                 if (JSON.stringify(currentState.news) !== JSON.stringify(newsItems)) {
                     currentState.news = newsItems;
                     stateChanged = true;
@@ -176,11 +176,11 @@ export async function fetchFirestoreStateDirectly() {
         // 5. Contests Collection
         try {
             const contestSnap = await getDocs(collection(db, "contests"));
-            if (!contestSnap.empty) {
-                const contestItems = [];
-                contestSnap.forEach(d => {
-                    contestItems.push({ id: d.id, ...d.data() });
-                });
+            const contestItems = [];
+            contestSnap.forEach(d => {
+                contestItems.push({ id: d.id, ...d.data() });
+            });
+            if (contestItems.length > 0 || contestSnap.size === 0) {
                 if (JSON.stringify(currentState.contests) !== JSON.stringify(contestItems)) {
                     currentState.contests = contestItems;
                     stateChanged = true;
@@ -322,28 +322,24 @@ function initFirestoreListeners() {
     // D. News Real-time Listener (Cross-device news sync)
     try {
         onSnapshot(collection(db, "news"), (snap) => {
-            if (!snap.empty) {
-                const newsItems = [];
-                snap.forEach(d => {
-                    newsItems.push({ id: d.id, ...d.data() });
-                });
-                currentState.news = newsItems;
-                notifyStateChanged(false);
-            }
+            const newsItems = [];
+            snap.forEach(d => {
+                newsItems.push({ id: d.id, ...d.data() });
+            });
+            currentState.news = newsItems;
+            notifyStateChanged(false);
         }, (err) => console.warn('Firestore news error:', err));
     } catch (e) {}
 
     // E. Contests Real-time Listener (Cross-device contests sync)
     try {
         onSnapshot(collection(db, "contests"), (snap) => {
-            if (!snap.empty) {
-                const contestItems = [];
-                snap.forEach(d => {
-                    contestItems.push({ id: d.id, ...d.data() });
-                });
-                currentState.contests = contestItems;
-                notifyStateChanged(false);
-            }
+            const contestItems = [];
+            snap.forEach(d => {
+                contestItems.push({ id: d.id, ...d.data() });
+            });
+            currentState.contests = contestItems;
+            notifyStateChanged(false);
         }, (err) => console.warn('Firestore contests error:', err));
     } catch (e) {}
 
