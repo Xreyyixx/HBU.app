@@ -1126,6 +1126,8 @@ function renderVotingCard() {
 // -------------------------------------------------------------
 // ИНИЦИАЛИЗАЦИЯ И ПОДПИСКА НА СОСТОЯНИЕ (БЕЗ МЕРЦАНИЯ)
 // -------------------------------------------------------------
+let lastRenderedContentHash = '';
+
 subscribeState((state) => {
     const prevStatus = systemState.status;
     const prevSession = systemState.sessionId;
@@ -1173,13 +1175,25 @@ subscribeState((state) => {
         }
     }
 
-    // Обновляем отображение при изменении новостей, конкурсов, участников или баннеров
-    if (currentPortalView === 'voting') {
-        if (prevStatus !== systemState.status || prevSession !== systemState.sessionId) {
-            renderVotingCard();
+    // Проверяем, изменился ли контент (новости, конкурсы, баннер, участники)
+    const currentContentHash = JSON.stringify({
+        contests: contestsData,
+        news: (newsData || []).map(n => ({ id: n.id, title: n.title, date: n.date, likes: n.likes, fire: n.fire, hearts: n.hearts })),
+        participants: participantsData,
+        recapUrl: systemState.recapVideoUrl,
+        featuredId: systemState.featuredContestId,
+        voteStatus: systemState.status
+    });
+
+    if (currentContentHash !== lastRenderedContentHash) {
+        lastRenderedContentHash = currentContentHash;
+        if (currentPortalView === 'voting') {
+            if (prevStatus !== systemState.status || prevSession !== systemState.sessionId) {
+                renderVotingCard();
+            }
+        } else {
+            renderMainView();
         }
-    } else {
-        renderMainView();
     }
 });
 

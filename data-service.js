@@ -1,5 +1,5 @@
 import { db, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS } from './config.js';
-import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // Локальное кэширование
 const LOCAL_STORAGE_STATE_KEY = 'harivision_cached_state';
@@ -90,11 +90,135 @@ function notifyStateChanged(force = false) {
 // -------------------------------------------------------------
 let sseSource = null;
 
+let isDirectSyncRunning = false;
+
+export async function fetchFirestoreStateDirectly() {
+    if (!db || isDirectSyncRunning) return;
+    isDirectSyncRunning = true;
+    try {
+        let stateChanged = false;
+
+        // 1. Settings (Banner, recap URL, threshold, reveal)
+        try {
+            const settingsSnap = await getDoc(doc(db, "system", "settings"));
+            if (settingsSnap.exists()) {
+                const data = settingsSnap.data();
+                if (data.recapVideoUrl !== undefined && currentState.recapVideoUrl !== data.recapVideoUrl) {
+                    currentState.recapVideoUrl = data.recapVideoUrl;
+                    stateChanged = true;
+                }
+                if (data.featuredContestId !== undefined && currentState.featuredContestId !== data.featuredContestId) {
+                    currentState.featuredContestId = data.featuredContestId;
+                    stateChanged = true;
+                }
+                if (data.manualThreshold !== undefined && currentState.manualThreshold !== data.manualThreshold) {
+                    currentState.manualThreshold = data.manualThreshold;
+                    stateChanged = true;
+                }
+                if (data.revealMode !== undefined && currentState.revealMode !== data.revealMode) {
+                    currentState.revealMode = data.revealMode;
+                    stateChanged = true;
+                }
+            }
+        } catch (e) {}
+
+        // 2. Voting State
+        try {
+            const votingSnap = await getDoc(doc(db, "system", "voting_state"));
+            if (votingSnap.exists()) {
+                const fsState = votingSnap.data();
+                const endsAtVal = fsState.endsAt ? (fsState.endsAt.toDate ? fsState.endsAt.toDate().toISOString() : fsState.endsAt) : null;
+                if (
+                    currentState.votingState.status !== fsState.status ||
+                    currentState.votingState.endsAt !== endsAtVal ||
+                    currentState.votingState.sessionId !== fsState.sessionId
+                ) {
+                    currentState.votingState = {
+                        ...currentState.votingState,
+                        status: fsState.status || currentState.votingState.status,
+                        endsAt: endsAtVal,
+                        sessionId: fsState.sessionId || currentState.votingState.sessionId
+                    };
+                    stateChanged = true;
+                }
+            }
+        } catch (e) {}
+
+        // 3. Participants
+        try {
+            const partSnap = await getDoc(doc(db, "system", "participants"));
+            if (partSnap.exists()) {
+                const pData = partSnap.data();
+                if (pData && Array.isArray(pData.list) && pData.list.length > 0) {
+                    if (JSON.stringify(currentState.participants) !== JSON.stringify(pData.list)) {
+                        currentState.participants = pData.list;
+                        stateChanged = true;
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // 4. News Collection
+        try {
+            const newsSnap = await getDocs(collection(db, "news"));
+            if (!newsSnap.empty) {
+                const newsItems = [];
+                newsSnap.forEach(d => {
+                    newsItems.push({ id: d.id, ...d.data() });
+                });
+                if (JSON.stringify(currentState.news) !== JSON.stringify(newsItems)) {
+                    currentState.news = newsItems;
+                    stateChanged = true;
+                }
+            }
+        } catch (e) {}
+
+        // 5. Contests Collection
+        try {
+            const contestSnap = await getDocs(collection(db, "contests"));
+            if (!contestSnap.empty) {
+                const contestItems = [];
+                contestSnap.forEach(d => {
+                    contestItems.push({ id: d.id, ...d.data() });
+                });
+                if (JSON.stringify(currentState.contests) !== JSON.stringify(contestItems)) {
+                    currentState.contests = contestItems;
+                    stateChanged = true;
+                }
+            }
+        } catch (e) {}
+
+        // 6. Votes Collection
+        try {
+            const votesSnap = await getDocs(collection(db, "votes"));
+            const votesList = [];
+            votesSnap.forEach(d => {
+                votesList.push({ id: d.id, ...d.data() });
+            });
+            if (JSON.stringify(currentState.votes) !== JSON.stringify(votesList)) {
+                currentState.votes = votesList;
+                stateChanged = true;
+            }
+        } catch (e) {}
+
+        if (stateChanged) {
+            notifyStateChanged(false);
+        }
+    } catch (err) {
+        console.warn('Direct Firestore fetch error:', err);
+    } finally {
+        isDirectSyncRunning = false;
+    }
+}
+
 function initRealtimeSync() {
-    // 1. Initial REST Fetch (if backend server is available)
+    // 1. Initial REST Fetch
     fetchState(true);
 
-    // 2. Server-Sent Events for local development
+    // 2. Immediate Direct Firestore pull
+    fetchFirestoreStateDirectly();
+
+    // 3. Server-Sent Events for local development
     if (typeof EventSource !== 'undefined') {
         try {
             sseSource = new EventSource('/api/events');
@@ -105,22 +229,29 @@ function initRealtimeSync() {
                         currentState = { ...currentState, ...parsed.data };
                         notifyStateChanged(false);
                     }
-                } catch (err) {
-                    // Ignore keepalive comments/pings
-                }
+                } catch (err) {}
             };
-            sseSource.onerror = () => {
-                // Reconnect happens automatically
-            };
-        } catch (e) {
-            console.warn('SSE initialization failed:', e);
-        }
+        } catch (e) {}
     }
 
-    // 3. Periodic fallback check
-    setInterval(() => fetchState(false), 15000);
+    // 4. Instant refresh on PWA focus / resume / visibility change (when returning to app)
+    if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                fetchFirestoreStateDirectly();
+                fetchState(false);
+            }
+        });
+        window.addEventListener('focus', () => {
+            fetchFirestoreStateDirectly();
+            fetchState(false);
+        });
+        window.addEventListener('online', () => {
+            fetchFirestoreStateDirectly();
+        });
+    }
 
-    // 4. Firestore Real-time Listeners (Works across all devices worldwide)
+    // 5. Firestore Real-time Snapshot Listeners (push updates automatically without polling)
     initFirestoreListeners();
 }
 
