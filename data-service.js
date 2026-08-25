@@ -347,8 +347,23 @@ export async function fetchFirestoreStateDirectly() {
             }
         } catch (e) {}
 
+        // 7. Artists Collection
+        try {
+            const artistsSnap = await getDocs(collection(db, "artists"));
+            const artistsList = [];
+            artistsSnap.forEach(d => {
+                const cleaned = sanitizeFirestoreData(d.data());
+                artistsList.push({ id: d.id, ...(cleaned || {}) });
+            });
+            if (safeJsonStringify(currentState.artists) !== safeJsonStringify(artistsList)) {
+                currentState.artists = artistsList;
+                stateChanged = true;
+            }
+        } catch (e) {}
+
         if (stateChanged) {
             notifyStateChanged(false);
+            syncCurrentUserArtistStatus();
         }
     } catch (err) {
         console.warn('Direct Firestore fetch error:', err);
@@ -461,6 +476,7 @@ function initFirestoreListeners() {
                 if (data && Array.isArray(data.list) && data.list.length > 0) {
                     currentState.participants = data.list;
                     notifyStateChanged(false);
+                    syncCurrentUserArtistStatus();
                 }
             }
         }, (err) => console.warn('Firestore participants error:', err));
@@ -489,6 +505,7 @@ function initFirestoreListeners() {
                 if (data && Array.isArray(data.list) && data.list.length > 0) {
                     currentState.contests = data.list;
                     notifyStateChanged(false);
+                    syncCurrentUserArtistStatus();
                 }
             }
         }, (err) => console.warn('Firestore system/contests error:', err));
@@ -503,11 +520,9 @@ function initFirestoreListeners() {
                     contestItems.push({ id: d.id, ...(cleaned || {}) });
                 });
                 if (contestItems.length > 0) {
-                    const mergedMap = new Map();
-                    (currentState.contests || []).forEach(c => mergedMap.set(c.id, c));
-                    contestItems.forEach(c => mergedMap.set(c.id, { ...(mergedMap.get(c.id) || {}), ...c }));
-                    currentState.contests = Array.from(mergedMap.values());
+                    currentState.contests = contestItems;
                     notifyStateChanged(false);
+                    syncCurrentUserArtistStatus();
                 }
             }
         }, (err) => console.warn('Firestore contests error:', err));
@@ -524,6 +539,19 @@ function initFirestoreListeners() {
             currentState.votes = votesList;
             notifyStateChanged(false);
         }, () => {});
+    } catch (e) {}
+
+    // G. Artists Real-time Listener (Cross-device artist detection & updates)
+    try {
+        onSnapshot(collection(db, "artists"), (snap) => {
+            const artistsList = [];
+            snap.forEach(d => {
+                const cleaned = sanitizeFirestoreData(d.data());
+                artistsList.push({ id: d.id, ...(cleaned || {}) });
+            });
+            currentState.artists = artistsList;
+            syncCurrentUserArtistStatus();
+        }, (err) => console.warn('Firestore artists error:', err));
     } catch (e) {}
 }
 
@@ -975,44 +1003,44 @@ export function getCurrentAuthUser() {
 
 // Таблица синонимов стран для точного и нечувствительного к языку сопоставления
 const COUNTRY_SYNONYMS = {
-    'austria': ['австрия', 'austria', 'aut', 'at'],
-    'австрия': ['австрия', 'austria', 'aut', 'at'],
-    'sweden': ['швеция', 'sweden', 'swe', 'se'],
-    'швеция': ['швеция', 'sweden', 'swe', 'se'],
-    'finland': ['финляндия', 'finland', 'fin', 'fi'],
-    'финляндия': ['финляндия', 'finland', 'fin', 'fi'],
-    'norway': ['норвегия', 'norway', 'nor', 'no'],
-    'норвегия': ['норвегия', 'norway', 'nor', 'no'],
-    'spain': ['испания', 'spain', 'esp', 'es'],
-    'испания': ['испания', 'spain', 'esp', 'es'],
-    'italy': ['италия', 'italy', 'ita', 'it'],
-    'италия': ['италия', 'italy', 'ita', 'it'],
+    'austria': ['австрия', 'austria', 'aut', 'at', 'österreich', 'osterreich'],
+    'австрия': ['австрия', 'austria', 'aut', 'at', 'österreich', 'osterreich'],
+    'sweden': ['швеция', 'sweden', 'swe', 'se', 'sverige'],
+    'швеция': ['швеция', 'sweden', 'swe', 'se', 'sverige'],
+    'finland': ['финляндия', 'finland', 'fin', 'fi', 'suomi'],
+    'финляндия': ['финляндия', 'finland', 'fin', 'fi', 'suomi'],
+    'norway': ['норвегия', 'norway', 'nor', 'no', 'norge'],
+    'норвегия': ['норвегия', 'norway', 'nor', 'no', 'norge'],
+    'spain': ['испания', 'spain', 'esp', 'es', 'españa', 'espana'],
+    'испания': ['испания', 'spain', 'esp', 'es', 'españa', 'espana'],
+    'italy': ['италия', 'italy', 'ita', 'it', 'italia'],
+    'италия': ['италия', 'italy', 'ita', 'it', 'italia'],
     'france': ['франция', 'france', 'fra', 'fr'],
     'франция': ['франция', 'france', 'fra', 'fr'],
-    'germany': ['германия', 'germany', 'ger', 'deu', 'de'],
-    'германия': ['германия', 'germany', 'ger', 'deu', 'de'],
-    'poland': ['польша', 'poland', 'pol', 'pl'],
-    'польша': ['польша', 'poland', 'pol', 'pl'],
-    'uk': ['великобритания', 'united kingdom', 'uk', 'gbr', 'gb', 'англия'],
-    'великобритания': ['великобритания', 'united kingdom', 'uk', 'gbr', 'gb', 'англия'],
+    'germany': ['германия', 'germany', 'ger', 'deu', 'de', 'deutschland', 'дойчланд'],
+    'германия': ['германия', 'germany', 'ger', 'deu', 'de', 'deutschland', 'дойчланд'],
+    'poland': ['польша', 'poland', 'pol', 'pl', 'polska'],
+    'польша': ['польша', 'poland', 'pol', 'pl', 'polska'],
+    'uk': ['великобритания', 'united kingdom', 'uk', 'gbr', 'gb', 'англия', 'england', 'британия', 'britain'],
+    'великобритания': ['великобритания', 'united kingdom', 'uk', 'gbr', 'gb', 'англия', 'england', 'британия', 'britain'],
     'israel': ['израиль', 'israel', 'isr', 'il'],
     'израиль': ['израиль', 'israel', 'isr', 'il'],
-    'ukraine': ['украина', 'ukraine', 'ukr', 'ua'],
-    'украина': ['украина', 'ukraine', 'ukr', 'ua'],
-    'netherlands': ['нидерланды', 'netherlands', 'ned', 'nl', 'голландия'],
-    'нидерланды': ['нидерланды', 'netherlands', 'ned', 'nl', 'голландия'],
-    'switzerland': ['швейцария', 'switzerland', 'sui', 'ch'],
-    'швейцария': ['швейцария', 'switzerland', 'sui', 'ch'],
-    'croatia': ['хорватия', 'croatia', 'cro', 'hr'],
-    'хорватия': ['хорватия', 'croatia', 'cro', 'hr'],
-    'greece': ['греция', 'greece', 'gre', 'gr'],
-    'греция': ['греция', 'greece', 'gre', 'gr'],
-    'estonia': ['эстония', 'estonia', 'est', 'ee'],
-    'эстония': ['эстония', 'estonia', 'est', 'ee'],
-    'lithuania': ['литва', 'lithuania', 'ltu', 'lt'],
-    'литва': ['литва', 'lithuania', 'ltu', 'lt'],
-    'latvia': ['латвия', 'latvia', 'lat', 'lv'],
-    'латвия': ['латвия', 'latvia', 'lat', 'lv'],
+    'ukraine': ['украина', 'ukraine', 'ukr', 'ua', 'україна'],
+    'украина': ['украина', 'ukraine', 'ukr', 'ua', 'україна'],
+    'netherlands': ['нидерланды', 'netherlands', 'ned', 'nl', 'голландия', 'holland', 'nederland'],
+    'нидерланды': ['нидерланды', 'netherlands', 'ned', 'nl', 'голландия', 'holland', 'nederland'],
+    'switzerland': ['швейцария', 'switzerland', 'sui', 'ch', 'schweiz', 'suisse'],
+    'швейцария': ['швейцария', 'switzerland', 'sui', 'ch', 'schweiz', 'suisse'],
+    'croatia': ['хорватия', 'croatia', 'cro', 'hr', 'hrvatska'],
+    'хорватия': ['хорватия', 'croatia', 'cro', 'hr', 'hrvatska'],
+    'greece': ['греция', 'greece', 'gre', 'gr', 'hellas'],
+    'греция': ['греция', 'greece', 'gre', 'gr', 'hellas'],
+    'estonia': ['эстония', 'estonia', 'est', 'ee', 'eesti'],
+    'эстония': ['эстония', 'estonia', 'est', 'ee', 'eesti'],
+    'lithuania': ['литва', 'lithuania', 'ltu', 'lt', 'lietuva'],
+    'литва': ['литва', 'lithuania', 'ltu', 'lt', 'lietuva'],
+    'latvia': ['латвия', 'latvia', 'lat', 'lv', 'latvija'],
+    'латвия': ['латвия', 'latvia', 'lat', 'lv', 'latvija'],
     'portugal': ['португалия', 'portugal', 'por', 'pt'],
     'португалия': ['португалия', 'portugal', 'por', 'pt'],
     'cyprus': ['кипр', 'cyprus', 'cyp', 'cy'],
@@ -1023,161 +1051,212 @@ const COUNTRY_SYNONYMS = {
     'грузия': ['грузия', 'georgia', 'geo', 'ge'],
     'azerbaijan': ['азербайджан', 'azerbaijan', 'aze', 'az'],
     'азербайджан': ['азербайджан', 'azerbaijan', 'aze', 'az'],
-    'belgium': ['бельгия', 'belgium', 'bel', 'be'],
-    'бельгия': ['бельгия', 'belgium', 'bel', 'be'],
-    'denmark': ['дания', 'denmark', 'den', 'dk'],
-    'дания': ['дания', 'denmark', 'den', 'dk'],
-    'iceland': ['исландия', 'iceland', 'isl', 'is'],
-    'исландия': ['исландия', 'iceland', 'isl', 'is'],
+    'belgium': ['бельгия', 'belgium', 'bel', 'be', 'belgique'],
+    'бельгия': ['бельгия', 'belgium', 'bel', 'be', 'belgique'],
+    'denmark': ['дания', 'denmark', 'den', 'dk', 'danmark'],
+    'дания': ['дания', 'denmark', 'den', 'dk', 'danmark'],
+    'iceland': ['исландия', 'iceland', 'isl', 'is', 'island'],
+    'исландия': ['исландия', 'iceland', 'isl', 'is', 'island'],
     'ireland': ['ирландия', 'ireland', 'irl', 'ie'],
     'ирландия': ['ирландия', 'ireland', 'irl', 'ie'],
-    'serbia': ['сербия', 'serbia', 'srb', 'rs'],
-    'сербия': ['сербия', 'serbia', 'srb', 'rs'],
-    'slovenia': ['словения', 'slovenia', 'slo', 'si'],
-    'словения': ['словения', 'slovenia', 'slo', 'si'],
-    'czechia': ['чехия', 'czechia', 'czech republic', 'cze', 'cz'],
-    'чехия': ['чехия', 'czechia', 'czech republic', 'cze', 'cz'],
+    'serbia': ['сербия', 'serbia', 'srb', 'rs', 'srbija'],
+    'сербия': ['сербия', 'serbia', 'srb', 'rs', 'srbija'],
+    'slovenia': ['словения', 'slovenia', 'slo', 'si', 'slovenija'],
+    'словения': ['словения', 'slovenia', 'slo', 'si', 'slovenija'],
+    'slovakia': ['словакия', 'slovakia', 'svk', 'sk', 'slovensko'],
+    'словакия': ['словакия', 'slovakia', 'svk', 'sk', 'slovensko'],
+    'czechia': ['чехия', 'czechia', 'czech republic', 'cze', 'cz', 'cesko'],
+    'чехия': ['чехия', 'czechia', 'czech republic', 'cze', 'cz', 'cesko'],
     'sanmarino': ['сан-марино', 'сан марино', 'san marino', 'smr', 'sm'],
     'сан-марино': ['сан-марино', 'сан марино', 'san marino', 'smr', 'sm'],
     'malta': ['мальта', 'malta', 'mlt', 'mt'],
     'мальта': ['мальта', 'malta', 'mlt', 'mt'],
     'australia': ['австралия', 'australia', 'aus', 'au'],
-    'австралия': ['австралия', 'australia', 'aus', 'au']
+    'австралия': ['австралия', 'australia', 'aus', 'au'],
+    'moldova': ['молдова', 'молдавия', 'moldova', 'mda', 'md'],
+    'молдова': ['молдова', 'молдавия', 'moldova', 'mda', 'md'],
+    'albania': ['албания', 'albania', 'alb', 'al', 'shqiperia'],
+    'албания': ['албания', 'albania', 'alb', 'al', 'shqiperia'],
+    'luxembourg': ['люксембург', 'luxembourg', 'lux', 'lu'],
+    'люксембург': ['люксембург', 'luxembourg', 'lux', 'lu'],
+    'monaco': ['монако', 'monaco', 'mco', 'mc'],
+    'монако': ['монако', 'monaco', 'mco', 'mc'],
+    'montenegro': ['черногория', 'montenegro', 'mne', 'me', 'crna gora'],
+    'черногория': ['черногория', 'montenegro', 'mne', 'me', 'crna gora'],
+    'macedonia': ['македония', 'северная македония', 'north macedonia', 'macedonia', 'mkd', 'mk'],
+    'македония': ['македония', 'северная македония', 'north macedonia', 'macedonia', 'mkd', 'mk'],
+    'bulgaria': ['болгария', 'bulgaria', 'bul', 'bg'],
+    'болгария': ['болгария', 'bulgaria', 'bul', 'bg'],
+    'hungary': ['венгрия', 'hungary', 'hun', 'hu', 'magyarorszag'],
+    'венгрия': ['венгрия', 'hungary', 'hun', 'hu', 'magyarorszag'],
+    'romania': ['румыния', 'romania', 'rou', 'ro'],
+    'румыния': ['румыния', 'romania', 'rou', 'ro'],
+    'russia': ['россия', 'russia', 'rus', 'ru'],
+    'россия': ['россия', 'russia', 'rus', 'ru'],
+    'belarus': ['беларусь', 'белоруссия', 'belarus', 'blr', 'by'],
+    'беларусь': ['беларусь', 'белоруссия', 'belarus', 'blr', 'by'],
+    'turkey': ['турция', 'turkey', 'turkiye', 'türkiye', 'tur', 'tr'],
+    'турция': ['турция', 'turkey', 'turkiye', 'türkiye', 'tur', 'tr'],
+    'kazakhstan': ['казахстан', 'kazakhstan', 'kaz', 'kz'],
+    'казахстан': ['казахстан', 'kazakhstan', 'kaz', 'kz']
 };
+
+function normalizeString(s) {
+    return String(s || '')
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/[^a-zа-я0-9\s]/gi, ' ')
+        .trim();
+}
+
+function extractKeywords(str) {
+    if (!str) return [];
+    const norm = normalizeString(str);
+    const ignoreWords = new Set(['artist', 'singer', 'music', 'official', 'user', 'fan', 'team', 'app', 'gmail', 'com', 'mail', 'ru', 'yandex', 'org', 'the']);
+    return norm.split(/\s+/).filter(w => w.length >= 2 && !ignoreWords.has(w));
+}
+
+function isFuzzyMatch(str1, str2) {
+    if (!str1 || !str2) return false;
+    const n1 = normalizeString(str1);
+    const n2 = normalizeString(str2);
+    if (n1 === n2) return true;
+    if (n1.length >= 3 && n2.length >= 3) {
+        if (n1.includes(n2) || n2.includes(n1)) return true;
+    }
+    const t1 = extractKeywords(str1);
+    const t2 = extractKeywords(str2);
+    return t1.some(w => t2.includes(w));
+}
 
 function countriesMatch(c1, c2) {
     if (!c1 || !c2) return false;
-    const str1 = String(c1).trim().toLowerCase();
-    const str2 = String(c2).trim().toLowerCase();
+    const str1 = normalizeString(c1);
+    const str2 = normalizeString(c2);
     if (str1 === str2) return true;
+    if (str1.length >= 3 && (str1.includes(str2) || str2.includes(str1))) return true;
 
-    const syns1 = COUNTRY_SYNONYMS[str1] || [str1];
-    const syns2 = COUNTRY_SYNONYMS[str2] || [str2];
+    const syns1 = COUNTRY_SYNONYMS[str1] || COUNTRY_SYNONYMS[String(c1).toLowerCase().trim()] || [str1];
+    const syns2 = COUNTRY_SYNONYMS[str2] || COUNTRY_SYNONYMS[String(c2).toLowerCase().trim()] || [str2];
 
-    return syns1.some(s => syns2.includes(s) || s === str2 || str1 === s);
+    return syns1.some(s => {
+        const normS = normalizeString(s);
+        return syns2.some(s2 => {
+            const normS2 = normalizeString(s2);
+            return normS === normS2 || (normS.length >= 3 && (normS.includes(normS2) || normS2.includes(normS)));
+        });
+    });
 }
 
-// Поиск совпадений артиста по номеру, стране, названию, логину или привязанному логину
+// Поиск ВСЕХ заблокированных номеров артиста (поддерживает множественные номера/выступления одного артиста)
 export function calculateBlockedIdsForArtist(artistData, participantsList) {
     const blocked = new Set();
     const list = participantsList || currentState.participants || DEFAULT_PARTICIPANTS;
     
     if (!artistData) return [];
 
-    const artLogin = String(artistData.login || artistData.username || artistData.id || '').trim().toLowerCase();
+    const artLogin = normalizeString(artistData.login || artistData.username || artistData.artistLogin || '');
     const artEmail = String(artistData.email || '').trim().toLowerCase();
-    const artCleanEmail = artEmail.split('@')[0];
+    const artCleanEmail = normalizeString(artEmail.includes('@') ? artEmail.split('@')[0] : artEmail);
+    const artId = String(artistData.id || '').trim().toLowerCase();
+    const artName = String(artistData.name || '').trim();
+    const artArtist = String(artistData.artist || '').trim();
+    const artCountry = String(artistData.country || '').trim();
 
-    // 0. Прямая привязка логина на уровне участника из админки (p.artistLogin / p.linkedArtistLogin)
+    // 1. Прямые ID
+    if (artistData.participantId) blocked.add(String(artistData.participantId));
+    if (Array.isArray(artistData.blockedIds)) {
+        artistData.blockedIds.forEach(id => blocked.add(String(id)));
+    }
+    if (Array.isArray(artistData.blockedParticipantIds)) {
+        artistData.blockedParticipantIds.forEach(id => blocked.add(String(id)));
+    }
+
+    // 2. Номера участников (find ALL participants matching any of these numbers)
+    const numbersToCheck = [];
+    if (artistData.number !== undefined && artistData.number !== null) {
+        numbersToCheck.push(Number(artistData.number));
+    }
+    if (Array.isArray(artistData.blockedNumbers)) {
+        artistData.blockedNumbers.forEach(n => numbersToCheck.push(Number(n)));
+    }
+    numbersToCheck.forEach(targetNum => {
+        if (!isNaN(targetNum)) {
+            list.filter(x => Number(x.number) === targetNum || x.id === `p${targetNum}` || x.id === String(targetNum))
+                .forEach(p => blocked.add(p.id));
+        }
+    });
+
+    // 3. Сопоставление по ВСЕМ участникам списка (по стране, артисту, имени, логину)
     list.forEach(p => {
-        const pLogin = String(p.artistLogin || p.linkedArtistLogin || '').trim().toLowerCase();
+        const pId = String(p.id || '').trim().toLowerCase();
+        const pNum = String(p.number || '').trim();
+        const pLogin = normalizeString(p.artistLogin || p.linkedArtistLogin || '');
+        const pArtist = String(p.artist || '').trim();
+        const pName = String(p.name || '').trim();
+        const pCountry = String(p.country || '').trim();
+
+        // Проверка совпадения ID
+        if (artId && (pId === artId || artId === `p${pNum}` || artId === pNum)) {
+            blocked.add(p.id);
+        }
+
+        // Проверка логина
         if (pLogin) {
             if (
-                pLogin === artLogin || 
-                pLogin === artEmail || 
-                (artCleanEmail && pLogin === artCleanEmail) ||
-                (artLogin && artLogin.startsWith(pLogin))
+                pLogin === artLogin ||
+                pLogin === artCleanEmail ||
+                (artLogin && artLogin.includes(pLogin)) ||
+                (artCleanEmail && artCleanEmail.includes(pLogin)) ||
+                (artLogin && pLogin.includes(artLogin))
             ) {
                 blocked.add(p.id);
             }
         }
-    });
 
-    // 1. Прямые ID
-    if (artistData.participantId) blocked.add(String(artistData.participantId));
-    if (artistData.id && list.some(p => p.id === artistData.id)) {
-        blocked.add(String(artistData.id));
-    }
-    if (Array.isArray(artistData.blockedIds)) {
-        artistData.blockedIds.forEach(id => blocked.add(String(id)));
-    }
-    
-    // 2. Номера участников (number: 1..99)
-    if (artistData.number !== undefined && artistData.number !== null) {
-        const targetNum = Number(artistData.number);
-        const p = list.find(x => Number(x.number) === targetNum || x.id === `p${targetNum}`);
-        if (p) blocked.add(p.id);
-    }
-    if (Array.isArray(artistData.blockedNumbers)) {
-        artistData.blockedNumbers.forEach(n => {
-            const targetNum = Number(n);
-            const p = list.find(x => Number(x.number) === targetNum || x.id === `p${targetNum}`);
-            if (p) blocked.add(p.id);
-        });
-    }
-
-    // 3. Страна (country) с поддержкой синонимов
-    if (artistData.country) {
-        const pList = list.filter(x => countriesMatch(x.country, artistData.country));
-        pList.forEach(p => blocked.add(p.id));
-    }
-
-    // 4. Имя артиста (artist)
-    if (artistData.artist) {
-        const aLow = String(artistData.artist).trim().toLowerCase();
-        const pList = list.filter(x => {
-            const pa = String(x.artist || '').trim().toLowerCase();
-            const pn = String(x.name || '').trim().toLowerCase();
-            return (pa && (pa === aLow || pa.includes(aLow) || aLow.includes(pa))) ||
-                   (pn && (pn === aLow || pn.includes(aLow) || aLow.includes(pn)));
-        });
-        pList.forEach(p => blocked.add(p.id));
-    }
-
-    // 5. Имя участника (name)
-    if (artistData.name) {
-        const nLow = String(artistData.name).trim().toLowerCase();
-        const pList = list.filter(x => {
-            const pa = String(x.artist || '').trim().toLowerCase();
-            const pn = String(x.name || '').trim().toLowerCase();
-            return (pn && (pn === nLow || pn.includes(nLow) || nLow.includes(pn))) ||
-                   (pa && (pa === nLow || pa.includes(nLow) || nLow.includes(pa)));
-        });
-        pList.forEach(p => blocked.add(p.id));
-    }
-
-    // 6. Если doc.id сам по себе 'p1'..'p8' или '1'..'8'
-    if (artistData.id) {
-        if (/^p\d+$/i.test(artistData.id)) {
-            blocked.add(artistData.id);
-        } else if (/^\d+$/.test(artistData.id)) {
-            const p = list.find(x => Number(x.number) === Number(artistData.id) || x.id === `p${artistData.id}`);
-            if (p) blocked.add(p.id);
+        // Проверка страны со всеми синонимами
+        if (artCountry && countriesMatch(pCountry, artCountry)) {
+            blocked.add(p.id);
         }
-    }
+        if (artLogin && countriesMatch(pCountry, artLogin)) {
+            blocked.add(p.id);
+        }
+        if (artCleanEmail && countriesMatch(pCountry, artCleanEmail)) {
+            blocked.add(p.id);
+        }
 
-    // 7. Если логин совпадает со страной или артистом участника (например, логин "austria" блокирует Австрию)
-    if (artLogin || artCleanEmail) {
-        const targetLogins = [artLogin, artCleanEmail].filter(Boolean);
-        list.forEach(p => {
-            for (const t of targetLogins) {
-                if (countriesMatch(p.country, t)) {
-                    blocked.add(p.id);
-                }
-                const pa = String(p.artist || '').trim().toLowerCase();
-                const pn = String(p.name || '').trim().toLowerCase();
-                if ((pa && (pa === t || t.includes(pa))) || (pn && (pn === t || t.includes(pn)))) {
-                    blocked.add(p.id);
-                }
-            }
-        });
-    }
+        // Проверка артиста / названия
+        if (artArtist && isFuzzyMatch(pArtist, artArtist)) {
+            blocked.add(p.id);
+        }
+        if (artName && isFuzzyMatch(pName, artName)) {
+            blocked.add(p.id);
+        }
+        if (artLogin && isFuzzyMatch(pArtist, artLogin)) {
+            blocked.add(p.id);
+        }
+        if (artCleanEmail && isFuzzyMatch(pArtist, artCleanEmail)) {
+            blocked.add(p.id);
+        }
+    });
 
     return Array.from(blocked);
 }
 
 // Универсальный резолвер артиста по логину / email / участнику
-export function resolveArtistInfo(inputString, participantsList, allArtists = []) {
+export function resolveArtistInfo(inputString, participantsList, allArtists = null) {
     if (!inputString) return null;
     const raw = String(inputString).trim();
     const isEmail = raw.includes('@');
     const cleanLogin = isEmail ? raw.split('@')[0].trim().toLowerCase() : raw.toLowerCase();
     const fullRaw = raw.toLowerCase();
+    const tokens = extractKeywords(cleanLogin);
 
     const list = participantsList || currentState.participants || DEFAULT_PARTICIPANTS;
+    const artistsCollection = (allArtists && allArtists.length > 0) ? allArtists : (currentState.artists || []);
 
     // 1. Поиск в коллекции artists
-    let matchedDoc = allArtists.find(a => {
+    let matchedDoc = (artistsCollection || []).find(a => {
         const docId = String(a.id || '').trim().toLowerCase();
         const aLogin = String(a.login || a.username || '').trim().toLowerCase();
         const aEmail = String(a.email || '').trim().toLowerCase();
@@ -1191,60 +1270,76 @@ export function resolveArtistInfo(inputString, participantsList, allArtists = []
             aLogin === cleanLogin ||
             aEmail === fullRaw ||
             (aEmail && aEmail.startsWith(cleanLogin + '@')) ||
-            (aArtist && (aArtist === fullRaw || aArtist === cleanLogin)) ||
-            (aCountry && (countriesMatch(aCountry, fullRaw) || countriesMatch(aCountry, cleanLogin)))
+            (aArtist && (isFuzzyMatch(aArtist, fullRaw) || isFuzzyMatch(aArtist, cleanLogin))) ||
+            (aCountry && (countriesMatch(aCountry, fullRaw) || countriesMatch(aCountry, cleanLogin))) ||
+            tokens.some(t => countriesMatch(aCountry, t) || (aArtist && isFuzzyMatch(aArtist, t)))
         );
     });
 
-    // 2. Поиск в participants (настроенных в админке или по умолчанию)
-    let matchedParticipant = null;
-    for (const p of list) {
-        const pLogin = String(p.artistLogin || p.linkedArtistLogin || '').trim().toLowerCase();
-        const pArtist = String(p.artist || '').trim().toLowerCase();
-        const pCountry = String(p.country || '').trim().toLowerCase();
-        const pName = String(p.name || '').trim().toLowerCase();
+    // 2. Поиск ВСЕХ участников, соответствующих артисту (включая если у артиста несколько номеров)
+    const matchedParticipants = list.filter(p => {
+        const pLogin = normalizeString(p.artistLogin || p.linkedArtistLogin || '');
+        const pArtist = String(p.artist || '').trim();
+        const pCountry = String(p.country || '').trim();
+        const pName = String(p.name || '').trim();
         const pId = String(p.id || '').trim().toLowerCase();
         const pNum = String(p.number || '').trim();
 
-        if (
-            (pLogin && (pLogin === cleanLogin || pLogin === fullRaw)) ||
-            (pId && (pId === cleanLogin || pId === fullRaw)) ||
-            (pNum && (pNum === cleanLogin || pNum === fullRaw)) ||
-            countriesMatch(pCountry, cleanLogin) ||
-            countriesMatch(pCountry, fullRaw) ||
-            (pArtist && (pArtist === cleanLogin || pArtist === fullRaw)) ||
-            (pName && (pName === cleanLogin || pName === fullRaw))
-        ) {
-            matchedParticipant = p;
-            break;
+        // Точный логин или префикс email
+        if (pLogin && (pLogin === cleanLogin || pLogin === fullRaw || cleanLogin.includes(pLogin) || pLogin.includes(cleanLogin))) {
+            return true;
         }
-    }
+        // Прямой ID или номер
+        if (pId === cleanLogin || pId === fullRaw || pNum === cleanLogin || pNum === fullRaw || `p${pNum}` === cleanLogin) {
+            return true;
+        }
+        // Совпадение страны
+        if (countriesMatch(pCountry, cleanLogin) || countriesMatch(pCountry, fullRaw)) {
+            return true;
+        }
+        // Совпадение артиста / имени
+        if (pArtist && (isFuzzyMatch(pArtist, cleanLogin) || isFuzzyMatch(pArtist, fullRaw))) {
+            return true;
+        }
+        if (pName && (isFuzzyMatch(pName, cleanLogin) || isFuzzyMatch(pName, fullRaw))) {
+            return true;
+        }
+        // Совпадение по токенам (например, "artist_spain" или "singer_loreen")
+        if (tokens.length > 0) {
+            if (tokens.some(t => countriesMatch(pCountry, t) || (pArtist && isFuzzyMatch(pArtist, t)) || (pLogin && pLogin === t))) {
+                return true;
+            }
+        }
+        return false;
+    });
 
-    if (matchedDoc || matchedParticipant) {
+    if (matchedDoc || matchedParticipants.length > 0) {
+        const primaryParticipant = matchedParticipants[0] || null;
         const effectiveArtistData = {
             ...(matchedDoc || {}),
-            ...(matchedParticipant ? {
-                id: matchedDoc?.id || matchedParticipant.id,
-                number: matchedParticipant.number,
-                artist: matchedParticipant.artist || matchedParticipant.name,
-                country: matchedParticipant.country,
-                name: matchedParticipant.name,
-                artistLogin: matchedParticipant.artistLogin || cleanLogin,
-                flag: matchedParticipant.flag
+            ...(primaryParticipant ? {
+                id: matchedDoc?.id || primaryParticipant.id,
+                number: primaryParticipant.number,
+                artist: matchedDoc?.artist || primaryParticipant.artist || primaryParticipant.name,
+                country: matchedDoc?.country || primaryParticipant.country,
+                name: primaryParticipant.name,
+                artistLogin: primaryParticipant.artistLogin || cleanLogin,
+                flag: primaryParticipant.flag,
+                blockedNumbers: matchedParticipants.map(p => p.number).filter(n => n !== undefined && n !== null)
             } : {})
         };
 
-        const blockedIds = calculateBlockedIdsForArtist(effectiveArtistData, list);
-        if (matchedParticipant && !blockedIds.includes(matchedParticipant.id)) {
-            blockedIds.push(matchedParticipant.id);
-        }
+        const allBlockedIds = new Set();
+        matchedParticipants.forEach(p => allBlockedIds.add(p.id));
+        const calculatedBlocked = calculateBlockedIdsForArtist(effectiveArtistData, list);
+        calculatedBlocked.forEach(id => allBlockedIds.add(id));
 
         const displayName = effectiveArtistData.artist || effectiveArtistData.name || effectiveArtistData.country || cleanLogin;
 
         return {
             isArtist: true,
             artistData: effectiveArtistData,
-            blockedParticipantIds: blockedIds,
+            blockedParticipantIds: Array.from(allBlockedIds),
             displayName
         };
     }
