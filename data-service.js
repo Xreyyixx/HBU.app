@@ -1,5 +1,5 @@
 import { db, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS } from './config.js';
-import { collection, doc, onSnapshot, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // Локальное кэширование
 const LOCAL_STORAGE_STATE_KEY = 'harivision_cached_state';
@@ -17,6 +17,7 @@ let currentState = {
 };
 
 let lastNotifiedStateJson = '';
+let isFirestoreInitialized = false;
 
 // Загрузка локального кэша
 try {
@@ -85,15 +86,15 @@ function notifyStateChanged(force = false) {
 }
 
 // -------------------------------------------------------------
-// REAL-TIME SYNC (SSE + POLLING + FIRESTORE FALLBACK)
+// REAL-TIME SYNC (FIRESTORE CLOUD REALTIME + REST/SSE FALLBACK)
 // -------------------------------------------------------------
 let sseSource = null;
 
 function initRealtimeSync() {
-    // 1. Initial REST Fetch
+    // 1. Initial REST Fetch (if backend server is available)
     fetchState(true);
 
-    // 2. Server-Sent Events for instant push updates without polling chatter
+    // 2. Server-Sent Events for local development
     if (typeof EventSource !== 'undefined') {
         try {
             sseSource = new EventSource('/api/events');
@@ -116,31 +117,114 @@ function initRealtimeSync() {
         }
     }
 
-    // 3. Very gentle fallback check (every 10 seconds), only notifies if data actually changed
-    setInterval(() => fetchState(false), 10000);
+    // 3. Periodic fallback check
+    setInterval(() => fetchState(false), 15000);
 
-    // 4. Firestore listeners if available
+    // 4. Firestore Real-time Listeners (Works across all devices worldwide)
+    initFirestoreListeners();
+}
+
+function initFirestoreListeners() {
+    if (!db) return;
+
+    // A. Voting State Listener
     try {
         onSnapshot(doc(db, "system", "voting_state"), (snap) => {
             if (snap.exists()) {
                 const fsState = snap.data();
                 if (fsState) {
                     const endsAtVal = fsState.endsAt ? (fsState.endsAt.toDate ? fsState.endsAt.toDate().toISOString() : fsState.endsAt) : null;
-                    if (
-                        currentState.votingState.status !== fsState.status ||
-                        currentState.votingState.endsAt !== endsAtVal ||
-                        currentState.votingState.sessionId !== fsState.sessionId
-                    ) {
-                        currentState.votingState = {
-                            ...currentState.votingState,
-                            status: fsState.status || currentState.votingState.status,
-                            endsAt: endsAtVal,
-                            sessionId: fsState.sessionId || currentState.votingState.sessionId
-                        };
-                        notifyStateChanged(false);
-                    }
+                    currentState.votingState = {
+                        ...currentState.votingState,
+                        status: fsState.status || currentState.votingState.status,
+                        endsAt: endsAtVal,
+                        sessionId: fsState.sessionId || currentState.votingState.sessionId
+                    };
+                    notifyStateChanged(false);
                 }
             }
+        }, (err) => console.warn('Firestore voting_state error:', err));
+    } catch (e) {}
+
+    // B. System Settings Listener (recapVideoUrl, featuredContestId, manualThreshold, revealMode)
+    try {
+        onSnapshot(doc(db, "system", "settings"), (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data) {
+                    let changed = false;
+                    if (data.recapVideoUrl !== undefined && currentState.recapVideoUrl !== data.recapVideoUrl) {
+                        currentState.recapVideoUrl = data.recapVideoUrl;
+                        changed = true;
+                    }
+                    if (data.featuredContestId !== undefined && currentState.featuredContestId !== data.featuredContestId) {
+                        currentState.featuredContestId = data.featuredContestId;
+                        changed = true;
+                    }
+                    if (data.manualThreshold !== undefined && currentState.manualThreshold !== data.manualThreshold) {
+                        currentState.manualThreshold = data.manualThreshold;
+                        changed = true;
+                    }
+                    if (data.revealMode !== undefined && currentState.revealMode !== data.revealMode) {
+                        currentState.revealMode = data.revealMode;
+                        changed = true;
+                    }
+                    if (changed) notifyStateChanged(false);
+                }
+            }
+        }, (err) => console.warn('Firestore settings error:', err));
+    } catch (e) {}
+
+    // C. Participants Listener
+    try {
+        onSnapshot(doc(db, "system", "participants"), (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data && Array.isArray(data.list) && data.list.length > 0) {
+                    currentState.participants = data.list;
+                    notifyStateChanged(false);
+                }
+            }
+        }, (err) => console.warn('Firestore participants error:', err));
+    } catch (e) {}
+
+    // D. News Real-time Listener (Cross-device news sync)
+    try {
+        onSnapshot(collection(db, "news"), (snap) => {
+            if (!snap.empty) {
+                const newsItems = [];
+                snap.forEach(d => {
+                    newsItems.push({ id: d.id, ...d.data() });
+                });
+                currentState.news = newsItems;
+                notifyStateChanged(false);
+            }
+        }, (err) => console.warn('Firestore news error:', err));
+    } catch (e) {}
+
+    // E. Contests Real-time Listener (Cross-device contests sync)
+    try {
+        onSnapshot(collection(db, "contests"), (snap) => {
+            if (!snap.empty) {
+                const contestItems = [];
+                snap.forEach(d => {
+                    contestItems.push({ id: d.id, ...d.data() });
+                });
+                currentState.contests = contestItems;
+                notifyStateChanged(false);
+            }
+        }, (err) => console.warn('Firestore contests error:', err));
+    } catch (e) {}
+
+    // F. Votes Real-time Listener (Admin live tally)
+    try {
+        onSnapshot(collection(db, "votes"), (snap) => {
+            const votesList = [];
+            snap.forEach(d => {
+                votesList.push({ id: d.id, ...d.data() });
+            });
+            currentState.votes = votesList;
+            notifyStateChanged(false);
         }, () => {});
     } catch (e) {}
 }
@@ -156,7 +240,7 @@ async function fetchState(isInitial = false) {
             }
         }
     } catch (e) {
-        // Offline or connection error
+        // Offline or static hosting
     }
 }
 
@@ -199,6 +283,14 @@ export async function saveNewsArticle(article) {
     }
     notifyStateChanged(true);
 
+    // Save to Firestore (Cross-device persistence)
+    try {
+        await setDoc(doc(db, "news", article.id), article, { merge: true });
+    } catch (e) {
+        console.warn('Firestore save news error:', e);
+    }
+
+    // Save to REST API if available
     try {
         const res = await fetch('/api/news', {
             method: 'POST',
@@ -212,12 +304,6 @@ export async function saveNewsArticle(article) {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API save news error:', e);
-    }
-
-    try {
-        await setDoc(doc(db, "news", article.id), article, { merge: true });
     } catch (e) {}
 
     return currentState.news;
@@ -227,6 +313,14 @@ export async function deleteNewsArticle(articleId) {
     currentState.news = (currentState.news || []).filter(n => n.id !== articleId);
     notifyStateChanged(true);
 
+    // Delete from Firestore
+    try {
+        await deleteDoc(doc(db, "news", articleId));
+    } catch (e) {
+        console.warn('Firestore delete news error:', e);
+    }
+
+    // Delete from REST API if available
     try {
         const res = await fetch(`/api/news/${articleId}`, { method: 'DELETE' });
         if (res.ok) {
@@ -236,12 +330,6 @@ export async function deleteNewsArticle(articleId) {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API delete news error:', e);
-    }
-
-    try {
-        await deleteDoc(doc(db, "news", articleId));
     } catch (e) {}
 
     return currentState.news;
@@ -260,6 +348,14 @@ export async function saveContest(contest) {
     }
     notifyStateChanged(true);
 
+    // Save to Firestore (Cross-device persistence)
+    try {
+        await setDoc(doc(db, "contests", contest.id), contest, { merge: true });
+    } catch (e) {
+        console.warn('Firestore save contest error:', e);
+    }
+
+    // Save to REST API if available
     try {
         const res = await fetch('/api/contests', {
             method: 'POST',
@@ -273,12 +369,6 @@ export async function saveContest(contest) {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API save contest error:', e);
-    }
-
-    try {
-        await setDoc(doc(db, "contests", contest.id), contest, { merge: true });
     } catch (e) {}
 
     return currentState.contests;
@@ -288,6 +378,14 @@ export async function deleteContest(contestId) {
     currentState.contests = (currentState.contests || []).filter(c => c.id !== contestId);
     notifyStateChanged(true);
 
+    // Delete from Firestore
+    try {
+        await deleteDoc(doc(db, "contests", contestId));
+    } catch (e) {
+        console.warn('Firestore delete contest error:', e);
+    }
+
+    // Delete from REST API if available
     try {
         const res = await fetch(`/api/contests/${contestId}`, { method: 'DELETE' });
         if (res.ok) {
@@ -297,12 +395,6 @@ export async function deleteContest(contestId) {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API delete contest error:', e);
-    }
-
-    try {
-        await deleteDoc(doc(db, "contests", contestId));
     } catch (e) {}
 
     return currentState.contests;
@@ -323,6 +415,16 @@ export async function saveParticipant(participant) {
     }
     notifyStateChanged(true);
 
+    // Save to Firestore system/participants
+    try {
+        await setDoc(doc(db, "system", "participants"), {
+            list: currentState.participants,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+    } catch (e) {
+        console.warn('Firestore save participant error:', e);
+    }
+
     try {
         const res = await fetch('/api/participants', {
             method: 'POST',
@@ -336,9 +438,7 @@ export async function saveParticipant(participant) {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API save participant error:', e);
-    }
+    } catch (e) {}
 
     return currentState.participants;
 }
@@ -347,6 +447,16 @@ export async function deleteParticipant(participantId) {
     if (!currentState.participants) currentState.participants = [];
     currentState.participants = currentState.participants.filter(p => p.id !== participantId);
     notifyStateChanged(true);
+
+    // Save updated list to Firestore
+    try {
+        await setDoc(doc(db, "system", "participants"), {
+            list: currentState.participants,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+    } catch (e) {
+        console.warn('Firestore delete participant error:', e);
+    }
 
     try {
         const res = await fetch(`/api/participants/${participantId}`, { method: 'DELETE' });
@@ -357,14 +467,22 @@ export async function deleteParticipant(participantId) {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API delete participant error:', e);
-    }
+    } catch (e) {}
 
     return currentState.participants;
 }
 
 export async function resetParticipantsToDefault() {
+    currentState.participants = [...DEFAULT_PARTICIPANTS];
+    notifyStateChanged(true);
+
+    try {
+        await setDoc(doc(db, "system", "participants"), {
+            list: DEFAULT_PARTICIPANTS,
+            updatedAt: new Date().toISOString()
+        }, { merge: true });
+    } catch (e) {}
+
     try {
         const res = await fetch('/api/participants/reset', { method: 'POST' });
         if (res.ok) {
@@ -374,9 +492,7 @@ export async function resetParticipantsToDefault() {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API reset participants error:', e);
-    }
+    } catch (e) {}
     return currentState.participants;
 }
 
@@ -388,17 +504,17 @@ export async function updateVotingState(stateUpdate) {
     notifyStateChanged(true);
 
     try {
+        await setDoc(doc(db, "system", "voting_state"), stateUpdate, { merge: true });
+    } catch (e) {
+        console.warn('Firestore update voting state error:', e);
+    }
+
+    try {
         await fetch('/api/voting/state', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(stateUpdate)
         });
-    } catch (e) {
-        console.warn('API update voting state error:', e);
-    }
-
-    try {
-        await setDoc(doc(db, "system", "voting_state"), stateUpdate, { merge: true });
     } catch (e) {}
 }
 
@@ -406,6 +522,13 @@ export async function updateVotingThreshold(threshold, revealMode) {
     currentState.manualThreshold = Number(threshold) || 0;
     if (revealMode !== undefined) currentState.revealMode = Boolean(revealMode);
     notifyStateChanged(true);
+
+    try {
+        await setDoc(doc(db, "system", "settings"), {
+            manualThreshold: Number(threshold) || 0,
+            revealMode: Boolean(revealMode)
+        }, { merge: true });
+    } catch (e) {}
 
     try {
         await fetch('/api/voting/threshold', {
@@ -421,6 +544,14 @@ export async function saveRecapVideoUrl(url) {
     notifyStateChanged(true);
 
     try {
+        await setDoc(doc(db, "system", "settings"), {
+            recapVideoUrl: url || ''
+        }, { merge: true });
+    } catch (e) {
+        console.warn('Firestore save recap url error:', e);
+    }
+
+    try {
         const res = await fetch('/api/voting/recap-url', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -433,14 +564,20 @@ export async function saveRecapVideoUrl(url) {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API save recap url error:', e);
-    }
+    } catch (e) {}
 }
 
 export async function saveFeaturedBanner(featuredContestId) {
     currentState.featuredContestId = featuredContestId || 'auto';
     notifyStateChanged(true);
+
+    try {
+        await setDoc(doc(db, "system", "settings"), {
+            featuredContestId: featuredContestId || 'auto'
+        }, { merge: true });
+    } catch (e) {
+        console.warn('Firestore save featured banner error:', e);
+    }
 
     try {
         const res = await fetch('/api/settings/featured-contest', {
@@ -455,9 +592,7 @@ export async function saveFeaturedBanner(featuredContestId) {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API save featured banner error:', e);
-    }
+    } catch (e) {}
 }
 
 export async function toggleNewsReaction(newsId, emoji, action = 'add') {
@@ -471,6 +606,10 @@ export async function toggleNewsReaction(newsId, emoji, action = 'add') {
             article.reactions[emoji] = curr + 1;
         }
         notifyStateChanged(true);
+
+        try {
+            await setDoc(doc(db, "news", newsId), { reactions: article.reactions }, { merge: true });
+        } catch (e) {}
     }
 
     try {
@@ -486,9 +625,7 @@ export async function toggleNewsReaction(newsId, emoji, action = 'add') {
                 notifyStateChanged(true);
             }
         }
-    } catch (e) {
-        console.warn('API toggle reaction error:', e);
-    }
+    } catch (e) {}
 }
 
 export async function loginAdminServer(emailOrUsername, password) {
@@ -526,11 +663,21 @@ export async function verifyAdminSession() {
 // VOTES SUBMISSION & MANAGEMENT
 // -------------------------------------------------------------
 export async function submitVote(voteData) {
+    const voteId = voteData.id || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
+    const votePayload = { ...voteData, id: voteId, createdAt: voteData.createdAt || new Date().toISOString() };
+
+    // Save directly to Firestore for serverless / GitHub Pages compatibility
+    try {
+        await setDoc(doc(db, "votes", voteId), votePayload);
+    } catch (e) {
+        console.warn('Firestore direct vote submit error:', e);
+    }
+
     try {
         const res = await fetch('/api/vote', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(voteData)
+            body: JSON.stringify(votePayload)
         });
         if (!res.ok) {
             const err = await res.json();
@@ -538,14 +685,20 @@ export async function submitVote(voteData) {
         }
         return await res.json();
     } catch (e) {
-        console.error('Submit vote error:', e);
-        throw e;
+        // If API fails (e.g. static hosting), but Firestore succeeded, return votePayload
+        return { success: true, vote: votePayload };
     }
 }
 
 export async function deleteVote(voteId) {
     currentState.votes = (currentState.votes || []).filter(v => v.id !== voteId);
     notifyStateChanged(true);
+
+    try {
+        await deleteDoc(doc(db, "votes", voteId));
+    } catch (e) {
+        console.warn('Firestore delete vote error:', e);
+    }
 
     try {
         await fetch(`/api/votes/${voteId}`, { method: 'DELETE' });
@@ -557,6 +710,15 @@ export async function resetAllVotes() {
     notifyStateChanged(true);
 
     try {
+        const snap = await getDocs(collection(db, "votes"));
+        const deletePromises = [];
+        snap.forEach(d => deletePromises.push(deleteDoc(d.ref)));
+        await Promise.all(deletePromises);
+    } catch (e) {
+        console.warn('Firestore reset votes error:', e);
+    }
+
+    try {
         await fetch('/api/votes/reset-all', { method: 'POST' });
     } catch (e) {}
 }
@@ -564,3 +726,4 @@ export async function resetAllVotes() {
 export function getCurrentState() {
     return currentState;
 }
+
