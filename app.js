@@ -20,14 +20,6 @@ const AVAILABLE_EMOJIS = ['❤️', '🔥', '👏', '🏆', '🤩', '⚡'];
 let currentAuthUser = null;
 let pendingAuthAction = null; // 'voting' or null
 
-// Страновые ограничения для национального голосования
-const COUNTRY_RESTRICTIONS = {
-    "Родион": { blockedIds: ['p4', 'p7'] },
-    "Орнелла": { blockedIds: ['p1', 'p6'] },
-    "Виктория": { blockedIds: ['p3', 'p8'] },
-    "Анна": { blockedIds: ['p2', 'p5'] }
-};
-
 // Состояние приложения
 const isNational = window.location.href.toLowerCase().includes('national');
 let currentPortalView = isNational ? 'voting' : 'home'; // 'home' | 'contests' | 'contest-detail' | 'news' | 'voting'
@@ -1347,18 +1339,33 @@ function renderVotingCard() {
     } 
     // 5. Экран выбора номеров и распределения
     else if (currentVotingSubPage === 'voting') {
+        const participants = participantsData || DEFAULT_PARTICIPANTS;
+
         if (isNational && !selectedRepresentative) {
+            const uniqueCountries = [];
+            const seen = new Set();
+            participants.forEach(p => {
+                const cName = p.country || p.name || `Номер ${p.number || p.id}`;
+                if (!seen.has(cName)) {
+                    seen.add(cName);
+                    uniqueCountries.push({ country: cName, flag: p.flag || '🏳️', participantId: p.id, artist: p.artist || '' });
+                }
+            });
+
             card.innerHTML = `
                 <div class="flex flex-col gap-6 page-fade">
                     <div class="border-b border-amber-500/15 pb-4">
-                        <h2 class="text-xl font-bold text-white uppercase tracking-wider">Выберите представителя вашей страны</h2>
-                        <p class="text-xs text-amber-200/70 mt-1">Голосовать за "своих" участников нельзя.</p>
+                        <h2 class="text-xl font-bold text-white uppercase tracking-wider">Выберите страну представительства</h2>
+                        <p class="text-xs text-amber-200/70 mt-1">В национальном голосовании голос за свою страну исключается автоматически.</p>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        ${Object.keys(COUNTRY_RESTRICTIONS).map(rep => `
-                            <button onclick="selectRepresentative('${rep}')" class="bg-[#16070b] hover:bg-amber-500/10 border border-amber-500/20 p-5 text-left transition rounded-2xl">
-                                <div class="text-sm font-bold text-white uppercase">${rep}</div>
-                                <div class="text-[10px] text-amber-400 mt-1">Исключаются номера вашей страны</div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        ${uniqueCountries.map(item => `
+                            <button onclick="selectRepresentative('${item.country.replace(/'/g, "\\'")}')" class="bg-[#16070b] hover:bg-amber-500/10 border border-amber-500/20 hover:border-amber-500/40 p-4 text-left transition rounded-2xl flex items-center gap-3">
+                                <span class="text-2xl">${item.flag}</span>
+                                <div class="truncate">
+                                    <div class="text-sm font-bold text-white uppercase truncate">${item.country}</div>
+                                    ${item.artist ? `<div class="text-[10px] text-amber-400 truncate">${item.artist}</div>` : `<div class="text-[10px] text-slate-400">Исключается номер страны</div>`}
+                                </div>
                             </button>
                         `).join('')}
                     </div>
@@ -1367,11 +1374,12 @@ function renderVotingCard() {
             return;
         }
 
-        const participants = participantsData || DEFAULT_PARTICIPANTS;
         let blockedIds = [];
 
         if (isNational && selectedRepresentative) {
-            blockedIds = COUNTRY_RESTRICTIONS[selectedRepresentative]?.blockedIds || [];
+            blockedIds = participants
+                .filter(p => (p.country && p.country.toLowerCase() === selectedRepresentative.toLowerCase()) || p.id === selectedRepresentative || p.name === selectedRepresentative)
+                .map(p => p.id);
         } else if (currentAuthUser && currentAuthUser.role === 'artist') {
             blockedIds = currentAuthUser.blockedParticipantIds || calculateBlockedIdsForArtist(currentAuthUser.artistData, participants);
         }
