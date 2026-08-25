@@ -13,13 +13,13 @@
 
   "icons": [
     {
-      "src": "/HBU.app/icons/your_icon_192.png",
+      "src": "/HBU.app/icons/HBU_icon.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/HBU.app/icons/your_icon_512.png",
+      "src": "/HBU.app/icons/HBU_icon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
