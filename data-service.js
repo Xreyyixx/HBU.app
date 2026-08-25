@@ -288,45 +288,22 @@ export async function fetchFirestoreStateDirectly() {
             }
         } catch (e) {}
 
-        // 5. Contests (Dual layer: system/contests document + collection contests)
+        // 5. Contests Collection (Single source of truth, identical to News)
         try {
-            let gotContests = false;
-            const sysContestSnap = await getDoc(doc(db, "system", "contests"));
-            if (sysContestSnap.exists()) {
-                const cData = sanitizeFirestoreData(sysContestSnap.data());
-                if (cData && Array.isArray(cData.list) && cData.list.length > 0) {
-                    if (safeJsonStringify(currentState.contests) !== safeJsonStringify(cData.list)) {
-                        currentState.contests = cData.list;
-                        stateChanged = true;
-                    }
-                    gotContests = true;
+            const contestSnap = await getDocs(collection(db, "contests"));
+            const contestItems = [];
+            contestSnap.forEach(d => {
+                const cleaned = sanitizeFirestoreData(d.data());
+                contestItems.push({ id: d.id, ...(cleaned || {}) });
+            });
+            if (contestItems.length > 0) {
+                if (safeJsonStringify(currentState.contests) !== safeJsonStringify(contestItems)) {
+                    currentState.contests = contestItems;
+                    stateChanged = true;
                 }
-            }
-
-            if (!gotContests) {
-                const contestSnap = await getDocs(collection(db, "contests"));
-                const contestItems = [];
-                contestSnap.forEach(d => {
-                    const cleaned = sanitizeFirestoreData(d.data());
-                    contestItems.push({ id: d.id, ...(cleaned || {}) });
-                });
-                if (contestItems.length > 0) {
-                    if (safeJsonStringify(currentState.contests) !== safeJsonStringify(contestItems)) {
-                        currentState.contests = contestItems;
-                        stateChanged = true;
-                    }
-                    setDoc(doc(db, "system", "contests"), {
-                        list: contestItems,
-                        updatedAt: new Date().toISOString()
-                    }, { merge: true }).catch(() => {});
-                } else if (contestSnap.empty && currentState.contests && currentState.contests.length > 0) {
-                    setDoc(doc(db, "system", "contests"), {
-                        list: currentState.contests,
-                        updatedAt: new Date().toISOString()
-                    }, { merge: true }).catch(() => {});
-                    for (const c of currentState.contests) {
-                        setDoc(doc(db, "contests", c.id), c, { merge: true }).catch(() => {});
-                    }
+            } else if (contestSnap.empty && currentState.contests && currentState.contests.length > 0) {
+                for (const c of currentState.contests) {
+                    setDoc(doc(db, "contests", c.id), c, { merge: true }).catch(() => {});
                 }
             }
         } catch (e) {
@@ -347,16 +324,11 @@ export async function fetchFirestoreStateDirectly() {
             }
         } catch (e) {}
 
-        // 7. Artists Collection
+        // 7. Artists Multi-Source Sync (Collection "artists", "users", "system/artists")
         try {
-            const artistsSnap = await getDocs(collection(db, "artists"));
-            const artistsList = [];
-            artistsSnap.forEach(d => {
-                const cleaned = sanitizeFirestoreData(d.data());
-                artistsList.push({ id: d.id, ...(cleaned || {}) });
-            });
-            if (safeJsonStringify(currentState.artists) !== safeJsonStringify(artistsList)) {
-                currentState.artists = artistsList;
+            const allArtists = await fetchArtistsFromFirestore();
+            if (safeJsonStringify(currentState.artists) !== safeJsonStringify(allArtists)) {
+                currentState.artists = allArtists;
                 stateChanged = true;
             }
         } catch (e) {}
@@ -497,33 +469,18 @@ function initFirestoreListeners() {
         }, (err) => console.warn('Firestore news error:', err));
     } catch (e) {}
 
-    // E. Contests Real-time Listeners (system/contests + collection contests)
-    try {
-        onSnapshot(doc(db, "system", "contests"), (snap) => {
-            if (snap.exists()) {
-                const data = sanitizeFirestoreData(snap.data());
-                if (data && Array.isArray(data.list) && data.list.length > 0) {
-                    currentState.contests = data.list;
-                    notifyStateChanged(false);
-                    syncCurrentUserArtistStatus();
-                }
-            }
-        }, (err) => console.warn('Firestore system/contests error:', err));
-    } catch (e) {}
-
+    // E. Contests Real-time Listener (Single collection "contests" - identical to news)
     try {
         onSnapshot(collection(db, "contests"), (snap) => {
-            if (!snap.empty) {
-                const contestItems = [];
-                snap.forEach(d => {
-                    const cleaned = sanitizeFirestoreData(d.data());
-                    contestItems.push({ id: d.id, ...(cleaned || {}) });
-                });
-                if (contestItems.length > 0) {
-                    currentState.contests = contestItems;
-                    notifyStateChanged(false);
-                    syncCurrentUserArtistStatus();
-                }
+            const contestItems = [];
+            snap.forEach(d => {
+                const cleaned = sanitizeFirestoreData(d.data());
+                contestItems.push({ id: d.id, ...(cleaned || {}) });
+            });
+            if (contestItems.length > 0) {
+                currentState.contests = contestItems;
+                notifyStateChanged(false);
+                syncCurrentUserArtistStatus();
             }
         }, (err) => console.warn('Firestore contests error:', err));
     } catch (e) {}
@@ -543,15 +500,24 @@ function initFirestoreListeners() {
 
     // G. Artists Real-time Listener (Cross-device artist detection & updates)
     try {
-        onSnapshot(collection(db, "artists"), (snap) => {
-            const artistsList = [];
-            snap.forEach(d => {
-                const cleaned = sanitizeFirestoreData(d.data());
-                artistsList.push({ id: d.id, ...(cleaned || {}) });
+        onSnapshot(collection(db, "artists"), () => {
+            fetchArtistsFromFirestore().then(all => {
+                currentState.artists = all;
+                notifyStateChanged(false);
+                syncCurrentUserArtistStatus();
             });
-            currentState.artists = artistsList;
-            syncCurrentUserArtistStatus();
         }, (err) => console.warn('Firestore artists error:', err));
+    } catch (e) {}
+
+    // H. Users Real-time Listener (For artists registered in users collection)
+    try {
+        onSnapshot(collection(db, "users"), () => {
+            fetchArtistsFromFirestore().then(all => {
+                currentState.artists = all;
+                notifyStateChanged(false);
+                syncCurrentUserArtistStatus();
+            });
+        }, (err) => console.warn('Firestore users listener error:', err));
     } catch (e) {}
 }
 
@@ -674,13 +640,9 @@ export async function saveContest(contest) {
     }
     notifyStateChanged(true);
 
-    // Save to Firestore (Cross-device persistence: individual doc + master list doc)
+    // Save to Firestore (Single collection "contests" - identical to news pattern)
     try {
         await setDoc(doc(db, "contests", contest.id), contest, { merge: true });
-        await setDoc(doc(db, "system", "contests"), {
-            list: currentState.contests,
-            updatedAt: new Date().toISOString()
-        }, { merge: true });
     } catch (e) {
         console.warn('Firestore save contest error:', e);
     }
@@ -711,10 +673,6 @@ export async function deleteContest(contestId) {
     // Delete from Firestore
     try {
         await deleteDoc(doc(db, "contests", contestId));
-        await setDoc(doc(db, "system", "contests"), {
-            list: currentState.contests,
-            updatedAt: new Date().toISOString()
-        }, { merge: true });
     } catch (e) {
         console.warn('Firestore delete contest error:', e);
     }
@@ -1148,22 +1106,74 @@ function countriesMatch(c1, c2) {
     });
 }
 
-// Поиск ВСЕХ заблокированных номеров артиста (поддерживает множественные номера/выступления одного артиста)
+// -------------------------------------------------------------
+// ПОЛУЧЕНИЕ СПИСКА ВСЕХ АРТИСТОВ ИЗ FIRESTORE (MULTI-SOURCE)
+// -------------------------------------------------------------
+export async function fetchArtistsFromFirestore() {
+    if (!db) return [];
+    const artists = [];
+    const seenIds = new Set();
+
+    // 1. Прямая коллекция "artists"
+    try {
+        const snap = await getDocs(collection(db, "artists"));
+        snap.forEach(d => {
+            const cleaned = sanitizeFirestoreData(d.data());
+            const item = { id: d.id, ...(cleaned || {}) };
+            artists.push(item);
+            seenIds.add(d.id);
+            if (item.login) seenIds.add(String(item.login).toLowerCase());
+        });
+    } catch (e) {
+        console.warn('Fetch artists collection warning:', e);
+    }
+
+    // 2. Коллекция пользователей "users" с признаком артиста
+    try {
+        const usersSnap = await getDocs(collection(db, "users"));
+        usersSnap.forEach(d => {
+            const data = sanitizeFirestoreData(d.data()) || {};
+            const isArt = data.role === 'artist' || data.isArtist === true || data.type === 'artist' || data.userType === 'artist';
+            if (isArt) {
+                const uId = d.id;
+                const uLogin = String(data.login || data.username || '').toLowerCase();
+                if (!seenIds.has(uId) && (!uLogin || !seenIds.has(uLogin))) {
+                    artists.push({ id: uId, role: 'artist', ...data });
+                    seenIds.add(uId);
+                    if (uLogin) seenIds.add(uLogin);
+                }
+            }
+        });
+    } catch (e) {}
+
+    // 3. Документ "system/artists" (если список артистов сохранен в едином документе)
+    try {
+        const sysSnap = await getDoc(doc(db, "system", "artists"));
+        if (sysSnap.exists()) {
+            const sysData = sanitizeFirestoreData(sysSnap.data()) || {};
+            const list = Array.isArray(sysData.list) ? sysData.list : (Array.isArray(sysData.artists) ? sysData.artists : []);
+            list.forEach(a => {
+                const aId = a.id || a.login || a.email;
+                if (aId && !seenIds.has(String(aId).toLowerCase())) {
+                    artists.push(a);
+                    seenIds.add(String(aId).toLowerCase());
+                }
+            });
+        }
+    } catch (e) {}
+
+    return artists;
+}
+
+// -------------------------------------------------------------
+// РАСЧЕТ ЗАБЛОКИРОВАННЫХ НОМЕРОВ ДЛЯ АРТИСТА
+// -------------------------------------------------------------
 export function calculateBlockedIdsForArtist(artistData, participantsList) {
-    const blocked = new Set();
-    const list = participantsList || currentState.participants || DEFAULT_PARTICIPANTS;
-    
     if (!artistData) return [];
+    const list = participantsList || currentState.participants || DEFAULT_PARTICIPANTS;
+    const blocked = new Set();
 
-    const artLogin = normalizeString(artistData.login || artistData.username || artistData.artistLogin || '');
-    const artEmail = String(artistData.email || '').trim().toLowerCase();
-    const artCleanEmail = normalizeString(artEmail.includes('@') ? artEmail.split('@')[0] : artEmail);
-    const artId = String(artistData.id || '').trim().toLowerCase();
-    const artName = String(artistData.name || '').trim();
-    const artArtist = String(artistData.artist || '').trim();
-    const artCountry = String(artistData.country || '').trim();
-
-    // 1. Прямые ID
+    // 1. Прямые ID участников
     if (artistData.participantId) blocked.add(String(artistData.participantId));
     if (Array.isArray(artistData.blockedIds)) {
         artistData.blockedIds.forEach(id => blocked.add(String(id)));
@@ -1172,7 +1182,7 @@ export function calculateBlockedIdsForArtist(artistData, participantsList) {
         artistData.blockedParticipantIds.forEach(id => blocked.add(String(id)));
     }
 
-    // 2. Номера участников (find ALL participants matching any of these numbers)
+    // 2. Номера участников
     const numbersToCheck = [];
     if (artistData.number !== undefined && artistData.number !== null) {
         numbersToCheck.push(Number(artistData.number));
@@ -1187,126 +1197,133 @@ export function calculateBlockedIdsForArtist(artistData, participantsList) {
         }
     });
 
-    // 3. Сопоставление по ВСЕМ участникам списка (по стране, артисту, имени, логину)
+    // 3. Точное сопоставление по логину, стране и имени артиста
+    const artLogin = normalizeString(artistData.login || artistData.username || artistData.artistLogin || '');
+    const artEmail = String(artistData.email || '').trim().toLowerCase();
+    const artCleanEmail = normalizeString(artEmail.includes('@') ? artEmail.split('@')[0] : artEmail);
+    const artCountry = String(artistData.country || '').trim();
+    const artArtist = normalizeString(artistData.artist || artistData.stageName || '');
+    const artId = String(artistData.id || '').trim().toLowerCase();
+
     list.forEach(p => {
         const pId = String(p.id || '').trim().toLowerCase();
         const pNum = String(p.number || '').trim();
         const pLogin = normalizeString(p.artistLogin || p.linkedArtistLogin || '');
-        const pArtist = String(p.artist || '').trim();
-        const pName = String(p.name || '').trim();
         const pCountry = String(p.country || '').trim();
+        const pArtist = normalizeString(p.artist || '');
 
-        // Проверка совпадения ID
-        if (artId && (pId === artId || artId === `p${pNum}` || artId === pNum)) {
+        // Совпадение по ID документа артиста с ID номера участника (например, 'p1')
+        if (artId && (pId === artId || artId === `p${pNum}` || (artId === pNum && !isNaN(Number(artId))))) {
             blocked.add(p.id);
         }
 
-        // Проверка логина
+        // Совпадение по логину артиста, указанному в номере
         if (pLogin) {
             if (
-                pLogin === artLogin ||
-                pLogin === artCleanEmail ||
-                (artLogin && artLogin.includes(pLogin)) ||
-                (artCleanEmail && artCleanEmail.includes(pLogin)) ||
-                (artLogin && pLogin.includes(artLogin))
+                (artLogin && pLogin === artLogin) ||
+                (artCleanEmail && pLogin === artCleanEmail)
             ) {
                 blocked.add(p.id);
             }
         }
 
-        // Проверка страны со всеми синонимами
-        if (artCountry && countriesMatch(pCountry, artCountry)) {
+        // Совпадение по стране (со всеми синонимами: "Германия", "Germany", "DE")
+        if (artCountry && pCountry && countriesMatch(pCountry, artCountry)) {
             blocked.add(p.id);
         }
-        if (artLogin && countriesMatch(pCountry, artLogin)) {
-            blocked.add(p.id);
-        }
-        if (artCleanEmail && countriesMatch(pCountry, artCleanEmail)) {
+        if (artLogin && pCountry && countriesMatch(pCountry, artLogin)) {
             blocked.add(p.id);
         }
 
-        // Проверка артиста / названия
-        if (artArtist && isFuzzyMatch(pArtist, artArtist)) {
-            blocked.add(p.id);
+        // Совпадение по имени артиста (только значимые имена >= 3 символов, не общие шаблоны)
+        if (artArtist && pArtist && artArtist.length >= 3 && !artArtist.startsWith('number') && !artArtist.startsWith('participant')) {
+            if (artArtist === pArtist) {
+                blocked.add(p.id);
+            }
         }
-        if (artName && isFuzzyMatch(pName, artName)) {
-            blocked.add(p.id);
-        }
-        if (artLogin && isFuzzyMatch(pArtist, artLogin)) {
-            blocked.add(p.id);
-        }
-        if (artCleanEmail && isFuzzyMatch(pArtist, artCleanEmail)) {
-            blocked.add(p.id);
+        if (artLogin && pArtist && artLogin.length >= 3 && !artLogin.startsWith('number') && !artLogin.startsWith('participant')) {
+            if (artLogin === pArtist) {
+                blocked.add(p.id);
+            }
         }
     });
+
+    // Защита от ложного блокирования всех номеров:
+    // Если заблокированы все номера, а в конкурсе больше 1 участника - это овер-матч, оставляем только строгие совпадения
+    if (blocked.size >= list.length && list.length > 1) {
+        const safeBlocked = new Set();
+        list.forEach(p => {
+            const pLogin = normalizeString(p.artistLogin || p.linkedArtistLogin || '');
+            if (artLogin && pLogin && artLogin === pLogin) safeBlocked.add(p.id);
+            if (artistData.participantId && String(artistData.participantId) === String(p.id)) safeBlocked.add(p.id);
+            if (artistData.number !== undefined && Number(artistData.number) === Number(p.number)) safeBlocked.add(p.id);
+        });
+        return Array.from(safeBlocked);
+    }
 
     return Array.from(blocked);
 }
 
-// Универсальный резолвер артиста по логину / email / участнику
+// -------------------------------------------------------------
+// УНИВЕРСАЛЬНЫЙ РЕЗОЛВЕР АРТИСТА ПО ЛОГИНУ / EMAIL / ПРИЗНАКАМ
+// -------------------------------------------------------------
 export function resolveArtistInfo(inputString, participantsList, allArtists = null) {
     if (!inputString) return null;
     const raw = String(inputString).trim();
     const isEmail = raw.includes('@');
     const cleanLogin = isEmail ? raw.split('@')[0].trim().toLowerCase() : raw.toLowerCase();
+    const normLogin = normalizeString(cleanLogin);
     const fullRaw = raw.toLowerCase();
-    const tokens = extractKeywords(cleanLogin);
 
     const list = participantsList || currentState.participants || DEFAULT_PARTICIPANTS;
     const artistsCollection = (allArtists && allArtists.length > 0) ? allArtists : (currentState.artists || []);
 
-    // 1. Поиск в коллекции artists
+    // 1. Поиск артиста в коллекции Firestore
     let matchedDoc = (artistsCollection || []).find(a => {
         const docId = String(a.id || '').trim().toLowerCase();
-        const aLogin = String(a.login || a.username || '').trim().toLowerCase();
+        const aLogin = normalizeString(a.login || a.username || '');
         const aEmail = String(a.email || '').trim().toLowerCase();
-        const aArtist = String(a.artist || a.name || '').trim().toLowerCase();
-        const aCountry = String(a.country || '').trim().toLowerCase();
+        const aArtist = normalizeString(a.artist || a.name || '');
+        const aCountry = String(a.country || '').trim();
 
-        return (
-            docId === fullRaw || 
-            docId === cleanLogin ||
-            aLogin === fullRaw || 
-            aLogin === cleanLogin ||
-            aEmail === fullRaw ||
-            (aEmail && aEmail.startsWith(cleanLogin + '@')) ||
-            (aArtist && (isFuzzyMatch(aArtist, fullRaw) || isFuzzyMatch(aArtist, cleanLogin))) ||
-            (aCountry && (countriesMatch(aCountry, fullRaw) || countriesMatch(aCountry, cleanLogin))) ||
-            tokens.some(t => countriesMatch(aCountry, t) || (aArtist && isFuzzyMatch(aArtist, t)))
-        );
+        if (docId === fullRaw || docId === cleanLogin || normalizeString(docId) === normLogin) return true;
+        if (aLogin && (aLogin === normLogin || aLogin === fullRaw)) return true;
+        if (aEmail && (aEmail === fullRaw || aEmail.startsWith(cleanLogin + '@'))) return true;
+        if (aCountry && countriesMatch(aCountry, cleanLogin)) return true;
+        if (aArtist && aArtist.length >= 3 && !aArtist.startsWith('number') && aArtist === normLogin) return true;
+        return false;
     });
 
-    // 2. Поиск ВСЕХ участников, соответствующих артисту (включая если у артиста несколько номеров)
+    // 2. Поиск среди номеров участников (если артист указан в номере через artistLogin или совпадает по стране/артисту)
     const matchedParticipants = list.filter(p => {
         const pLogin = normalizeString(p.artistLogin || p.linkedArtistLogin || '');
-        const pArtist = String(p.artist || '').trim();
+        const pArtist = normalizeString(p.artist || '');
         const pCountry = String(p.country || '').trim();
-        const pName = String(p.name || '').trim();
         const pId = String(p.id || '').trim().toLowerCase();
         const pNum = String(p.number || '').trim();
 
-        // Точный логин или префикс email
-        if (pLogin && (pLogin === cleanLogin || pLogin === fullRaw || cleanLogin.includes(pLogin) || pLogin.includes(cleanLogin))) {
+        // Точный логин артиста, привязанный к номеру
+        if (pLogin && (pLogin === normLogin || pLogin === fullRaw)) {
             return true;
         }
-        // Прямой ID или номер
-        if (pId === cleanLogin || pId === fullRaw || pNum === cleanLogin || pNum === fullRaw || `p${pNum}` === cleanLogin) {
-            return true;
-        }
-        // Совпадение страны
-        if (countriesMatch(pCountry, cleanLogin) || countriesMatch(pCountry, fullRaw)) {
-            return true;
-        }
-        // Совпадение артиста / имени
-        if (pArtist && (isFuzzyMatch(pArtist, cleanLogin) || isFuzzyMatch(pArtist, fullRaw))) {
-            return true;
-        }
-        if (pName && (isFuzzyMatch(pName, cleanLogin) || isFuzzyMatch(pName, fullRaw))) {
-            return true;
-        }
-        // Совпадение по токенам (например, "artist_spain" или "singer_loreen")
-        if (tokens.length > 0) {
-            if (tokens.some(t => countriesMatch(pCountry, t) || (pArtist && isFuzzyMatch(pArtist, t)) || (pLogin && pLogin === t))) {
+        // Если найден документ артиста, проверяем привязку номера
+        if (matchedDoc) {
+            if (matchedDoc.participantId && String(matchedDoc.participantId) === p.id) return true;
+            if (matchedDoc.number !== undefined && Number(matchedDoc.number) === Number(p.number)) return true;
+            if (Array.isArray(matchedDoc.blockedNumbers) && matchedDoc.blockedNumbers.map(Number).includes(Number(p.number))) return true;
+            if (Array.isArray(matchedDoc.blockedIds) && matchedDoc.blockedIds.includes(p.id)) return true;
+            if (matchedDoc.country && pCountry && countriesMatch(pCountry, matchedDoc.country)) return true;
+            if (matchedDoc.artist && pArtist && normalizeString(matchedDoc.artist) === pArtist) return true;
+            if (matchedDoc.id && (matchedDoc.id === pId || matchedDoc.id === `p${pNum}`)) return true;
+        } else {
+            // Без документа артиста: прямое совпадение ID, страны или уникального артиста
+            if (pId === cleanLogin || `p${pNum}` === cleanLogin || (pNum === cleanLogin && !isNaN(Number(cleanLogin)))) {
+                return true;
+            }
+            if (pCountry && countriesMatch(pCountry, cleanLogin)) {
+                return true;
+            }
+            if (pArtist && pArtist.length >= 3 && !pArtist.startsWith('number') && !pArtist.startsWith('participant') && pArtist === normLogin) {
                 return true;
             }
         }
@@ -1320,7 +1337,7 @@ export function resolveArtistInfo(inputString, participantsList, allArtists = nu
             ...(primaryParticipant ? {
                 id: matchedDoc?.id || primaryParticipant.id,
                 number: primaryParticipant.number,
-                artist: matchedDoc?.artist || primaryParticipant.artist || primaryParticipant.name,
+                artist: matchedDoc?.artist || primaryParticipant.artist || '',
                 country: matchedDoc?.country || primaryParticipant.country,
                 name: primaryParticipant.name,
                 artistLogin: primaryParticipant.artistLogin || cleanLogin,
@@ -1334,7 +1351,8 @@ export function resolveArtistInfo(inputString, participantsList, allArtists = nu
         const calculatedBlocked = calculateBlockedIdsForArtist(effectiveArtistData, list);
         calculatedBlocked.forEach(id => allBlockedIds.add(id));
 
-        const displayName = effectiveArtistData.artist || effectiveArtistData.name || effectiveArtistData.country || cleanLogin;
+        // Всегда отображаем ЛОГИН пользователя, а не название номера или песни!
+        const displayName = cleanLogin;
 
         return {
             isArtist: true,
@@ -1371,22 +1389,6 @@ export function syncCurrentUserArtistStatus() {
             notifyAuthChanged(currentAuthUser);
         }
     }
-}
-
-// Получение списка всех артистов из коллекции Firestore
-export async function fetchArtistsFromFirestore() {
-    if (!db) return [];
-    const artists = [];
-    try {
-        const snap = await getDocs(collection(db, "artists"));
-        snap.forEach(d => {
-            const cleaned = sanitizeFirestoreData(d.data());
-            artists.push({ id: d.id, ...(cleaned || {}) });
-        });
-    } catch (e) {
-        console.warn('Fetch artists collection warning:', e);
-    }
-    return artists;
 }
 
 // Авторизация пользователя или артиста
@@ -1459,7 +1461,7 @@ export async function loginUser(emailOrLogin, password) {
 
         const isArtist = Boolean(finalResolved);
         const blockedIds = isArtist ? finalResolved.blockedParticipantIds : [];
-        const displayName = fbUser.displayName || (isArtist ? finalResolved.displayName : cleanLogin);
+        const displayName = cleanLogin;
 
         const userObj = {
             uid: fbUser.uid,
@@ -1591,7 +1593,7 @@ onAuthStateChanged(auth, async (fbUser) => {
                 uid: fbUser.uid,
                 email: rawEmail,
                 login: cleanLogin,
-                displayName: fbUser.displayName || (isArtist ? resolved.displayName : cleanLogin),
+                displayName: cleanLogin,
                 role: isArtist ? 'artist' : 'user',
                 artistData: isArtist ? resolved.artistData : null,
                 blockedParticipantIds: blockedIds
