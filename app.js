@@ -1173,11 +1173,13 @@ subscribeState((state) => {
         }
     }
 
-    // Если изменился статус голосования или сессия, обновляем карточку
+    // Обновляем отображение при изменении новостей, конкурсов, участников или баннеров
     if (currentPortalView === 'voting') {
         if (prevStatus !== systemState.status || prevSession !== systemState.sessionId) {
             renderVotingCard();
         }
+    } else {
+        renderMainView();
     }
 });
 

@@ -723,6 +723,51 @@ export async function resetAllVotes() {
     } catch (e) {}
 }
 
+export async function syncAllToFirestore() {
+    if (!db) return;
+    try {
+        // News
+        if (Array.isArray(currentState.news)) {
+            for (const item of currentState.news) {
+                if (item && item.id) {
+                    await setDoc(doc(db, "news", item.id), item, { merge: true });
+                }
+            }
+        }
+        // Contests
+        if (Array.isArray(currentState.contests)) {
+            for (const c of currentState.contests) {
+                if (c && c.id) {
+                    await setDoc(doc(db, "contests", c.id), c, { merge: true });
+                }
+            }
+        }
+        // Participants
+        if (Array.isArray(currentState.participants) && currentState.participants.length > 0) {
+            await setDoc(doc(db, "system", "participants"), {
+                list: currentState.participants,
+                updatedAt: new Date().toISOString()
+            }, { merge: true });
+        }
+        // Settings
+        await setDoc(doc(db, "system", "settings"), {
+            recapVideoUrl: currentState.recapVideoUrl || '',
+            featuredContestId: currentState.featuredContestId || 'auto',
+            manualThreshold: Number(currentState.manualThreshold) || 0,
+            revealMode: Boolean(currentState.revealMode)
+        }, { merge: true });
+        // Voting State
+        if (currentState.votingState) {
+            await setDoc(doc(db, "system", "voting_state"), currentState.votingState, { merge: true });
+        }
+        console.log('Successfully synced all data to Firestore Cloud');
+        return true;
+    } catch (e) {
+        console.warn('Sync all to Firestore error:', e);
+        return false;
+    }
+}
+
 export function getCurrentState() {
     return currentState;
 }

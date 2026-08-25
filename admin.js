@@ -13,6 +13,7 @@ import {
     updateVotingThreshold, 
     saveRecapVideoUrl,
     saveFeaturedBanner,
+    syncAllToFirestore,
     loginAdminServer,
     verifyAdminSession,
     deleteVote, 
@@ -36,6 +37,27 @@ let activeAdminTab = 'voting';
 let timerInterval = null;
 
 // -------------------------------------------------------------
+// РУЧНАЯ И АВТОМАТИЧЕСКАЯ ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ
+// -------------------------------------------------------------
+window.manualCloudSync = async function() {
+    const btn = document.getElementById('cloud-sync-btn');
+    if (btn) {
+        btn.innerHTML = `<span>⏳</span><span>Синхронизация...</span>`;
+        btn.disabled = true;
+    }
+    const success = await syncAllToFirestore();
+    if (btn) {
+        btn.innerHTML = `<span>☁️</span><span>Синхронизировать с облаком</span>`;
+        btn.disabled = false;
+    }
+    if (success) {
+        showToast('Все новости, сезоны и настройки синхронизированы с облаком Firebase!');
+    } else {
+        showToast('Ошибка при синхронизации с Firebase', true);
+    }
+};
+
+// -------------------------------------------------------------
 // АУТЕНТИФИКАЦИЯ (ЧИСТЫЙ FIREBASE AUTH)
 // -------------------------------------------------------------
 let isAuthenticated = false;
@@ -56,9 +78,13 @@ function setAdminAuthenticated(authenticated) {
 }
 
 // Отслеживание сессии Firebase Auth
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
     if (user) {
         setAdminAuthenticated(true);
+        // Фоновая синхронизация с облаком при входе
+        try {
+            await syncAllToFirestore();
+        } catch (e) {}
     } else {
         setAdminAuthenticated(false);
     }
