@@ -491,10 +491,11 @@ function calculateAndRenderPublicPoints() {
 
     votes.forEach(v => {
         Object.entries(v.allocations || {}).forEach(([pId, count]) => {
+            const num = Number(count) || 0;
             if (totals[pId] !== undefined) {
-                totals[pId] += (count || 0);
+                totals[pId] += num;
             } else {
-                totals[pId] = (count || 0);
+                totals[pId] = num;
             }
         });
     });

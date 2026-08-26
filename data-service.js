@@ -336,8 +336,12 @@ export async function fetchFirestoreStateDirectly() {
                 const cleaned = sanitizeFirestoreData(d.data());
                 votesList.push({ id: d.id, ...(cleaned || {}) });
             });
-            if (safeJsonStringify(currentState.votes) !== safeJsonStringify(votesList)) {
-                currentState.votes = votesList;
+            const voteMap = new Map();
+            (currentState.votes || []).forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
+            votesList.forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
+            const mergedVotes = Array.from(voteMap.values());
+            if (safeJsonStringify(currentState.votes) !== safeJsonStringify(mergedVotes)) {
+                currentState.votes = mergedVotes;
                 stateChanged = true;
             }
         } catch (e) {}
@@ -377,7 +381,14 @@ function initRealtimeSync() {
                 try {
                     const parsed = JSON.parse(event.data);
                     if (parsed && parsed.data) {
-                        currentState = { ...currentState, ...parsed.data };
+                        const newData = parsed.data;
+                        if (Array.isArray(newData.votes)) {
+                            const voteMap = new Map();
+                            (currentState.votes || []).forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
+                            newData.votes.forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
+                            newData.votes = Array.from(voteMap.values());
+                        }
+                        currentState = { ...currentState, ...newData };
                         notifyStateChanged(false);
                     }
                 } catch (err) {}
@@ -525,7 +536,10 @@ function initFirestoreListeners() {
                 const cleaned = sanitizeFirestoreData(d.data());
                 votesList.push({ id: d.id, ...(cleaned || {}) });
             });
-            currentState.votes = votesList;
+            const voteMap = new Map();
+            (currentState.votes || []).forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
+            votesList.forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
+            currentState.votes = Array.from(voteMap.values());
             notifyStateChanged(false);
         }, () => {});
     } catch (e) {}
@@ -573,6 +587,16 @@ async function fetchState(isInitial = false) {
                     if ((!currentState.participants || currentState.participants.length === 0) && Array.isArray(data.participants) && data.participants.length > 0) {
                         currentState.participants = data.participants;
                         updated = true;
+                    }
+                    if (Array.isArray(data.votes) && data.votes.length > 0) {
+                        const voteMap = new Map();
+                        (currentState.votes || []).forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
+                        data.votes.forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
+                        const merged = Array.from(voteMap.values());
+                        if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
+                            currentState.votes = merged;
+                            updated = true;
+                        }
                     }
                     if (updated) notifyStateChanged(isInitial);
                 } else {
@@ -1947,28 +1971,45 @@ export async function submitVote(voteData) {
     const voteId = voteData.id || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
     const votePayload = { ...voteData, id: voteId, createdAt: voteData.createdAt || new Date().toISOString() };
 
-    // Save directly to Firestore for serverless / GitHub Pages compatibility
+    // 1. Optimistic local state update
+    if (!currentState.votes) currentState.votes = [];
+    const existIdx = currentState.votes.findIndex(v => v.id === voteId);
+    if (existIdx >= 0) {
+        currentState.votes[existIdx] = votePayload;
+    } else {
+        currentState.votes.push(votePayload);
+    }
+    notifyStateChanged(true);
+
+    // 2. Save directly to Firestore for serverless / GitHub Pages compatibility
     try {
-        await setDoc(doc(db, "votes", voteId), votePayload);
+        if (db) {
+            await setDoc(doc(db, "votes", voteId), votePayload);
+        }
     } catch (e) {
         console.warn('Firestore direct vote submit error:', e);
     }
 
+    // 3. Save to backend API
     try {
         const res = await fetch('/api/vote', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(votePayload)
         });
-        if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.error || 'Failed to submit vote');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.votes && Array.isArray(data.votes)) {
+                currentState.votes = data.votes;
+                notifyStateChanged(true);
+            }
+            return data;
         }
-        return await res.json();
     } catch (e) {
-        // If API fails (e.g. static hosting), but Firestore succeeded, return votePayload
-        return { success: true, vote: votePayload };
+        console.warn('API vote submit warning:', e);
     }
+
+    return { success: true, vote: votePayload };
 }
 
 export async function deleteVote(voteId) {

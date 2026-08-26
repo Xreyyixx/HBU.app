@@ -501,31 +501,40 @@ app.post('/api/voting/recap-url', (req, res) => {
 
 // --- VOTES SUBMISSION & INSPECTION ---
 app.post('/api/vote', (req, res) => {
-    const { voterName, allocations, sessionId } = req.body;
+    const { voterName, allocations, sessionId, totalVotesGiven, isNational, representative, userId, userEmail, userRole, artistName, id } = req.body;
     
-    // Проверка статуса голосования
-    if (store.votingState.status !== 'open') {
-        return res.status(400).json({ success: false, error: 'Voting is closed' });
-    }
-
-    if (store.votingState.endsAt && new Date(store.votingState.endsAt).getTime() < Date.now()) {
-        return res.status(400).json({ success: false, error: 'Voting time expired' });
+    if (!allocations || typeof allocations !== 'object' || Object.keys(allocations).length === 0) {
+        return res.status(400).json({ success: false, error: 'No vote allocations provided' });
     }
 
     const voteRecord = {
-        id: 'vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-        voterName: voterName || 'Зритель ' + (store.votes.length + 1),
+        id: id || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)),
+        voterName: voterName || 'Зритель ' + (((store.votes || []).length) + 1),
         allocations: allocations || {},
+        totalVotesGiven: totalVotesGiven || Object.values(allocations || {}).reduce((s, v) => s + (Number(v) || 0), 0),
+        isNational: Boolean(isNational),
+        representative: representative || null,
         sessionId: sessionId || store.votingState.sessionId,
+        userId: userId || null,
+        userEmail: userEmail || null,
+        userRole: userRole || 'user',
+        artistName: artistName || null,
         timestamp: new Date().toISOString(),
         ip: req.ip
     };
 
     if (!store.votes) store.votes = [];
-    store.votes.push(voteRecord);
+    
+    const existingIdx = store.votes.findIndex(v => v.id === voteRecord.id);
+    if (existingIdx >= 0) {
+        store.votes[existingIdx] = voteRecord;
+    } else {
+        store.votes.push(voteRecord);
+    }
+
     saveStore(store);
     broadcastState('vote_received');
-    res.json({ success: true, voteId: voteRecord.id });
+    res.json({ success: true, voteId: voteRecord.id, votes: store.votes });
 });
 
 app.delete('/api/votes/:id', (req, res) => {
