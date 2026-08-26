@@ -548,9 +548,10 @@ app.delete('/api/votes/:id', (req, res) => {
 
 app.post('/api/votes/reset-all', (req, res) => {
     store.votes = [];
+    store.revealMode = false;
     saveStore(store);
     broadcastState('votes_reset');
-    res.json({ success: true });
+    res.json({ success: true, votes: [] });
 });
 
 // Front-end routes

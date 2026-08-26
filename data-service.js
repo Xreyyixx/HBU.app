@@ -336,12 +336,8 @@ export async function fetchFirestoreStateDirectly() {
                 const cleaned = sanitizeFirestoreData(d.data());
                 votesList.push({ id: d.id, ...(cleaned || {}) });
             });
-            const voteMap = new Map();
-            (currentState.votes || []).forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
-            votesList.forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
-            const mergedVotes = Array.from(voteMap.values());
-            if (safeJsonStringify(currentState.votes) !== safeJsonStringify(mergedVotes)) {
-                currentState.votes = mergedVotes;
+            if (safeJsonStringify(currentState.votes) !== safeJsonStringify(votesList)) {
+                currentState.votes = votesList;
                 stateChanged = true;
             }
         } catch (e) {}
@@ -383,10 +379,7 @@ function initRealtimeSync() {
                     if (parsed && parsed.data) {
                         const newData = parsed.data;
                         if (Array.isArray(newData.votes)) {
-                            const voteMap = new Map();
-                            (currentState.votes || []).forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
-                            newData.votes.forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
-                            newData.votes = Array.from(voteMap.values());
+                            currentState.votes = newData.votes;
                         }
                         currentState = { ...currentState, ...newData };
                         notifyStateChanged(false);
@@ -622,14 +615,10 @@ async function fetchState(isInitial = false) {
                     updated = true;
                 }
 
-                // Sync votes: merge with server votes
+                // Sync votes directly from server
                 if (Array.isArray(data.votes)) {
-                    const currentVoteMap = new Map();
-                    (currentState.votes || []).forEach(v => { if (v && v.id) currentVoteMap.set(v.id, v); });
-                    data.votes.forEach(v => { if (v && v.id) currentVoteMap.set(v.id, v); });
-                    const merged = Array.from(currentVoteMap.values());
-                    if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
-                        currentState.votes = merged;
+                    if (safeJsonStringify(currentState.votes) !== safeJsonStringify(data.votes)) {
+                        currentState.votes = data.votes;
                         updated = true;
                     }
                 }

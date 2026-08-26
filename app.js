@@ -591,14 +591,8 @@ window.selectRepresentative = function(repName) {
 };
 
 window.changeVote = function(participantId, delta) {
-    // Если пользователь не вошел, открываем модальное окно авторизации
-    if (!currentAuthUser) {
-        openAuthModal('voting');
-        return;
-    }
-
     // Если артист пытается голосовать за свой номер
-    if (currentAuthUser.role === 'artist') {
+    if (currentAuthUser && currentAuthUser.role === 'artist') {
         const blockedIds = currentAuthUser.blockedParticipantIds || calculateBlockedIdsForArtist(currentAuthUser.artistData, participantsData);
         if (blockedIds.includes(participantId)) {
             return;
