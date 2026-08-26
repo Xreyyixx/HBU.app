@@ -231,6 +231,9 @@ window.openVoting = async function(minutes) {
     const newSessionId = 'session_' + Date.now();
     const endsAt = minutes > 0 ? new Date(Date.now() + minutes * 60000).toISOString() : null;
     
+    // Обнуляем все голоса и скрываем результаты предыдущего голосования
+    await resetAllVotes();
+
     await updateVotingState({
         status: 'open',
         endsAt: endsAt,
@@ -466,7 +469,16 @@ window.resetParticipantsDefaults = function() {
 // РАСЧЕТ И ОТОБРАЖЕНИЕ PUBLIC POINTS
 // -------------------------------------------------------------
 function calculateAndRenderPublicPoints() {
-    const votes = appState.votes || [];
+    const vState = appState.votingState || { sessionId: null };
+    const currentSessionId = vState.sessionId;
+
+    // Фильтруем голоса по текущей сессии голосования
+    const allVotes = appState.votes || [];
+    const votes = allVotes.filter(v => {
+        if (!currentSessionId) return true;
+        return !v.sessionId || v.sessionId === currentSessionId;
+    });
+
     const participants = appState.participants || [];
     const manualThreshold = appState.manualThreshold || 0;
     const revealMode = appState.revealMode || false;
@@ -900,36 +912,36 @@ function renderContestModalParticipants() {
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Флаг</label>
-                    <input type="text" value="${p.flag || '🏳️'}" onchange="updateContestParticipantField(${idx}, 'flag', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2 py-1.5 text-xs text-white rounded-lg text-center" />
+                    <input type="text" value="${p.flag || '🏳️'}" oninput="updateContestParticipantField(${idx}, 'flag', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2 py-1.5 text-xs text-white rounded-lg text-center" />
                 </div>
                 <div class="sm:col-span-2">
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Страна</label>
-                    <input type="text" value="${p.country || ''}" placeholder="Германия" onchange="updateContestParticipantField(${idx}, 'country', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
+                    <input type="text" value="${p.country || ''}" placeholder="Германия" oninput="updateContestParticipantField(${idx}, 'country', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
                 </div>
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Место / Ранг</label>
-                    <input type="number" value="${p.rank !== undefined && p.rank !== null ? p.rank : ''}" placeholder="1" onchange="updateContestParticipantField(${idx}, 'rank', this.value ? parseInt(this.value, 10) : null)" class="w-full bg-[#16070b] border border-amber-500/25 px-2 py-1.5 text-xs text-white rounded-lg font-mono text-center" />
+                    <input type="number" value="${p.rank !== undefined && p.rank !== null ? p.rank : ''}" placeholder="1" oninput="updateContestParticipantField(${idx}, 'rank', this.value ? parseInt(this.value, 10) : null)" class="w-full bg-[#16070b] border border-amber-500/25 px-2 py-1.5 text-xs text-white rounded-lg font-mono text-center" />
                 </div>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Исполнитель</label>
-                    <input type="text" value="${p.artist || ''}" placeholder="Elena & The Echoes" onchange="updateContestParticipantField(${idx}, 'artist', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
+                    <input type="text" value="${p.artist || ''}" placeholder="Elena & The Echoes" oninput="updateContestParticipantField(${idx}, 'artist', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
                 </div>
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Песня</label>
-                    <input type="text" value="${p.song || ''}" placeholder="Neon Heartbeat" onchange="updateContestParticipantField(${idx}, 'song', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
+                    <input type="text" value="${p.song || ''}" placeholder="Neon Heartbeat" oninput="updateContestParticipantField(${idx}, 'song', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
                 </div>
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Баллы (Public Pts)</label>
-                    <input type="number" value="${p.points !== undefined && p.points !== null ? p.points : ''}" placeholder="240" onchange="updateContestParticipantField(${idx}, 'points', this.value ? parseInt(this.value, 10) : null)" class="w-full bg-[#16070b] border border-amber-500/25 px-2 py-1.5 text-xs text-white rounded-lg font-mono text-center" />
+                    <input type="number" value="${p.points !== undefined && p.points !== null ? p.points : ''}" placeholder="240" oninput="updateContestParticipantField(${idx}, 'points', this.value ? parseInt(this.value, 10) : null)" class="w-full bg-[#16070b] border border-amber-500/25 px-2 py-1.5 text-xs text-white rounded-lg font-mono text-center" />
                 </div>
             </div>
 
             <div>
                 <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Презентация / Открытка (Postcard)</label>
-                <input type="text" value="${p.postcard || ''}" placeholder="Открытка: Гамбургский порт на рассвете" onchange="updateContestParticipantField(${idx}, 'postcard', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1 text-[11px] text-slate-300 rounded-lg" />
+                <input type="text" value="${p.postcard || ''}" placeholder="Открытка: Гамбургский порт на рассвете" oninput="updateContestParticipantField(${idx}, 'postcard', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1 text-[11px] text-slate-300 rounded-lg" />
             </div>
         </div>
     `).join('');

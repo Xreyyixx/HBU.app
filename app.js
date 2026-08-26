@@ -735,14 +735,6 @@ window.submitVote = async function() {
 
         // Отправка на бэкенд и в Firestore
         await submitVoteToService(votePayload);
-
-        // Mirror Firestore
-        try {
-            await addDoc(collection(db, "votes"), {
-                ...votePayload,
-                timestamp: serverTimestamp()
-            });
-        } catch (e) {}
         
         localStorage.setItem('harivision_voted_session', systemState.sessionId || 'active');
         renderVotingCard();

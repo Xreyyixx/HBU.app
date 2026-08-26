@@ -1988,13 +1988,17 @@ export async function deleteVote(voteId) {
 
 export async function resetAllVotes() {
     currentState.votes = [];
+    currentState.revealMode = false;
     notifyStateChanged(true);
 
     try {
-        const snap = await getDocs(collection(db, "votes"));
-        const deletePromises = [];
-        snap.forEach(d => deletePromises.push(deleteDoc(d.ref)));
-        await Promise.all(deletePromises);
+        if (db) {
+            const snap = await getDocs(collection(db, "votes"));
+            const deletePromises = [];
+            snap.forEach(d => deletePromises.push(deleteDoc(d.ref)));
+            await Promise.all(deletePromises);
+            await setDoc(doc(db, "system", "settings"), { revealMode: false }, { merge: true });
+        }
     } catch (e) {
         console.warn('Firestore reset votes error:', e);
     }
