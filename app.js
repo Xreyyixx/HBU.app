@@ -726,6 +726,7 @@ window.submitVote = async function() {
     }
 
     try {
+        const nowIso = new Date().toISOString();
         const votePayload = {
             voterName: nameValue,
             allocations: { ...userAllocations },
@@ -737,19 +738,28 @@ window.submitVote = async function() {
             userEmail: currentAuthUser ? currentAuthUser.email : null,
             userRole: currentAuthUser ? currentAuthUser.role : 'user',
             artistName: (currentAuthUser && currentAuthUser.role === 'artist') ? currentAuthUser.displayName : null,
-            timestamp: serverTimestamp()
+            createdAt: nowIso,
+            timestamp: nowIso
         };
 
-        // 1. Прямая запись в коллекцию votes Firestore (с serverTimestamp)
+        // 1. Прямая запись в коллекцию votes Firestore (с обработкой прав/ошибок без блокировки)
         if (db) {
-            await addDoc(collection(db, "votes"), votePayload);
+            try {
+                await addDoc(collection(db, "votes"), {
+                    ...votePayload,
+                    timestamp: serverTimestamp()
+                });
+            } catch (firestoreErr) {
+                console.warn('Direct Firestore vote note (falling back to backend API sync):', firestoreErr);
+            }
         }
 
-        // 2. Локальное и серверное сохранение
-        await submitVoteToService({
-            ...votePayload,
-            createdAt: new Date().toISOString()
-        }).catch(err => console.warn('Local service sync note:', err));
+        // 2. Локальное и серверное сохранение через backend API
+        try {
+            await submitVoteToService(votePayload);
+        } catch (serviceErr) {
+            console.warn('Local service sync note:', serviceErr);
+        }
         
         if (systemState.sessionId) {
             localStorage.setItem('harivision_voted_session', systemState.sessionId);
