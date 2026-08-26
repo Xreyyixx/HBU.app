@@ -752,7 +752,12 @@ function getHeartSVG(extraClass = "w-10 h-10") {
 // -------------------------------------------------------------
 function renderMainView() {
     const container = document.getElementById('portal-view-container');
-    if (!container) return;
+    if (!container) {
+        if (document.getElementById('app-card')) {
+            renderVotingCard();
+        }
+        return;
+    }
 
     updateSideMenuContests();
 
@@ -1555,15 +1560,20 @@ subscribeState((state) => {
 
     if (currentContentHash !== lastRenderedContentHash) {
         lastRenderedContentHash = currentContentHash;
-        if (currentPortalView === 'voting') {
-            if (prevStatus !== systemState.status || prevSession !== systemState.sessionId) {
-                renderVotingCard();
-            }
+        if (currentPortalView === 'voting' || isNational) {
+            renderVotingCard();
         } else {
             renderMainView();
+        }
+    } else if (currentPortalView === 'voting' || isNational) {
+        if (prevStatus !== systemState.status || prevSession !== systemState.sessionId) {
+            renderVotingCard();
         }
     }
 });
 
 // Первоначальный рендер
 renderMainView();
+if (isNational || currentPortalView === 'voting') {
+    renderVotingCard();
+}

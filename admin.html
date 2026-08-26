@@ -32,15 +32,15 @@
 
         <form id="login-form" class="flex flex-col gap-4">
             <div>
-                <label class="text-[10px] uppercase font-bold text-amber-400 tracking-wider block mb-1.5">Электронная почта (Email)</label>
-                <input type="email" id="email" required placeholder="admin@harivision.org" class="w-full bg-[#060204] border border-amber-500/20 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl">
+                <label class="text-[10px] uppercase font-bold text-amber-400 tracking-wider block mb-1.5">Логин или Email</label>
+                <input type="text" id="email" required placeholder="admin или email..." class="w-full bg-[#060204] border border-amber-500/20 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl">
             </div>
             <div>
                 <label class="text-[10px] uppercase font-bold text-amber-400 tracking-wider block mb-1.5">Пароль</label>
                 <input type="password" id="password" required placeholder="••••••••" class="w-full bg-[#060204] border border-amber-500/20 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl">
             </div>
             <button type="submit" id="login-submit-btn" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-widest py-3.5 mt-2 transition rounded-xl shadow-lg flex items-center justify-center gap-2">
-                <span>Войти через Firebase</span>
+                <span>Войти в панель управления</span>
             </button>
             <p id="auth-error" class="text-xs text-rose-400 hidden mt-2 text-center bg-rose-950/40 p-2.5 rounded-xl border border-rose-500/20"></p>
         </form>
