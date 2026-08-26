@@ -536,10 +536,7 @@ function initFirestoreListeners() {
                 const cleaned = sanitizeFirestoreData(d.data());
                 votesList.push({ id: d.id, ...(cleaned || {}) });
             });
-            const voteMap = new Map();
-            (currentState.votes || []).forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
-            votesList.forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
-            currentState.votes = Array.from(voteMap.values());
+            currentState.votes = votesList;
             notifyStateChanged(false);
         }, () => {});
     } catch (e) {}
@@ -573,34 +570,71 @@ async function fetchState(isInitial = false) {
         if (res.ok) {
             const data = await res.json();
             if (data && typeof data === 'object') {
-                // If Firestore is active, do not overwrite fresh cloud data with local store.json
-                if (db) {
-                    let updated = false;
-                    if ((!currentState.contests || currentState.contests.length === 0) && Array.isArray(data.contests) && data.contests.length > 0) {
-                        currentState.contests = data.contests;
+                let updated = false;
+
+                // Sync votingState
+                if (data.votingState && typeof data.votingState === 'object') {
+                    if (safeJsonStringify(currentState.votingState) !== safeJsonStringify(data.votingState)) {
+                        currentState.votingState = { ...currentState.votingState, ...data.votingState };
                         updated = true;
                     }
-                    if ((!currentState.news || currentState.news.length === 0) && Array.isArray(data.news) && data.news.length > 0) {
-                        currentState.news = data.news;
-                        updated = true;
-                    }
-                    if ((!currentState.participants || currentState.participants.length === 0) && Array.isArray(data.participants) && data.participants.length > 0) {
+                }
+
+                // Sync participants
+                if (Array.isArray(data.participants) && data.participants.length > 0) {
+                    if (safeJsonStringify(currentState.participants) !== safeJsonStringify(data.participants)) {
                         currentState.participants = data.participants;
                         updated = true;
                     }
-                    if (Array.isArray(data.votes) && data.votes.length > 0) {
-                        const voteMap = new Map();
-                        (currentState.votes || []).forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
-                        data.votes.forEach(v => { if (v && v.id) voteMap.set(v.id, v); });
-                        const merged = Array.from(voteMap.values());
-                        if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
-                            currentState.votes = merged;
-                            updated = true;
-                        }
+                }
+
+                // Sync news
+                if (Array.isArray(data.news) && data.news.length > 0) {
+                    if (safeJsonStringify(currentState.news) !== safeJsonStringify(data.news)) {
+                        currentState.news = data.news;
+                        updated = true;
                     }
-                    if (updated) notifyStateChanged(isInitial);
-                } else {
-                    currentState = { ...currentState, ...data };
+                }
+
+                // Sync contests
+                if (Array.isArray(data.contests) && data.contests.length > 0) {
+                    if (safeJsonStringify(currentState.contests) !== safeJsonStringify(data.contests)) {
+                        currentState.contests = data.contests;
+                        updated = true;
+                    }
+                }
+
+                // Sync settings
+                if (data.recapVideoUrl !== undefined && currentState.recapVideoUrl !== data.recapVideoUrl) {
+                    currentState.recapVideoUrl = data.recapVideoUrl;
+                    updated = true;
+                }
+                if (data.featuredContestId !== undefined && currentState.featuredContestId !== data.featuredContestId) {
+                    currentState.featuredContestId = data.featuredContestId;
+                    updated = true;
+                }
+                if (data.manualThreshold !== undefined && currentState.manualThreshold !== data.manualThreshold) {
+                    currentState.manualThreshold = data.manualThreshold;
+                    updated = true;
+                }
+                if (data.revealMode !== undefined && currentState.revealMode !== data.revealMode) {
+                    currentState.revealMode = data.revealMode;
+                    updated = true;
+                }
+
+                // Sync votes: merge with server votes
+                if (Array.isArray(data.votes)) {
+                    const currentVoteMap = new Map();
+                    (currentState.votes || []).forEach(v => { if (v && v.id) currentVoteMap.set(v.id, v); });
+                    data.votes.forEach(v => { if (v && v.id) currentVoteMap.set(v.id, v); });
+                    const merged = Array.from(currentVoteMap.values());
+                    if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
+                        currentState.votes = merged;
+                        updated = true;
+                    }
+                }
+
+                if (updated || isInitial) {
                     notifyStateChanged(isInitial);
                 }
             }

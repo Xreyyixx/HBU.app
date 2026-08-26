@@ -680,17 +680,12 @@ window.navigateToVotingSubPage = function(subPage) {
 };
 
 window.submitVote = async function() {
-    // 1. Проверка авторизации
-    if (!currentAuthUser) {
-        openAuthModal('voting');
-        return;
-    }
-
     const inputName = document.getElementById('voter-name-input');
-    const nameValue = inputName ? inputName.value.trim() : (currentAuthUser.displayName || userName.trim());
+    const nameValue = inputName ? inputName.value.trim() : (currentAuthUser ? currentAuthUser.displayName : userName.trim());
 
     if (!nameValue) {
         alert("Пожалуйста, введите ваше имя перед отправкой голоса.");
+        if (inputName) inputName.focus();
         return;
     }
 
@@ -700,7 +695,7 @@ window.submitVote = async function() {
     }
 
     // 2. Блокировка собственных номеров для артиста
-    if (currentAuthUser.role === 'artist') {
+    if (currentAuthUser && currentAuthUser.role === 'artist') {
         const blockedIds = currentAuthUser.blockedParticipantIds || calculateBlockedIdsForArtist(currentAuthUser.artistData, participantsData);
         blockedIds.forEach(bid => {
             if (userAllocations[bid]) delete userAllocations[bid];
@@ -727,10 +722,10 @@ window.submitVote = async function() {
             isNational: isNational,
             representative: selectedRepresentative || null,
             sessionId: systemState.sessionId,
-            userId: currentAuthUser.uid,
-            userEmail: currentAuthUser.email,
-            userRole: currentAuthUser.role,
-            artistName: currentAuthUser.role === 'artist' ? currentAuthUser.displayName : null
+            userId: currentAuthUser ? currentAuthUser.uid : null,
+            userEmail: currentAuthUser ? currentAuthUser.email : null,
+            userRole: currentAuthUser ? currentAuthUser.role : 'user',
+            artistName: (currentAuthUser && currentAuthUser.role === 'artist') ? currentAuthUser.displayName : null
         };
 
         // Отправка на бэкенд и в Firestore
@@ -1280,9 +1275,12 @@ function renderVotingCard() {
                     <p class="text-xs text-slate-300 font-medium mb-6 leading-relaxed">Вам доступно 10 голосов. Распределите их между номерами (до 5 голосов одному выступлению).</p>
                     
                     ${!currentAuthUser ? `
-                        <div class="mb-5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-left">
-                            <div class="text-xs font-bold text-amber-300 mb-0.5">Требуется вход в аккаунт</div>
-                            <div class="text-[11px] text-slate-300">Для артистов действует запрет голосования за свой номер. Для зрителей доступна быстрая регистрация.</div>
+                        <div class="mb-5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-left flex items-center justify-between">
+                            <div>
+                                <div class="text-xs font-bold text-amber-300 mb-0.5">👤 Режим Зрителя</div>
+                                <div class="text-[11px] text-slate-300">Распределение 10 голосов доступно всем.</div>
+                            </div>
+                            <button onclick="openAuthModal('voting')" class="text-[11px] text-amber-400 hover:text-amber-300 font-bold uppercase underline">Вход</button>
                         </div>
                     ` : (currentAuthUser.role === 'artist' ? `
                         <div class="mb-5 p-3 rounded-xl bg-amber-500/15 border border-amber-500/35 text-left flex items-center justify-between">
@@ -1302,8 +1300,8 @@ function renderVotingCard() {
                         </div>
                     `)}
 
-                    <button onclick="${currentAuthUser ? `navigateToVotingSubPage('recap')` : `openAuthModal('voting')`}" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition shadow-lg rounded-xl cursor-pointer">
-                        ${currentAuthUser ? 'Начать голосование' : 'Войти и начать голосование'}
+                    <button onclick="navigateToVotingSubPage('recap')" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition shadow-lg rounded-xl cursor-pointer">
+                        Начать голосование
                     </button>
                 </div>
             </div>
@@ -1322,7 +1320,7 @@ function renderVotingCard() {
                     <iframe class="w-full h-full" src="${recapUrl}" frameborder="0" allow="clipboard-write; autoplay" webkitAllowFullScreen mozallowfullscreen allowfullscreen></iframe>
                 </div>
                 <div class="flex flex-col md:flex-row gap-4 pt-2">
-                    <button onclick="${currentAuthUser ? `navigateToVotingSubPage('voting')` : `openAuthModal('voting')`}" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition shadow-lg rounded-xl cursor-pointer">
+                    <button onclick="navigateToVotingSubPage('voting')" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition shadow-lg rounded-xl cursor-pointer">
                         Перейти к голосованию &rarr;
                     </button>
                 </div>
@@ -1420,9 +1418,9 @@ function renderVotingCard() {
                         <button onclick="handleLogout()" class="text-[10px] uppercase font-bold text-slate-400 hover:text-rose-400 transition">Сменить</button>
                     </div>
                 `) : `
-                    <div class="flex items-center justify-between bg-amber-500/10 border border-amber-500/25 p-3 text-xs text-amber-200 rounded-xl">
-                        <span>Для отправки голоса необходимо авторизоваться</span>
-                        <button onclick="openAuthModal('voting')" class="text-xs uppercase font-black text-slate-950 bg-amber-500 px-3 py-1 rounded-lg hover:bg-amber-400 transition shadow">Войти</button>
+                    <div class="flex items-center justify-between bg-[#16070b] border border-amber-500/20 p-2.5 rounded-xl text-xs">
+                        <span class="text-slate-300 flex items-center gap-1.5 font-medium"><span>👤</span> Голосование зрителя</span>
+                        <button onclick="openAuthModal('voting')" class="text-[11px] font-bold text-amber-400 hover:text-amber-300 uppercase underline">Войти как артист</button>
                     </div>
                 `)}
 
