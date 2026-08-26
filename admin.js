@@ -60,7 +60,7 @@ window.manualCloudSync = async function() {
 };
 
 // -------------------------------------------------------------
-// АУТЕНТИФИКАЦИЯ (ЧИСТЫЙ FIREBASE AUTH)
+// АУТЕНТИФИКАЦИЯ (FIREBASE AUTH + SERVER ADMIN SESSION)
 // -------------------------------------------------------------
 let isAuthenticated = false;
 
@@ -79,30 +79,46 @@ function setAdminAuthenticated(authenticated) {
     }
 }
 
-// Отслеживание сессии Firebase Auth
-onAuthStateChanged(auth, async (user) => {
-    if (user) {
+// Проверка сохраненной сессии при старте
+(async function initAdminAuthSession() {
+    const hasServerSession = await verifyAdminSession();
+    if (hasServerSession) {
         setAdminAuthenticated(true);
-        // Загрузка свежего состояния из облака при входе
         try {
             await fetchFirestoreStateDirectly();
         } catch (e) {}
-    } else {
-        setAdminAuthenticated(false);
+        return;
     }
-});
+
+    // Отслеживание сессии Firebase Auth
+    onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            setAdminAuthenticated(true);
+            try {
+                await fetchFirestoreStateDirectly();
+            } catch (e) {}
+        } else {
+            const token = localStorage.getItem('harivision_admin_token');
+            if (!token) {
+                setAdminAuthenticated(false);
+            }
+        }
+    });
+})();
 
 document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const loginInput = (e.target.email.value || '').trim();
-    const password = (e.target.password.value || '').trim();
+    const loginInput = (document.getElementById('email')?.value || '').trim();
+    const password = (document.getElementById('password')?.value || '').trim();
     const errEl = document.getElementById('auth-error');
     const submitBtn = document.getElementById('login-submit-btn');
-    errEl.classList.add('hidden');
+    if (errEl) errEl.classList.add('hidden');
 
     if (!loginInput || !password) {
-        errEl.innerText = "Пожалуйста, заполните все поля";
-        errEl.classList.remove('hidden');
+        if (errEl) {
+            errEl.innerText = "Пожалуйста, заполните все поля";
+            errEl.classList.remove('hidden');
+        }
         return;
     }
 
@@ -111,33 +127,53 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
         submitBtn.classList.add('opacity-70');
     }
 
+    let authSuccess = false;
+
+    // 1. Попытка входа через серверный API
     try {
-        const firebaseEmail = loginInput.includes('@') ? loginInput : `${loginInput}@harivision.org`;
-        await signInWithEmailAndPassword(auth, firebaseEmail, password);
-        showToast('Вход в панель администратора выполнен');
-    } catch (firebaseErr) {
-        console.error('Firebase Auth Error:', firebaseErr);
-        let msg = "Неверный логин или пароль администратора";
-        if (firebaseErr.code === 'auth/invalid-credential' || firebaseErr.code === 'auth/wrong-password' || firebaseErr.code === 'auth/user-not-found') {
-            msg = "Неверный email или пароль Firebase";
-        } else if (firebaseErr.code === 'auth/invalid-email') {
-            msg = "Некорректный формат email";
-        } else if (firebaseErr.code === 'auth/too-many-requests') {
-            msg = "Слишком много неудачных попыток входа. Попробуйте позже.";
-        } else if (firebaseErr.message) {
-            msg = firebaseErr.message;
+        const srvRes = await loginAdminServer(loginInput, password);
+        if (srvRes && srvRes.token) {
+            localStorage.setItem('harivision_admin_token', srvRes.token);
+            setAdminAuthenticated(true);
+            showToast('Вход в панель администратора выполнен');
+            authSuccess = true;
         }
-        errEl.innerText = msg;
-        errEl.classList.remove('hidden');
-    } finally {
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.classList.remove('opacity-70');
+    } catch (srvErr) {}
+
+    // 2. Если серверный вход не сработал, пробуем Firebase Auth
+    if (!authSuccess) {
+        try {
+            const firebaseEmail = loginInput.includes('@') ? loginInput : `${loginInput}@harivision.org`;
+            await signInWithEmailAndPassword(auth, firebaseEmail, password);
+            showToast('Вход через Firebase Auth выполнен');
+            authSuccess = true;
+        } catch (firebaseErr) {
+            console.error('Firebase Auth Error:', firebaseErr);
+            let msg = "Неверный логин или пароль администратора";
+            if (firebaseErr.code === 'auth/invalid-credential' || firebaseErr.code === 'auth/wrong-password' || firebaseErr.code === 'auth/user-not-found') {
+                msg = "Неверный логин или пароль (по умолчанию: admin / admin)";
+            } else if (firebaseErr.code === 'auth/invalid-email') {
+                msg = "Некорректный формат email";
+            } else if (firebaseErr.code === 'auth/too-many-requests') {
+                msg = "Слишком много неудачных попыток входа. Попробуйте позже.";
+            } else if (firebaseErr.message) {
+                msg = firebaseErr.message;
+            }
+            if (errEl) {
+                errEl.innerText = msg;
+                errEl.classList.remove('hidden');
+            }
         }
+    }
+
+    if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-70');
     }
 });
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
+    localStorage.removeItem('harivision_admin_token');
     try {
         await signOut(auth);
     } catch (e) {}
@@ -296,41 +332,60 @@ window.closeVoteModal = function() {
 };
 
 window.inspectVote = function(voteId) {
-    const vote = (appState.votes || []).find(v => v.id === voteId);
-    if (!vote) return;
+    const vote = (appState.votes || []).find(v => String(v.id) === String(voteId));
+    if (!vote) {
+        showToast('Голос не найден', true);
+        return;
+    }
 
-    activeModalVoteId = voteId;
+    activeModalVoteId = vote.id;
     const isArtist = vote.userRole === 'artist';
-    const badgeText = isArtist ? ` [⭐ Артист: ${vote.artistName || vote.voterName}]` : (vote.isNational ? ' [🌍 Национальное]' : ' [👤 Зритель]');
-    document.getElementById('modal-voter-name').innerText = `Голос: ${vote.voterName || 'Аноним'}${badgeText}`;
+    const isNational = Boolean(vote.isNational);
+    const badgeText = isArtist ? ` [⭐ Артист: ${vote.artistName || vote.voterName}]` : (isNational ? ` [🌍 Национальное: ${vote.representative || 'Представитель'}]` : ' [👤 Зритель]');
+    
+    const modalTitleEl = document.getElementById('modal-voter-name');
+    if (modalTitleEl) {
+        modalTitleEl.innerText = `Голос: ${vote.voterName || 'Аноним'}${badgeText}`;
+    }
     
     const allocEl = document.getElementById('modal-allocations');
     const participants = appState.participants || [];
 
-    allocEl.innerHTML = Object.entries(vote.allocations || {}).map(([pId, count]) => {
-        const num = Number(count) || 0;
-        if (num <= 0) return '';
-        
-        const participant = participants.find((p, idx) => {
-            const numVal = p.number || (idx + 1);
-            return String(p.id).toLowerCase() === String(pId).toLowerCase() ||
-                   String(numVal) === String(pId) ||
-                   `p${numVal}`.toLowerCase() === String(pId).toLowerCase() ||
-                   `p${idx + 1}`.toLowerCase() === String(pId).toLowerCase();
-        });
+    if (allocEl) {
+        const entries = Object.entries(vote.allocations || {}).filter(([_, count]) => (Number(count) || 0) > 0);
+        if (entries.length === 0) {
+            allocEl.innerHTML = '<div class="text-xs text-slate-400 text-center py-4">Нет распределенных голосов</div>';
+        } else {
+            allocEl.innerHTML = entries.map(([pId, count]) => {
+                const num = Number(count) || 0;
+                const participant = participants.find((p, idx) => {
+                    const numVal = p.number || (idx + 1);
+                    return String(p.id).toLowerCase() === String(pId).toLowerCase() ||
+                           String(numVal) === String(pId) ||
+                           `p${numVal}`.toLowerCase() === String(pId).toLowerCase() ||
+                           `p${idx + 1}`.toLowerCase() === String(pId).toLowerCase() ||
+                           (p.name && p.name.toLowerCase() === String(pId).toLowerCase());
+                });
 
-        const name = participant ? `${participant.flag || '🏳️'} ${participant.name || ('Number ' + (participant.number || pId))}` : `Номер ${pId}`;
-        const songInfo = participant && participant.song ? ` (${participant.song})` : '';
+                const name = participant ? `${participant.flag || '🏳️'} #${participant.number || ''} ${participant.name || ('Number ' + (participant.number || pId))}` : `Номер ${pId}`;
+                const countryArtist = participant ? `${participant.country ? participant.country + ' • ' : ''}${participant.artist || ''}` : '';
+                const songInfo = participant && participant.song ? ` «${participant.song}»` : '';
 
-        return `
-            <div class="flex justify-between items-center bg-[#16070b] border border-amber-500/20 p-2.5 rounded-xl text-xs">
-                <span class="font-bold text-slate-200">${name}${songInfo}</span>
-                <span class="font-mono font-black text-amber-400 px-2 py-0.5 bg-amber-500/10 rounded-lg border border-amber-500/20">${num} ${num === 1 ? 'голос' : (num < 5 ? 'голоса' : 'голосов')}</span>
-            </div>
-        `;
-    }).join('') || '<div class="text-xs text-slate-400">Нет распределенных голосов</div>';
+                return `
+                    <div class="flex justify-between items-center bg-[#16070b] border border-amber-500/20 p-3 rounded-2xl text-xs">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-slate-100">${name}</span>
+                            <span class="text-[10px] text-slate-400">${countryArtist}${songInfo}</span>
+                        </div>
+                        <span class="font-mono font-black text-amber-400 px-3 py-1 bg-amber-500/10 rounded-xl border border-amber-500/25 text-xs">${num} ${num === 1 ? 'голос' : (num < 5 ? 'голоса' : 'голосов')}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+    }
 
-    document.getElementById('vote-modal').classList.remove('hidden');
+    const modal = document.getElementById('vote-modal');
+    if (modal) modal.classList.remove('hidden');
 };
 
 document.getElementById('reset-vote-btn').addEventListener('click', async () => {
@@ -339,6 +394,20 @@ document.getElementById('reset-vote-btn').addEventListener('click', async () => 
     closeVoteModal();
     showToast('Голос аннулирован');
 });
+
+window.deleteVote = function(voteId) {
+    const vote = (appState.votes || []).find(v => String(v.id) === String(voteId));
+    const voterLabel = vote ? (vote.voterName || `Голос #${voteId}`) : `Голос #${voteId}`;
+    openAdminConfirmModal({
+        title: 'Аннулирование голоса',
+        message: `Вы действительно хотите аннулировать голос "${voterLabel}"?`,
+        confirmText: 'Аннулировать голос',
+        onConfirm: async () => {
+            await deleteVote(voteId);
+            showToast(`Голос ${voterLabel} аннулирован`);
+        }
+    });
+};
 
 // -------------------------------------------------------------
 // УПРАВЛЕНИЕ УЧАСТНИКАМИ (PARTICIPANTS / SONGS)
@@ -477,36 +546,39 @@ window.resetParticipantsDefaults = function() {
 };
 
 // -------------------------------------------------------------
-// РАСЧЕТ И ОТОБРАЖЕНИЕ PUBLIC POINTS
+// РАСЧЕТ И ОТОБРАЖЕНИЕ PUBLIC POINTS И ДЕТАЛИЗАЦИИ ГОЛОСОВАНИЯ
 // -------------------------------------------------------------
 function calculateAndRenderPublicPoints() {
     const vState = appState.votingState || { sessionId: null };
     const currentSessionId = vState.sessionId;
 
-    // Получаем все голоса без ошибочной фильтрации
+    // Получаем все голоса
     const allVotes = Array.isArray(appState.votes) ? appState.votes : [];
     
-    // Если есть сессия и голоса с этой сессией, фильтруем; иначе учитываем все активные голоса
+    // Если есть активная сессия и есть голоса именно с этой сессией, отдаем им приоритет, иначе показываем все голоса
     let votes = allVotes;
     if (currentSessionId && allVotes.some(v => v.sessionId === currentSessionId)) {
         votes = allVotes.filter(v => !v.sessionId || v.sessionId === currentSessionId);
     }
 
     const participants = appState.participants || [];
-    const manualThreshold = appState.manualThreshold || 0;
-    const revealMode = appState.revealMode || false;
+    const manualThreshold = Number(appState.manualThreshold) || 0;
+    const revealMode = Boolean(appState.revealMode);
 
-    // Суммирование голосов с поддержкой любых вариантов ID и номеров
+    // Суммирование голосов с поддержкой любых вариантов ключей распределения
     const totals = {};
     participants.forEach((p, idx) => {
         totals[p.id] = 0;
     });
+
+    let totalVotesCast = 0;
 
     votes.forEach(v => {
         if (!v || !v.allocations || typeof v.allocations !== 'object') return;
         Object.entries(v.allocations).forEach(([allocKey, count]) => {
             const num = Number(count) || 0;
             if (num <= 0) return;
+            totalVotesCast += num;
 
             // Ищем соответствующего участника
             const matched = participants.find((p, idx) => {
@@ -514,7 +586,8 @@ function calculateAndRenderPublicPoints() {
                 return String(p.id).toLowerCase() === String(allocKey).toLowerCase() ||
                        String(numVal) === String(allocKey) ||
                        `p${numVal}`.toLowerCase() === String(allocKey).toLowerCase() ||
-                       `p${idx + 1}`.toLowerCase() === String(allocKey).toLowerCase();
+                       `p${idx + 1}`.toLowerCase() === String(allocKey).toLowerCase() ||
+                       (p.name && p.name.toLowerCase() === String(allocKey).toLowerCase());
             });
 
             if (matched) {
@@ -530,6 +603,7 @@ function calculateAndRenderPublicPoints() {
         const numVal = p.number || (idx + 1);
         const count = totals[p.id] || 0;
         const passed = count >= manualThreshold;
+        const percent = totalVotesCast > 0 ? ((count / totalVotesCast) * 100).toFixed(1) : '0.0';
         return {
             id: p.id,
             number: numVal,
@@ -539,6 +613,7 @@ function calculateAndRenderPublicPoints() {
             artist: p.artist || '',
             song: p.song || '',
             count,
+            percent,
             passed
         };
     });
@@ -564,21 +639,28 @@ function calculateAndRenderPublicPoints() {
         }
     });
 
-    // Рендер таблицы
+    // 1. Рендер таблицы Public Points
     const tbody = document.getElementById('public-table-body');
     if (tbody) {
         if (results.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-500">Нет зарегистрированных номеров</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-500 font-mono">Нет зарегистрированных номеров</td></tr>`;
         } else {
             tbody.innerHTML = results.map(item => `
                 <tr class="hover:bg-amber-500/5 transition">
                     <td class="py-3 font-bold text-white flex items-center gap-2">
-                        <span class="text-amber-400 font-mono">#${item.number}</span>
-                        <span>${item.flag}</span>
-                        <span class="truncate max-w-[200px]">${item.name}</span>
-                        ${item.song ? `<span class="text-[10px] text-slate-400 font-normal truncate max-w-[150px]">(${item.song})</span>` : ''}
+                        <span class="text-amber-400 font-mono font-black">#${item.number}</span>
+                        <span class="text-base">${item.flag}</span>
+                        <div class="flex flex-col">
+                            <span class="truncate max-w-[200px] text-slate-100">${item.name}</span>
+                            ${item.song || item.artist ? `<span class="text-[10px] text-slate-400 font-normal truncate max-w-[200px]">${item.artist ? item.artist + ' – ' : ''}«${item.song || 'Песня'}»</span>` : ''}
+                        </div>
                     </td>
-                    <td class="py-3 font-bold ${item.count > 0 ? 'text-amber-300' : 'text-slate-500'} font-mono text-sm">${item.count}</td>
+                    <td class="py-3">
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold ${item.count > 0 ? 'text-amber-300' : 'text-slate-500'} font-mono text-sm">${item.count}</span>
+                            <span class="text-[10px] text-slate-500 font-mono">(${item.percent}%)</span>
+                        </div>
+                    </td>
                     <td class="py-3">
                         <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${item.passed ? 'bg-green-950/60 text-green-400 border border-green-500/30' : 'bg-rose-950/40 text-rose-400 border border-rose-500/20'}">
                             ${item.passed ? '✓ Пройден' : '✗ Ниже порога'}
@@ -593,11 +675,16 @@ function calculateAndRenderPublicPoints() {
         }
     }
 
-    // Обновление счетчика зрителей
+    // 2. Обновление счетчиков в карточке статистики
     const votersCountEl = document.getElementById('voters-count');
     if (votersCountEl) votersCountEl.innerText = votes.length;
 
-    // Рендер списка зрителей
+    const votersTotalPointsCastEl = document.getElementById('voters-total-points-cast');
+    if (votersTotalPointsCastEl) {
+        votersTotalPointsCastEl.innerText = `Всего отдано голосов: ${totalVotesCast}`;
+    }
+
+    // 3. Рендер быстрых чипов зрителей
     const votersListEl = document.getElementById('voters-list');
     if (votersListEl) {
         if (votes.length === 0) {
@@ -605,19 +692,102 @@ function calculateAndRenderPublicPoints() {
         } else {
             votersListEl.innerHTML = votes.map(v => {
                 const totalGiven = v.totalVotesGiven || Object.values(v.allocations || {}).reduce((s, x) => s + (Number(x) || 0), 0);
-                const roleBadge = v.userRole === 'artist' ? '⭐ ' : '';
+                const roleIcon = v.userRole === 'artist' ? '⭐' : (v.isNational ? '🌍' : '👤');
+                const roleBadge = v.userRole === 'artist' ? '⭐ ' : (v.isNational ? '🌍 ' : '');
                 return `
-                    <button onclick="inspectVote('${v.id}')" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-slate-200 text-[11px] font-medium px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer">
-                        <span>${v.userRole === 'artist' ? '⭐' : '👤'}</span>
+                    <button onclick="inspectVote('${v.id}')" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-slate-200 text-[11px] font-medium px-2.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer">
+                        <span>${roleIcon}</span>
                         <span class="truncate max-w-[120px] font-bold">${roleBadge}${v.voterName || 'Зритель'}</span>
-                        <span class="text-[10px] font-mono text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">(${totalGiven})</span>
+                        <span class="text-[10px] font-mono text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-lg">(${totalGiven})</span>
                     </button>
                 `;
             }).join('');
         }
     }
 
-    // Кнопка reveal
+    // 4. Рендер детальной таблицы всех голосов
+    const detailedBadgeEl = document.getElementById('detailed-votes-badge');
+    if (detailedBadgeEl) {
+        detailedBadgeEl.innerText = `Всего голосов: ${votes.length} (отдано: ${totalVotesCast})`;
+    }
+
+    const detailedTableBody = document.getElementById('detailed-votes-table-body');
+    if (detailedTableBody) {
+        if (votes.length === 0) {
+            detailedTableBody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="py-8 text-center text-slate-500 font-mono text-xs">
+                        Пока не поступило ни одного голоса в текущей сессии
+                    </td>
+                </tr>
+            `;
+        } else {
+            detailedTableBody.innerHTML = votes.map((v, idx) => {
+                const totalGiven = v.totalVotesGiven || Object.values(v.allocations || {}).reduce((s, x) => s + (Number(x) || 0), 0);
+                const isArtist = v.userRole === 'artist';
+                const isNational = Boolean(v.isNational);
+
+                let roleBadgeHtml = '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">👤 Зритель</span>';
+                if (isArtist) {
+                    roleBadgeHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">⭐ Артист (${v.artistName || v.voterName})</span>`;
+                } else if (isNational) {
+                    roleBadgeHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">🌍 Национальное (${v.representative || 'Жюри'})</span>`;
+                }
+
+                // Форматирование распределения
+                const allocItems = Object.entries(v.allocations || {})
+                    .filter(([_, count]) => (Number(count) || 0) > 0)
+                    .map(([allocKey, count]) => {
+                        const num = Number(count) || 0;
+                        const p = participants.find((item, pIdx) => {
+                            const n = item.number || (pIdx + 1);
+                            return String(item.id).toLowerCase() === String(allocKey).toLowerCase() ||
+                                   String(n) === String(allocKey) ||
+                                   `p${n}`.toLowerCase() === String(allocKey).toLowerCase() ||
+                                   `p${pIdx + 1}`.toLowerCase() === String(allocKey).toLowerCase() ||
+                                   (item.name && item.name.toLowerCase() === String(allocKey).toLowerCase());
+                        });
+                        const flag = p ? (p.flag || '🏳️') : '';
+                        const numVal = p ? `#${p.number}` : allocKey;
+                        const label = p ? (p.name || numVal) : numVal;
+                        return `<span class="inline-flex items-center gap-1 bg-[#16070b] border border-amber-500/20 px-2 py-0.5 rounded-lg text-[11px] font-mono"><span class="text-xs">${flag}</span><span class="font-bold text-slate-200">${label}:</span> <span class="text-amber-400 font-bold">${num}</span></span>`;
+                    }).join(' ');
+
+                return `
+                    <tr class="hover:bg-amber-500/5 transition">
+                        <td class="py-3 font-mono text-slate-500">#${idx + 1}</td>
+                        <td class="py-3 font-bold text-white">
+                            <div class="flex flex-col">
+                                <span class="text-slate-100">${v.voterName || 'Анонимный зритель'}</span>
+                                ${v.voterEmail ? `<span class="text-[10px] font-mono text-slate-500">${v.voterEmail}</span>` : ''}
+                            </div>
+                        </td>
+                        <td class="py-3">${roleBadgeHtml}</td>
+                        <td class="py-3">
+                            <div class="flex flex-wrap gap-1 max-w-md">
+                                ${allocItems || '<span class="text-slate-500 italic text-xs">Нет распределения</span>'}
+                            </div>
+                        </td>
+                        <td class="py-3 font-mono font-black text-amber-400 text-sm">
+                            ${totalGiven} <span class="text-[10px] text-slate-400 font-normal">гол.</span>
+                        </td>
+                        <td class="py-3 text-right">
+                            <div class="flex items-center justify-end gap-2">
+                                <button onclick="inspectVote('${v.id}')" class="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded-lg border border-amber-500/20 text-[11px] font-bold transition">
+                                    Подробнее
+                                </button>
+                                <button onclick="deleteVote('${v.id}')" class="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg border border-rose-500/20 text-[11px] font-bold transition">
+                                    Аннулировать
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+    }
+
+    // 5. Кнопка раскрытия результатов
     const revealBtn = document.getElementById('reveal-btn');
     if (revealBtn) {
         if (revealMode) {

@@ -328,6 +328,23 @@ export async function fetchFirestoreStateDirectly() {
             console.warn('Contests fetch error:', e);
         }
 
+function mergeVotes(current, incoming) {
+    if (!Array.isArray(incoming)) return Array.isArray(current) ? current : [];
+    if (!Array.isArray(current) || current.length === 0) return incoming;
+
+    const map = new Map();
+    current.forEach(v => {
+        if (v && v.id) map.set(String(v.id), v);
+    });
+    incoming.forEach(v => {
+        if (v && v.id) {
+            const idKey = String(v.id);
+            map.set(idKey, { ...(map.get(idKey) || {}), ...v });
+        }
+    });
+    return Array.from(map.values());
+}
+
         // 6. Votes Collection
         try {
             const votesSnap = await getDocs(collection(db, "votes"));
@@ -336,9 +353,12 @@ export async function fetchFirestoreStateDirectly() {
                 const cleaned = sanitizeFirestoreData(d.data());
                 votesList.push({ id: d.id, ...(cleaned || {}) });
             });
-            if (safeJsonStringify(currentState.votes) !== safeJsonStringify(votesList)) {
-                currentState.votes = votesList;
-                stateChanged = true;
+            if (votesList.length > 0) {
+                const merged = mergeVotes(currentState.votes || [], votesList);
+                if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
+                    currentState.votes = merged;
+                    stateChanged = true;
+                }
             }
         } catch (e) {}
 
@@ -379,9 +399,9 @@ function initRealtimeSync() {
                     if (parsed && parsed.data) {
                         const newData = parsed.data;
                         if (Array.isArray(newData.votes)) {
-                            currentState.votes = newData.votes;
+                            currentState.votes = mergeVotes(currentState.votes || [], newData.votes);
                         }
-                        currentState = { ...currentState, ...newData };
+                        currentState = { ...currentState, ...newData, votes: currentState.votes };
                         notifyStateChanged(false);
                     }
                 } catch (err) {}
@@ -529,8 +549,13 @@ function initFirestoreListeners() {
                 const cleaned = sanitizeFirestoreData(d.data());
                 votesList.push({ id: d.id, ...(cleaned || {}) });
             });
-            currentState.votes = votesList;
-            notifyStateChanged(false);
+            if (votesList.length > 0) {
+                const merged = mergeVotes(currentState.votes || [], votesList);
+                if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
+                    currentState.votes = merged;
+                    notifyStateChanged(false);
+                }
+            }
         }, () => {});
     } catch (e) {}
 
@@ -617,8 +642,9 @@ async function fetchState(isInitial = false) {
 
                 // Sync votes directly from server
                 if (Array.isArray(data.votes)) {
-                    if (safeJsonStringify(currentState.votes) !== safeJsonStringify(data.votes)) {
-                        currentState.votes = data.votes;
+                    const merged = mergeVotes(currentState.votes || [], data.votes);
+                    if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
+                        currentState.votes = merged;
                         updated = true;
                     }
                 }
@@ -2036,11 +2062,11 @@ export async function submitVote(voteData) {
 }
 
 export async function deleteVote(voteId) {
-    currentState.votes = (currentState.votes || []).filter(v => v.id !== voteId);
+    currentState.votes = (currentState.votes || []).filter(v => String(v.id) !== String(voteId));
     notifyStateChanged(true);
 
     try {
-        await deleteDoc(doc(db, "votes", voteId));
+        await deleteDoc(doc(db, "votes", String(voteId)));
     } catch (e) {
         console.warn('Firestore delete vote error:', e);
     }
