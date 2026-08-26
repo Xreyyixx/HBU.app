@@ -399,9 +399,9 @@ function initRealtimeSync() {
                     if (parsed && parsed.data) {
                         const newData = parsed.data;
                         if (Array.isArray(newData.votes)) {
-                            currentState.votes = mergeVotes(currentState.votes || [], newData.votes);
+                            currentState.votes = newData.votes;
                         }
-                        currentState = { ...currentState, ...newData, votes: currentState.votes };
+                        currentState = { ...currentState, ...newData };
                         notifyStateChanged(false);
                     }
                 } catch (err) {}
@@ -642,9 +642,8 @@ async function fetchState(isInitial = false) {
 
                 // Sync votes directly from server
                 if (Array.isArray(data.votes)) {
-                    const merged = mergeVotes(currentState.votes || [], data.votes);
-                    if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
-                        currentState.votes = merged;
+                    if (safeJsonStringify(currentState.votes) !== safeJsonStringify(data.votes)) {
+                        currentState.votes = data.votes;
                         updated = true;
                     }
                 }

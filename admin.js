@@ -73,6 +73,12 @@ function setAdminAuthenticated(authenticated) {
     if (authenticated) {
         authPanel.classList.add('hidden');
         dashboard.classList.remove('hidden');
+        renderAdminParticipants();
+        calculateAndRenderPublicPoints();
+        updateVotingSessionUI();
+        renderAdminNews();
+        renderAdminContests();
+        updateBannerSelectUI();
     } else {
         authPanel.classList.remove('hidden');
         dashboard.classList.add('hidden');
@@ -359,7 +365,7 @@ window.inspectVote = function(voteId) {
             allocEl.innerHTML = entries.map(([pId, count]) => {
                 const num = Number(count) || 0;
                 const participant = participants.find((p, idx) => {
-                    const numVal = p.number || (idx + 1);
+                    const numVal = p.number !== undefined ? Number(p.number) : (idx + 1);
                     return String(p.id).toLowerCase() === String(pId).toLowerCase() ||
                            String(numVal) === String(pId) ||
                            `p${numVal}`.toLowerCase() === String(pId).toLowerCase() ||
@@ -367,7 +373,8 @@ window.inspectVote = function(voteId) {
                            (p.name && p.name.toLowerCase() === String(pId).toLowerCase());
                 });
 
-                const name = participant ? `${participant.flag || '🏳️'} #${participant.number || ''} ${participant.name || ('Number ' + (participant.number || pId))}` : `Номер ${pId}`;
+                const pNumber = participant ? (participant.number !== undefined ? participant.number : '') : '';
+                const name = participant ? `${participant.flag || '🏳️'} #${pNumber} ${participant.name || ('Number ' + pNumber)}` : `Номер ${pId}`;
                 const countryArtist = participant ? `${participant.country ? participant.country + ' • ' : ''}${participant.artist || ''}` : '';
                 const songInfo = participant && participant.song ? ` «${participant.song}»` : '';
 
@@ -549,26 +556,25 @@ window.resetParticipantsDefaults = function() {
 // РАСЧЕТ И ОТОБРАЖЕНИЕ PUBLIC POINTS И ДЕТАЛИЗАЦИИ ГОЛОСОВАНИЯ
 // -------------------------------------------------------------
 function calculateAndRenderPublicPoints() {
-    const vState = appState.votingState || { sessionId: null };
-    const currentSessionId = vState.sessionId;
-
     // Получаем все голоса
-    const allVotes = Array.isArray(appState.votes) ? appState.votes : [];
-    
-    // Если есть активная сессия и есть голоса именно с этой сессией, отдаем им приоритет, иначе показываем все голоса
-    let votes = allVotes;
-    if (currentSessionId && allVotes.some(v => v.sessionId === currentSessionId)) {
-        votes = allVotes.filter(v => !v.sessionId || v.sessionId === currentSessionId);
-    }
-
+    const votes = Array.isArray(appState.votes) ? appState.votes : [];
     const participants = appState.participants || [];
     const manualThreshold = Number(appState.manualThreshold) || 0;
     const revealMode = Boolean(appState.revealMode);
 
-    // Суммирование голосов с поддержкой любых вариантов ключей распределения
+    // Подготовка быстрого поиска и начальных сумм
     const totals = {};
+    const participantMap = new Map();
     participants.forEach((p, idx) => {
+        const numVal = p.number !== undefined ? Number(p.number) : (idx + 1);
         totals[p.id] = 0;
+        totals[String(numVal)] = 0;
+        participantMap.set(String(p.id).toLowerCase().trim(), p);
+        participantMap.set(String(numVal), p);
+        participantMap.set(`p${numVal}`.toLowerCase(), p);
+        participantMap.set(`p${idx + 1}`.toLowerCase(), p);
+        if (p.name) participantMap.set(p.name.toLowerCase().trim(), p);
+        if (p.artist) participantMap.set(p.artist.toLowerCase().trim(), p);
     });
 
     let totalVotesCast = 0;
@@ -581,13 +587,13 @@ function calculateAndRenderPublicPoints() {
             totalVotesCast += num;
 
             // Ищем соответствующего участника
-            const matched = participants.find((p, idx) => {
-                const numVal = p.number || (idx + 1);
+            const matched = participantMap.get(String(allocKey).toLowerCase().trim()) || participants.find((p, idx) => {
+                const numVal = p.number !== undefined ? Number(p.number) : (idx + 1);
                 return String(p.id).toLowerCase() === String(allocKey).toLowerCase() ||
                        String(numVal) === String(allocKey) ||
                        `p${numVal}`.toLowerCase() === String(allocKey).toLowerCase() ||
                        `p${idx + 1}`.toLowerCase() === String(allocKey).toLowerCase() ||
-                       (p.name && p.name.toLowerCase() === String(allocKey).toLowerCase());
+                       (p.name && p.name.toLowerCase().trim() === String(allocKey).toLowerCase().trim());
             });
 
             if (matched) {
@@ -600,8 +606,8 @@ function calculateAndRenderPublicPoints() {
 
     // Формирование списка для ранжирования
     const results = participants.map((p, idx) => {
-        const numVal = p.number || (idx + 1);
-        const count = totals[p.id] || 0;
+        const numVal = p.number !== undefined ? Number(p.number) : (idx + 1);
+        const count = (totals[p.id] || 0) + (totals[String(numVal)] || 0) + (totals[`p${numVal}`] || 0);
         const passed = count >= manualThreshold;
         const percent = totalVotesCast > 0 ? ((count / totalVotesCast) * 100).toFixed(1) : '0.0';
         return {
@@ -739,16 +745,17 @@ function calculateAndRenderPublicPoints() {
                     .filter(([_, count]) => (Number(count) || 0) > 0)
                     .map(([allocKey, count]) => {
                         const num = Number(count) || 0;
-                        const p = participants.find((item, pIdx) => {
-                            const n = item.number || (pIdx + 1);
+                        const p = participantMap.get(String(allocKey).toLowerCase().trim()) || participants.find((item, pIdx) => {
+                            const n = item.number !== undefined ? Number(item.number) : (pIdx + 1);
                             return String(item.id).toLowerCase() === String(allocKey).toLowerCase() ||
                                    String(n) === String(allocKey) ||
                                    `p${n}`.toLowerCase() === String(allocKey).toLowerCase() ||
                                    `p${pIdx + 1}`.toLowerCase() === String(allocKey).toLowerCase() ||
-                                   (item.name && item.name.toLowerCase() === String(allocKey).toLowerCase());
+                                   (item.name && item.name.toLowerCase().trim() === String(allocKey).toLowerCase().trim());
                         });
                         const flag = p ? (p.flag || '🏳️') : '';
-                        const numVal = p ? `#${p.number}` : allocKey;
+                        const pNumber = p ? (p.number !== undefined ? p.number : '') : '';
+                        const numVal = pNumber !== '' ? `#${pNumber}` : allocKey;
                         const label = p ? (p.name || numVal) : numVal;
                         return `<span class="inline-flex items-center gap-1 bg-[#16070b] border border-amber-500/20 px-2 py-0.5 rounded-lg text-[11px] font-mono"><span class="text-xs">${flag}</span><span class="font-bold text-slate-200">${label}:</span> <span class="text-amber-400 font-bold">${num}</span></span>`;
                     }).join(' ');

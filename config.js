@@ -36,14 +36,14 @@ export const MAX_VOTES_PER_PARTICIPANT = 5;
 export const PUBLIC_POINTS_SCALE = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10];
 
 export const DEFAULT_PARTICIPANTS = [
-    { id: 'p1', name: 'Number 1', videoUrl: 'videos/thank_you_p1.mp4' },
-    { id: 'p2', name: 'Number 2', videoUrl: 'videos/thank_you_p2.mp4' },
-    { id: 'p3', name: 'Number 3', videoUrl: 'videos/thank_you_p3.mp4' },
-    { id: 'p4', name: 'Number 4', videoUrl: 'videos/thank_you_p4.mp4' },
-    { id: 'p5', name: 'Number 5', videoUrl: 'videos/thank_you_p5.mp4' },
-    { id: 'p6', name: 'Number 6', videoUrl: 'videos/thank_you_p6.mp4' },
-    { id: 'p7', name: 'Number 7', videoUrl: 'videos/thank_you_p7.mp4' },
-    { id: 'p8', name: 'Number 8', videoUrl: 'videos/thank_you_p8.mp4' }
+    { id: 'p1', number: 1, name: 'Number 1', videoUrl: 'videos/thank_you_p1.mp4' },
+    { id: 'p2', number: 2, name: 'Number 2', videoUrl: 'videos/thank_you_p2.mp4' },
+    { id: 'p3', number: 3, name: 'Number 3', videoUrl: 'videos/thank_you_p3.mp4' },
+    { id: 'p4', number: 4, name: 'Number 4', videoUrl: 'videos/thank_you_p4.mp4' },
+    { id: 'p5', number: 5, name: 'Number 5', videoUrl: 'videos/thank_you_p5.mp4' },
+    { id: 'p6', number: 6, name: 'Number 6', videoUrl: 'videos/thank_you_p6.mp4' },
+    { id: 'p7', number: 7, name: 'Number 7', videoUrl: 'videos/thank_you_p7.mp4' },
+    { id: 'p8', number: 8, name: 'Number 8', videoUrl: 'videos/thank_you_p8.mp4' }
 ];
 
 export const INITIAL_CONTESTS = [
