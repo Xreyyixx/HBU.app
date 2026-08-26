@@ -554,6 +554,26 @@ app.post('/api/votes/reset-all', (req, res) => {
     res.json({ success: true, votes: [] });
 });
 
+// Full state sync endpoint
+app.post('/api/sync', (req, res) => {
+    const { news, contests, participants, settings, votingState } = req.body || {};
+    if (Array.isArray(news)) store.news = news;
+    if (Array.isArray(contests)) store.contests = contests;
+    if (Array.isArray(participants)) store.participants = participants;
+    if (settings && typeof settings === 'object') {
+        if (settings.recapVideoUrl !== undefined) store.recapVideoUrl = settings.recapVideoUrl;
+        if (settings.featuredContestId !== undefined) store.featuredContestId = settings.featuredContestId;
+        if (settings.manualThreshold !== undefined) store.manualThreshold = Number(settings.manualThreshold) || 0;
+        if (settings.revealMode !== undefined) store.revealMode = Boolean(settings.revealMode);
+    }
+    if (votingState && typeof votingState === 'object') {
+        store.votingState = { ...store.votingState, ...votingState };
+    }
+    saveStore(store);
+    broadcastState('full_sync');
+    res.json({ success: true, store });
+});
+
 // Front-end routes
 app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'admin.html'));

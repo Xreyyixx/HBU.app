@@ -48,15 +48,17 @@ window.manualCloudSync = async function() {
         btn.innerHTML = `<span>⏳</span><span>Синхронизация...</span>`;
         btn.disabled = true;
     }
-    const success = await syncAllToFirestore();
+    const result = await syncAllToFirestore();
     if (btn) {
         btn.innerHTML = `<span>☁️</span><span>Синхронизировать с облаком</span>`;
         btn.disabled = false;
     }
-    if (success) {
-        showToast('Все новости, сезоны и настройки синхронизированы с облаком Firebase!');
+    if (result && result.firestore) {
+        showToast('✓ Все новости, сезоны и настройки синхронизированы с базой Firebase!');
+    } else if (result && result.server) {
+        showToast('✓ Данные сохранены на сервере! (Для Firebase обновите правила в консоли)', false);
     } else {
-        showToast('Ошибка при синхронизации с Firebase', true);
+        showToast('Ошибка при синхронизации данных', true);
     }
 };
 

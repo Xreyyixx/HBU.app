@@ -2115,48 +2115,87 @@ export async function resetAllVotes() {
 }
 
 export async function syncAllToFirestore() {
-    if (!db) return;
+    let serverOk = false;
+    let firestoreOk = false;
+    let firestoreError = null;
+
+    // 1. Sync to Backend Server Database
     try {
-        // News
-        if (Array.isArray(currentState.news)) {
-            for (const item of currentState.news) {
-                if (item && item.id) {
-                    await setDoc(doc(db, "news", item.id), item, { merge: true });
-                }
-            }
+        const payload = {
+            news: currentState.news || [],
+            contests: currentState.contests || [],
+            participants: currentState.participants || [],
+            settings: {
+                recapVideoUrl: currentState.recapVideoUrl || '',
+                featuredContestId: currentState.featuredContestId || 'auto',
+                manualThreshold: Number(currentState.manualThreshold) || 0,
+                revealMode: Boolean(currentState.revealMode)
+            },
+            votingState: currentState.votingState || {}
+        };
+        const res = await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: safeJsonStringify(payload)
+        });
+        if (res.ok) {
+            serverOk = true;
         }
-        // Contests
-        if (Array.isArray(currentState.contests)) {
-            for (const c of currentState.contests) {
-                if (c && c.id) {
-                    await setDoc(doc(db, "contests", c.id), c, { merge: true });
-                }
-            }
-        }
-        // Participants
-        if (Array.isArray(currentState.participants) && currentState.participants.length > 0) {
-            await setDoc(doc(db, "system", "participants"), {
-                list: currentState.participants,
-                updatedAt: new Date().toISOString()
-            }, { merge: true });
-        }
-        // Settings
-        await setDoc(doc(db, "system", "settings"), {
-            recapVideoUrl: currentState.recapVideoUrl || '',
-            featuredContestId: currentState.featuredContestId || 'auto',
-            manualThreshold: Number(currentState.manualThreshold) || 0,
-            revealMode: Boolean(currentState.revealMode)
-        }, { merge: true });
-        // Voting State
-        if (currentState.votingState) {
-            await setDoc(doc(db, "system", "voting_state"), currentState.votingState, { merge: true });
-        }
-        console.log('Successfully synced all data to Firestore Cloud');
-        return true;
     } catch (e) {
-        console.warn('Sync all to Firestore error:', e);
-        return false;
+        console.warn('Server sync error:', e);
     }
+
+    // 2. Sync to Firestore Cloud Database
+    if (db) {
+        try {
+            // News
+            if (Array.isArray(currentState.news)) {
+                for (const item of currentState.news) {
+                    if (item && item.id) {
+                        await setDoc(doc(db, "news", item.id), item, { merge: true });
+                    }
+                }
+            }
+            // Contests
+            if (Array.isArray(currentState.contests)) {
+                for (const c of currentState.contests) {
+                    if (c && c.id) {
+                        await setDoc(doc(db, "contests", c.id), c, { merge: true });
+                    }
+                }
+            }
+            // Participants
+            if (Array.isArray(currentState.participants) && currentState.participants.length > 0) {
+                await setDoc(doc(db, "system", "participants"), {
+                    list: currentState.participants,
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
+            }
+            // Settings
+            await setDoc(doc(db, "system", "settings"), {
+                recapVideoUrl: currentState.recapVideoUrl || '',
+                featuredContestId: currentState.featuredContestId || 'auto',
+                manualThreshold: Number(currentState.manualThreshold) || 0,
+                revealMode: Boolean(currentState.revealMode)
+            }, { merge: true });
+            // Voting State
+            if (currentState.votingState) {
+                await setDoc(doc(db, "system", "voting_state"), currentState.votingState, { merge: true });
+            }
+            firestoreOk = true;
+            console.log('Successfully synced all data to Firestore Cloud');
+        } catch (e) {
+            firestoreError = e.message || String(e);
+            console.warn('Sync all to Firestore note:', e);
+        }
+    }
+
+    return {
+        success: serverOk || firestoreOk,
+        server: serverOk,
+        firestore: firestoreOk,
+        firestoreError
+    };
 }
 
 export function getCurrentState() {
