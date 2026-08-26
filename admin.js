@@ -300,21 +300,32 @@ window.inspectVote = function(voteId) {
     if (!vote) return;
 
     activeModalVoteId = voteId;
-    document.getElementById('modal-voter-name').innerText = `Голос от: ${vote.voterName || 'Аноним'}`;
+    const isArtist = vote.userRole === 'artist';
+    const badgeText = isArtist ? ` [⭐ Артист: ${vote.artistName || vote.voterName}]` : (vote.isNational ? ' [🌍 Национальное]' : ' [👤 Зритель]');
+    document.getElementById('modal-voter-name').innerText = `Голос: ${vote.voterName || 'Аноним'}${badgeText}`;
     
     const allocEl = document.getElementById('modal-allocations');
     const participants = appState.participants || [];
 
     allocEl.innerHTML = Object.entries(vote.allocations || {}).map(([pId, count]) => {
-        if (count === 0) return '';
-        const participant = participants.find(p => p.id === pId);
-        const name = participant ? `${participant.flag || '🏳️'} ${participant.name || ('Number ' + participant.number)}` : pId;
+        const num = Number(count) || 0;
+        if (num <= 0) return '';
+        
+        const participant = participants.find((p, idx) => {
+            const numVal = p.number || (idx + 1);
+            return String(p.id).toLowerCase() === String(pId).toLowerCase() ||
+                   String(numVal) === String(pId) ||
+                   `p${numVal}`.toLowerCase() === String(pId).toLowerCase() ||
+                   `p${idx + 1}`.toLowerCase() === String(pId).toLowerCase();
+        });
+
+        const name = participant ? `${participant.flag || '🏳️'} ${participant.name || ('Number ' + (participant.number || pId))}` : `Номер ${pId}`;
         const songInfo = participant && participant.song ? ` (${participant.song})` : '';
 
         return `
             <div class="flex justify-between items-center bg-[#16070b] border border-amber-500/20 p-2.5 rounded-xl text-xs">
                 <span class="font-bold text-slate-200">${name}${songInfo}</span>
-                <span class="font-mono font-black text-amber-400 px-2 py-0.5 bg-amber-500/10 rounded-lg border border-amber-500/20">${count} ${count === 1 ? 'голос' : 'голоса'}</span>
+                <span class="font-mono font-black text-amber-400 px-2 py-0.5 bg-amber-500/10 rounded-lg border border-amber-500/20">${num} ${num === 1 ? 'голос' : (num < 5 ? 'голоса' : 'голосов')}</span>
             </div>
         `;
     }).join('') || '<div class="text-xs text-slate-400">Нет распределенных голосов</div>';
@@ -472,42 +483,57 @@ function calculateAndRenderPublicPoints() {
     const vState = appState.votingState || { sessionId: null };
     const currentSessionId = vState.sessionId;
 
-    // Фильтруем голоса по текущей сессии голосования
-    const allVotes = appState.votes || [];
-    const votes = allVotes.filter(v => {
-        if (!currentSessionId) return true;
-        return !v.sessionId || v.sessionId === currentSessionId;
-    });
+    // Получаем все голоса без ошибочной фильтрации
+    const allVotes = Array.isArray(appState.votes) ? appState.votes : [];
+    
+    // Если есть сессия и голоса с этой сессией, фильтруем; иначе учитываем все активные голоса
+    let votes = allVotes;
+    if (currentSessionId && allVotes.some(v => v.sessionId === currentSessionId)) {
+        votes = allVotes.filter(v => !v.sessionId || v.sessionId === currentSessionId);
+    }
 
     const participants = appState.participants || [];
     const manualThreshold = appState.manualThreshold || 0;
     const revealMode = appState.revealMode || false;
 
-    // Суммирование голосов
+    // Суммирование голосов с поддержкой любых вариантов ID и номеров
     const totals = {};
-    participants.forEach(p => {
+    participants.forEach((p, idx) => {
         totals[p.id] = 0;
     });
 
     votes.forEach(v => {
-        Object.entries(v.allocations || {}).forEach(([pId, count]) => {
+        if (!v || !v.allocations || typeof v.allocations !== 'object') return;
+        Object.entries(v.allocations).forEach(([allocKey, count]) => {
             const num = Number(count) || 0;
-            if (totals[pId] !== undefined) {
-                totals[pId] += num;
+            if (num <= 0) return;
+
+            // Ищем соответствующего участника
+            const matched = participants.find((p, idx) => {
+                const numVal = p.number || (idx + 1);
+                return String(p.id).toLowerCase() === String(allocKey).toLowerCase() ||
+                       String(numVal) === String(allocKey) ||
+                       `p${numVal}`.toLowerCase() === String(allocKey).toLowerCase() ||
+                       `p${idx + 1}`.toLowerCase() === String(allocKey).toLowerCase();
+            });
+
+            if (matched) {
+                totals[matched.id] = (totals[matched.id] || 0) + num;
             } else {
-                totals[pId] = num;
+                totals[allocKey] = (totals[allocKey] || 0) + num;
             }
         });
     });
 
     // Формирование списка для ранжирования
     const results = participants.map((p, idx) => {
+        const numVal = p.number || (idx + 1);
         const count = totals[p.id] || 0;
         const passed = count >= manualThreshold;
         return {
             id: p.id,
-            number: p.number || (idx + 1),
-            name: p.name || `Number ${p.number || idx + 1}`,
+            number: numVal,
+            name: p.name || `Number ${numVal}`,
             country: p.country || '',
             flag: p.flag || '🏳️',
             artist: p.artist || '',
@@ -552,13 +578,13 @@ function calculateAndRenderPublicPoints() {
                         <span class="truncate max-w-[200px]">${item.name}</span>
                         ${item.song ? `<span class="text-[10px] text-slate-400 font-normal truncate max-w-[150px]">(${item.song})</span>` : ''}
                     </td>
-                    <td class="py-3 font-bold ${item.count > 0 ? 'text-amber-300' : 'text-slate-500'}">${item.count}</td>
+                    <td class="py-3 font-bold ${item.count > 0 ? 'text-amber-300' : 'text-slate-500'} font-mono text-sm">${item.count}</td>
                     <td class="py-3">
                         <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${item.passed ? 'bg-green-950/60 text-green-400 border border-green-500/30' : 'bg-rose-950/40 text-rose-400 border border-rose-500/20'}">
                             ${item.passed ? '✓ Пройден' : '✗ Ниже порога'}
                         </span>
                     </td>
-                    <td class="py-3 font-bold text-slate-300">${item.rank}</td>
+                    <td class="py-3 font-bold text-slate-300 font-mono">${item.rank}</td>
                     <td class="py-3 font-black text-sm ${revealMode ? 'text-amber-400 font-mono text-base' : 'text-slate-600'}">
                         ${revealMode ? `${item.points} pts` : '🔒 Скрыто'}
                     </td>
@@ -577,12 +603,17 @@ function calculateAndRenderPublicPoints() {
         if (votes.length === 0) {
             votersListEl.innerHTML = `<span class="text-xs text-slate-500 italic">Пока никто не проголосовал</span>`;
         } else {
-            votersListEl.innerHTML = votes.map(v => `
-                <button onclick="inspectVote('${v.id}')" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-slate-200 text-[11px] font-medium px-2.5 py-1 rounded-lg transition flex items-center gap-1.5">
-                    <span>👤</span>
-                    <span class="truncate max-w-[120px]">${v.voterName || 'Зритель'}</span>
-                </button>
-            `).join('');
+            votersListEl.innerHTML = votes.map(v => {
+                const totalGiven = v.totalVotesGiven || Object.values(v.allocations || {}).reduce((s, x) => s + (Number(x) || 0), 0);
+                const roleBadge = v.userRole === 'artist' ? '⭐ ' : '';
+                return `
+                    <button onclick="inspectVote('${v.id}')" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-slate-200 text-[11px] font-medium px-2.5 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer">
+                        <span>${v.userRole === 'artist' ? '⭐' : '👤'}</span>
+                        <span class="truncate max-w-[120px] font-bold">${roleBadge}${v.voterName || 'Зритель'}</span>
+                        <span class="text-[10px] font-mono text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">(${totalGiven})</span>
+                    </button>
+                `;
+            }).join('');
         }
     }
 
