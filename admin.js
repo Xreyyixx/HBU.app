@@ -1,5 +1,6 @@
-import { auth, PUBLIC_POINTS_SCALE } from './config.js';
+import { auth, PUBLIC_POINTS_SCALE, db } from './config.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
     subscribeState, 
     saveNewsArticle, 
@@ -1476,3 +1477,24 @@ subscribeState((newState) => {
     renderAdminContests();
     updateBannerSelectUI();
 });
+
+// Прямой real-time слушатель коллекции votes из Firestore
+if (db) {
+    try {
+        onSnapshot(collection(db, "votes"), (snapshot) => {
+            const votesList = [];
+            snapshot.forEach(docSnap => {
+                const data = docSnap.data() || {};
+                votesList.push({ id: docSnap.id, ...data });
+            });
+            if (votesList.length > 0) {
+                appState.votes = votesList;
+                calculateAndRenderPublicPoints();
+            }
+        }, (err) => {
+            console.warn("Direct votes snapshot listener warning:", err);
+        });
+    } catch (e) {
+        console.warn("Votes listener init error:", e);
+    }
+}

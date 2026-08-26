@@ -669,13 +669,30 @@ function updateVoteUIOnly(targetParticipantId) {
 }
 
 window.navigateToVotingSubPage = function(subPage) {
+    if ((subPage === 'recap' || subPage === 'voting') && !currentAuthUser) {
+        if (typeof openAuthModal === 'function') {
+            openAuthModal('voting');
+        } else {
+            alert("Пожалуйста, войдите в аккаунт или зарегистрируйтесь для участия в голосовании.");
+        }
+        return;
+    }
     currentVotingSubPage = subPage;
     renderVotingCard();
 };
 
 window.submitVote = async function() {
+    // 1. Обязательный вход для голосования
+    if (!currentAuthUser) {
+        alert("Для голосования необходимо войти в аккаунт или зарегистрироваться.");
+        if (typeof openAuthModal === 'function') {
+            openAuthModal('voting');
+        }
+        return;
+    }
+
     const inputName = document.getElementById('voter-name-input');
-    const nameValue = inputName ? inputName.value.trim() : (currentAuthUser ? currentAuthUser.displayName : userName.trim());
+    const nameValue = inputName ? inputName.value.trim() : (currentAuthUser.displayName || currentAuthUser.login || userName.trim());
 
     if (!nameValue) {
         alert("Пожалуйста, введите ваше имя перед отправкой голоса.");
@@ -711,27 +728,39 @@ window.submitVote = async function() {
     try {
         const votePayload = {
             voterName: nameValue,
-            allocations: userAllocations,
+            allocations: { ...userAllocations },
             totalVotesGiven: totalUsed,
-            isNational: isNational,
+            isNational: Boolean(isNational),
             representative: selectedRepresentative || null,
-            sessionId: systemState.sessionId,
+            sessionId: systemState.sessionId || null,
             userId: currentAuthUser ? currentAuthUser.uid : null,
             userEmail: currentAuthUser ? currentAuthUser.email : null,
             userRole: currentAuthUser ? currentAuthUser.role : 'user',
-            artistName: (currentAuthUser && currentAuthUser.role === 'artist') ? currentAuthUser.displayName : null
+            artistName: (currentAuthUser && currentAuthUser.role === 'artist') ? currentAuthUser.displayName : null,
+            timestamp: serverTimestamp()
         };
 
-        // Отправка на бэкенд и в Firestore
-        await submitVoteToService(votePayload);
+        // 1. Прямая запись в коллекцию votes Firestore (с serverTimestamp)
+        if (db) {
+            await addDoc(collection(db, "votes"), votePayload);
+        }
+
+        // 2. Локальное и серверное сохранение
+        await submitVoteToService({
+            ...votePayload,
+            createdAt: new Date().toISOString()
+        }).catch(err => console.warn('Local service sync note:', err));
         
-        localStorage.setItem('harivision_voted_session', systemState.sessionId || 'active');
+        if (systemState.sessionId) {
+            localStorage.setItem('harivision_voted_session', systemState.sessionId);
+        }
         renderVotingCard();
     } catch (e) {
+        console.error("Submit vote error:", e);
         alert("Ошибка при отправке голоса: " + (e.message || e));
         if (submitBtn) {
             submitBtn.disabled = false;
-            submitBtn.innerText = `Отправить ${totalUsed} голосов`;
+            submitBtn.innerText = `Отправить ${totalUsed} ${totalUsed === 1 ? 'голос' : (totalUsed < 5 ? 'голоса' : 'голосов')}`;
         }
     }
 };
@@ -1274,18 +1303,18 @@ function renderVotingCard() {
                     <p class="text-xs text-slate-300 font-medium mb-6 leading-relaxed">Вам доступно 10 голосов. Распределите их между номерами (до 5 голосов одному выступлению).</p>
                     
                     ${!currentAuthUser ? `
-                        <div class="mb-5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-left flex items-center justify-between">
+                        <div class="mb-5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-left flex items-center justify-between">
                             <div>
-                                <div class="text-xs font-bold text-amber-300 mb-0.5">👤 Режим Зрителя</div>
-                                <div class="text-[11px] text-slate-300">Распределение 10 голосов доступно всем.</div>
+                                <div class="text-xs font-bold text-amber-300 mb-0.5">🔒 Вход обязателен</div>
+                                <div class="text-[11px] text-slate-300">Войдите или зарегистрируйтесь для голосования.</div>
                             </div>
-                            <button onclick="openAuthModal('voting')" class="text-[11px] text-amber-400 hover:text-amber-300 font-bold uppercase underline">Вход</button>
+                            <button onclick="openAuthModal('voting')" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase rounded-lg shadow transition cursor-pointer">Войти</button>
                         </div>
                     ` : (currentAuthUser.role === 'artist' ? `
                         <div class="mb-5 p-3 rounded-xl bg-amber-500/15 border border-amber-500/35 text-left flex items-center justify-between">
                             <div>
                                 <div class="text-xs font-black text-amber-300 uppercase">🎤 ${currentAuthUser.displayName}</div>
-                                <div class="text-[10px] text-amber-400/90 font-medium">Аккаунт Артиста: свой номер будет заблокирован</div>
+                                <div class="text-[10px] text-amber-400/90 font-medium">Аккаунт Артиста: свой номер заблокирован</div>
                             </div>
                             <button onclick="handleLogout()" class="text-[10px] text-slate-400 hover:text-rose-400 uppercase font-bold transition">Сменить</button>
                         </div>
@@ -1328,6 +1357,22 @@ function renderVotingCard() {
     } 
     // 5. Экран выбора номеров и распределения
     else if (currentVotingSubPage === 'voting') {
+        if (!currentAuthUser) {
+            card.innerHTML = `
+                <div class="flex flex-col items-center text-center my-auto py-10 page-fade">
+                    <div class="w-16 h-16 bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mb-4 text-amber-400 rounded-2xl shadow-[0_0_25px_rgba(245,158,11,0.2)]">
+                        <span class="text-3xl">🔒</span>
+                    </div>
+                    <h2 class="text-xl font-black text-white uppercase tracking-wider mb-2">Требуется авторизация</h2>
+                    <p class="text-xs text-slate-300 font-medium mb-6 max-w-sm leading-relaxed">Для участия в официальном голосовании HariVision необходимо войти в аккаунт зрителя или артиста.</p>
+                    <button onclick="openAuthModal('voting')" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest px-8 py-4 transition shadow-lg rounded-xl cursor-pointer">
+                        Войти / Зарегистрироваться
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
         const participants = participantsData || DEFAULT_PARTICIPANTS;
 
         if (isNational && !selectedRepresentative) {
