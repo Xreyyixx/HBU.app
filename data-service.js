@@ -709,7 +709,7 @@ export async function saveNewsArticle(article) {
         const res = await fetch('/api/news', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(article)
+            body: safeJsonStringify(article)
         });
         if (res.ok) {
             const data = await res.json();
@@ -777,7 +777,7 @@ export async function saveContest(contest) {
         const res = await fetch('/api/contests', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(contest)
+            body: safeJsonStringify(contest)
         });
         if (res.ok) {
             const data = await res.json();
@@ -849,7 +849,7 @@ export async function saveParticipant(participant) {
         const res = await fetch('/api/participants', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(participant)
+            body: safeJsonStringify(participant)
         });
         if (res.ok) {
             const data = await res.json();
@@ -933,7 +933,7 @@ export async function updateVotingState(stateUpdate) {
         await fetch('/api/voting/state', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(stateUpdate)
+            body: safeJsonStringify(stateUpdate)
         });
     } catch (e) {}
 }
@@ -1066,10 +1066,27 @@ export function subscribeAuth(callback) {
 }
 
 function notifyAuthChanged(user) {
-    currentAuthUser = user;
+    if (user) {
+        try {
+            const jsonStr = safeJsonStringify(user);
+            currentAuthUser = jsonStr ? JSON.parse(jsonStr) : null;
+        } catch (e) {
+            currentAuthUser = {
+                uid: String(user.uid || ''),
+                email: String(user.email || ''),
+                login: String(user.login || user.displayName || ''),
+                displayName: String(user.displayName || user.login || ''),
+                role: user.role || 'user',
+                blockedParticipantIds: Array.isArray(user.blockedParticipantIds) ? user.blockedParticipantIds : []
+            };
+        }
+    } else {
+        currentAuthUser = null;
+    }
+
     try {
-        if (user) {
-            localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(user));
+        if (currentAuthUser) {
+            localStorage.setItem(LOCAL_STORAGE_USER_KEY, safeJsonStringify(currentAuthUser));
         } else {
             localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
         }
@@ -2043,7 +2060,7 @@ export async function submitVote(voteData) {
         const res = await fetch('/api/vote', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(votePayload)
+            body: safeJsonStringify(votePayload)
         });
         if (res.ok) {
             const data = await res.json();

@@ -428,7 +428,26 @@
     "sessionId": "session_1787599214120",
     "openedAt": "2026-08-24T20:27:07.321Z"
   },
-  "votes": [],
+  "votes": [
+    {
+      "id": "vote_1787764781513_18lg86",
+      "voterName": "Тестовый Зритель",
+      "allocations": {
+        "p1": 3,
+        "p2": 2
+      },
+      "totalVotesGiven": 5,
+      "isNational": false,
+      "representative": null,
+      "sessionId": "session_1787599214120",
+      "userId": null,
+      "userEmail": null,
+      "userRole": "user",
+      "artistName": null,
+      "timestamp": "2026-08-26T17:19:41.513Z",
+      "ip": "127.0.0.1"
+    }
+  ],
   "manualThreshold": 0,
   "revealMode": false,
   "recapVideoUrl": "https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA",
