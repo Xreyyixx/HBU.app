@@ -606,10 +606,8 @@ function initFirestoreListeners() {
 
             if (votesList.length > 0) {
                 const merged = mergeVotes(currentState.votes || [], votesList);
-                if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
-                    currentState.votes = merged;
-                    notifyStateChanged(false);
-                }
+                currentState.votes = merged;
+                notifyStateChanged(false);
             }
         }, (err) => console.warn('Firestore votes snapshot error:', err));
     } catch (e) {
@@ -2177,19 +2175,27 @@ export async function syncAllToFirestore() {
     let firestoreOk = false;
     let firestoreError = null;
 
+    // Deep sanitize current state to guarantee clean serialization
+    const cleanNews = (currentState.news || []).map(n => sanitizeFirestoreData(n)).filter(Boolean);
+    const cleanContests = (currentState.contests || []).map(c => sanitizeFirestoreData(c)).filter(Boolean);
+    const cleanParticipants = (currentState.participants || []).map(p => sanitizeFirestoreData(p)).filter(Boolean);
+    const cleanVotingState = sanitizeFirestoreData(currentState.votingState) || {};
+    const cleanVotes = (currentState.votes || []).map(v => sanitizeFirestoreData(v)).filter(Boolean);
+
     // 1. Sync to Backend Server Database
     try {
         const payload = {
-            news: currentState.news || [],
-            contests: currentState.contests || [],
-            participants: currentState.participants || [],
+            news: cleanNews,
+            contests: cleanContests,
+            participants: cleanParticipants,
             settings: {
                 recapVideoUrl: currentState.recapVideoUrl || '',
                 featuredContestId: currentState.featuredContestId || 'auto',
                 manualThreshold: Number(currentState.manualThreshold) || 0,
                 revealMode: Boolean(currentState.revealMode)
             },
-            votingState: currentState.votingState || {}
+            votingState: cleanVotingState,
+            votes: cleanVotes
         };
         const res = await fetch('/api/sync', {
             method: 'POST',
@@ -2207,25 +2213,25 @@ export async function syncAllToFirestore() {
     if (db) {
         try {
             // News
-            if (Array.isArray(currentState.news)) {
-                for (const item of currentState.news) {
+            if (Array.isArray(cleanNews)) {
+                for (const item of cleanNews) {
                     if (item && item.id) {
-                        await setDoc(doc(db, "news", item.id), item, { merge: true });
+                        await setDoc(doc(db, "news", String(item.id)), item, { merge: true });
                     }
                 }
             }
             // Contests
-            if (Array.isArray(currentState.contests)) {
-                for (const c of currentState.contests) {
+            if (Array.isArray(cleanContests)) {
+                for (const c of cleanContests) {
                     if (c && c.id) {
-                        await setDoc(doc(db, "contests", c.id), c, { merge: true });
+                        await setDoc(doc(db, "contests", String(c.id)), c, { merge: true });
                     }
                 }
             }
             // Participants
-            if (Array.isArray(currentState.participants) && currentState.participants.length > 0) {
+            if (Array.isArray(cleanParticipants) && cleanParticipants.length > 0) {
                 await setDoc(doc(db, "system", "participants"), {
-                    list: currentState.participants,
+                    list: cleanParticipants,
                     updatedAt: new Date().toISOString()
                 }, { merge: true });
             }
@@ -2237,8 +2243,8 @@ export async function syncAllToFirestore() {
                 revealMode: Boolean(currentState.revealMode)
             }, { merge: true });
             // Voting State
-            if (currentState.votingState) {
-                await setDoc(doc(db, "system", "voting_state"), currentState.votingState, { merge: true });
+            if (cleanVotingState && Object.keys(cleanVotingState).length > 0) {
+                await setDoc(doc(db, "system", "voting_state"), cleanVotingState, { merge: true });
             }
             firestoreOk = true;
             console.log('Successfully synced all data to Firestore Cloud');

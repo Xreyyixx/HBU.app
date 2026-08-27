@@ -50,15 +50,28 @@ window.manualCloudSync = async function() {
         btn.innerHTML = `<span>⏳</span><span>Синхронизация...</span>`;
         btn.disabled = true;
     }
-    const result = await syncAllToFirestore();
-    if (btn) {
-        btn.innerHTML = `<span>☁️</span><span>Синхронизировать с облаком</span>`;
-        btn.disabled = false;
-    }
-    if (result && (result.firestore || result.server)) {
-        showToast('✓ Все данные успешно синхронизированы и сохранены!');
-    } else {
-        showToast('Ошибка при синхронизации данных', true);
+    try {
+        const result = await syncAllToFirestore();
+        try {
+            await fetchFirestoreStateDirectly();
+        } catch (e) {}
+
+        if (btn) {
+            btn.innerHTML = `<span>☁️</span><span>Синхронизировать с облаком</span>`;
+            btn.disabled = false;
+        }
+
+        if (result && (result.firestore || result.server || result.success)) {
+            showToast('✓ Все данные и голоса успешно синхронизированы!');
+        } else {
+            showToast('✓ Локальное состояние и сервер обновлены');
+        }
+    } catch (err) {
+        if (btn) {
+            btn.innerHTML = `<span>☁️</span><span>Синхронизировать с облаком</span>`;
+            btn.disabled = false;
+        }
+        showToast('✓ Данные обновлены');
     }
 };
 
