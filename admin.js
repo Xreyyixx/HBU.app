@@ -18,9 +18,10 @@ import {
     fetchFirestoreStateDirectly,
     loginAdminServer,
     verifyAdminSession,
-    deleteVote, 
+    deleteVote as deleteVoteFromService, 
     resetAllVotes,
     mergeVotes,
+    sanitizeFirestoreData,
     safeJsonStringify 
 } from './data-service.js';
 
@@ -399,7 +400,7 @@ window.inspectVote = function(voteId) {
 
 document.getElementById('reset-vote-btn').addEventListener('click', async () => {
     if (!activeModalVoteId) return;
-    await deleteVote(activeModalVoteId);
+    await deleteVoteFromService(activeModalVoteId);
     closeVoteModal();
     showToast('Голос аннулирован');
 });
@@ -412,7 +413,7 @@ window.deleteVote = function(voteId) {
         message: `Вы действительно хотите аннулировать голос "${voterLabel}"?`,
         confirmText: 'Аннулировать голос',
         onConfirm: async () => {
-            await deleteVote(voteId);
+            await deleteVoteFromService(voteId);
             showToast(`Голос ${voterLabel} аннулирован`);
         }
     });
@@ -1488,10 +1489,11 @@ if (db) {
             } else {
                 const votesList = [];
                 snapshot.forEach(docSnap => {
-                    const data = docSnap.data() || {};
-                    votesList.push({ id: docSnap.id, ...data });
+                    const raw = docSnap.data() || {};
+                    const cleaned = sanitizeFirestoreData(raw) || {};
+                    votesList.push({ id: docSnap.id, ...cleaned });
                 });
-                appState.votes = mergeVotes(appState.votes || [], votesList);
+                appState.votes = votesList;
             }
             calculateAndRenderPublicPoints();
         }, (err) => {

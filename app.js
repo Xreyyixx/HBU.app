@@ -73,7 +73,7 @@ window.toggleNewsReactionUser = async function(newsId, emoji, event) {
     }
 
     try {
-        localStorage.setItem('harivision_user_reactions', JSON.stringify(map));
+        localStorage.setItem('harivision_user_reactions', safeJsonStringify(map, '{}'));
     } catch (e) {}
 
     // Оптимистичное локальное обновление

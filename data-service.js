@@ -11,38 +11,41 @@ import {
 // -------------------------------------------------------------
 // SAFE JSON UTILS & FIRESTORE DATA SANITIZATION
 // -------------------------------------------------------------
-export function safeJsonStringify(obj, fallback = '') {
-    try {
-        const seen = new WeakSet();
-        return JSON.stringify(obj, (key, value) => {
-            if (typeof value === 'object' && value !== null) {
-                // Firestore Timestamp
-                if (typeof value.toDate === 'function') {
-                    return value.toDate().toISOString();
-                }
-                if (typeof value.toMillis === 'function') {
-                    return value.toMillis();
-                }
-                // Firestore DocumentReference or internal objects
-                if (value.id && (value.path || value.firestore)) {
-                    return String(value.id);
-                }
-                // Break circular references
-                if (seen.has(value)) {
-                    return undefined;
-                }
-                seen.add(value);
-            }
-            return value;
-        });
-    } catch (e) {
-        return fallback;
-    }
-}
-
 export function sanitizeFirestoreData(val, seen = new WeakSet()) {
     if (val === null || val === undefined) return val;
-    if (typeof val !== 'object') return val;
+    if (typeof val !== 'object') {
+        if (typeof val === 'function' || typeof val === 'symbol') return undefined;
+        if (typeof val === 'bigint') return val.toString();
+        return val;
+    }
+
+    // DOM Elements / Window / Event check to prevent circular traps
+    if (typeof Element !== 'undefined' && val instanceof Element) return undefined;
+    if (typeof Event !== 'undefined' && val instanceof Event) return undefined;
+    if (typeof Window !== 'undefined' && val instanceof Window) return undefined;
+
+    // Check circular references FIRST before any deeper traversal
+    if (seen.has(val)) {
+        return undefined;
+    }
+    seen.add(val);
+
+    // Firebase Auth User object
+    if (typeof val.getIdToken === 'function' && val.uid) {
+        return {
+            uid: String(val.uid || ''),
+            email: String(val.email || ''),
+            displayName: String(val.displayName || ''),
+            photoURL: String(val.photoURL || ''),
+            isAnonymous: Boolean(val.isAnonymous)
+        };
+    }
+
+    // Firestore DocumentSnapshot
+    if (typeof val.data === 'function' && val.id) {
+        const d = val.data();
+        return sanitizeFirestoreData({ id: val.id, ...(d || {}) }, seen);
+    }
 
     // Firestore Timestamp
     if (typeof val.toDate === 'function') {
@@ -57,11 +60,11 @@ export function sanitizeFirestoreData(val, seen = new WeakSet()) {
         return String(val.id);
     }
 
-    // Check circular references
-    if (seen.has(val)) {
+    // Filter out internal SDK classes or circular classes
+    const cName = val.constructor?.name;
+    if (cName === 'Q$1' || cName === 'Sa' || cName === 'FirebaseApp' || cName === 'Firestore' || cName === 'AuthImpl') {
         return undefined;
     }
-    seen.add(val);
 
     if (Array.isArray(val)) {
         return val.map(item => sanitizeFirestoreData(item, seen)).filter(item => item !== undefined);
@@ -69,13 +72,46 @@ export function sanitizeFirestoreData(val, seen = new WeakSet()) {
 
     const res = {};
     for (const key of Object.keys(val)) {
-        if (key.startsWith('_') || key === 'firestore') continue;
-        const cleaned = sanitizeFirestoreData(val[key], seen);
-        if (cleaned !== undefined) {
-            res[key] = cleaned;
-        }
+        if (key.startsWith('_') || key === 'firestore' || key === 'auth' || key === 'app') continue;
+        try {
+            const cleaned = sanitizeFirestoreData(val[key], seen);
+            if (cleaned !== undefined) {
+                res[key] = cleaned;
+            }
+        } catch (e) {}
     }
     return res;
+}
+
+export function safeJsonStringify(obj, fallback = '') {
+    if (obj === undefined || obj === null) return fallback || '';
+    try {
+        const sanitized = sanitizeFirestoreData(obj);
+        if (sanitized === undefined) return fallback || '';
+        const res = JSON.stringify(sanitized);
+        return res !== undefined ? res : (fallback || '');
+    } catch (e) {
+        try {
+            const seen = new WeakSet();
+            const res = JSON.stringify(obj, (key, value) => {
+                if (typeof value === 'object' && value !== null) {
+                    if (typeof Element !== 'undefined' && value instanceof Element) return undefined;
+                    if (typeof Event !== 'undefined' && value instanceof Event) return undefined;
+                    if (typeof Window !== 'undefined' && value instanceof Window) return undefined;
+                    if (typeof value.toDate === 'function') return value.toDate().toISOString();
+                    if (typeof value.toMillis === 'function') return value.toMillis();
+                    if (value.id && (value.path || value.firestore)) return String(value.id);
+                    if (key.startsWith('_') || key === 'firestore' || key === 'auth' || key === 'app') return undefined;
+                    if (seen.has(value)) return undefined;
+                    seen.add(value);
+                }
+                return value;
+            });
+            return res !== undefined ? res : (fallback || '');
+        } catch (err) {
+            return fallback || '';
+        }
+    }
 }
 
 // Локальное кэширование
@@ -976,7 +1012,7 @@ export async function updateVotingThreshold(threshold, revealMode) {
         await fetch('/api/voting/threshold', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ manualThreshold: threshold, revealMode })
+            body: safeJsonStringify({ manualThreshold: Number(threshold) || 0, revealMode: Boolean(revealMode) })
         });
     } catch (e) {}
 }
@@ -997,7 +1033,7 @@ export async function saveRecapVideoUrl(url) {
         const res = await fetch('/api/voting/recap-url', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ recapVideoUrl: url })
+            body: safeJsonStringify({ recapVideoUrl: String(url || '') })
         });
         if (res.ok) {
             const data = await res.json();
@@ -1025,7 +1061,7 @@ export async function saveFeaturedBanner(featuredContestId) {
         const res = await fetch('/api/settings/featured-contest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ featuredContestId })
+            body: safeJsonStringify({ featuredContestId: String(featuredContestId || 'auto') })
         });
         if (res.ok) {
             const data = await res.json();
@@ -1058,7 +1094,7 @@ export async function toggleNewsReaction(newsId, emoji, action = 'add') {
         const res = await fetch(`/api/news/${newsId}/react`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ emoji, action })
+            body: safeJsonStringify({ emoji: String(emoji || ''), action: String(action || 'add') })
         });
         if (res.ok) {
             const data = await res.json();
@@ -2024,10 +2060,10 @@ export async function loginAdminServer(emailOrUsername, password) {
     const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            email: emailOrUsername,
-            username: emailOrUsername,
-            password
+        body: safeJsonStringify({
+            email: String(emailOrUsername || ''),
+            username: String(emailOrUsername || ''),
+            password: String(password || '')
         })
     });
     const data = await res.json();
