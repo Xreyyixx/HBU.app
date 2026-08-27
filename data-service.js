@@ -202,6 +202,29 @@ let sseSource = null;
 
 let isDirectSyncRunning = false;
 
+export function mergeVotes(current = [], incoming = []) {
+    const curArr = Array.isArray(current) ? current : [];
+    const inArr = Array.isArray(incoming) ? incoming : [];
+    const map = new Map();
+
+    curArr.forEach(v => {
+        if (v && (v.id || v.voterName)) {
+            const key = String(v.id || `${v.voterName}_${v.sessionId || ''}`);
+            map.set(key, { ...v });
+        }
+    });
+
+    inArr.forEach(v => {
+        if (v && (v.id || v.voterName)) {
+            const key = String(v.id || `${v.voterName}_${v.sessionId || ''}`);
+            const existing = map.get(key) || {};
+            map.set(key, { ...existing, ...v });
+        }
+    });
+
+    return Array.from(map.values());
+}
+
 export async function fetchFirestoreStateDirectly() {
     if (!db || isDirectSyncRunning) return;
     isDirectSyncRunning = true;
@@ -328,23 +351,6 @@ export async function fetchFirestoreStateDirectly() {
             console.warn('Contests fetch error:', e);
         }
 
-function mergeVotes(current, incoming) {
-    if (!Array.isArray(incoming)) return Array.isArray(current) ? current : [];
-    if (!Array.isArray(current) || current.length === 0) return incoming;
-
-    const map = new Map();
-    current.forEach(v => {
-        if (v && v.id) map.set(String(v.id), v);
-    });
-    incoming.forEach(v => {
-        if (v && v.id) {
-            const idKey = String(v.id);
-            map.set(idKey, { ...(map.get(idKey) || {}), ...v });
-        }
-    });
-    return Array.from(map.values());
-}
-
         // 6. Votes Collection
         try {
             const votesSnap = await getDocs(collection(db, "votes"));
@@ -359,8 +365,12 @@ function mergeVotes(current, incoming) {
                     currentState.votes = merged;
                     stateChanged = true;
                 }
+            } else if (votesSnap.empty && Array.isArray(currentState.votes) && currentState.votes.length > 0) {
+                // If cloud is explicitly empty and we have no server votes
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn('Firestore votes fetch direct error:', e);
+        }
 
         // 7. Artists Multi-Source Sync (Collection "artists", "users", "system/artists")
         try {
@@ -544,11 +554,20 @@ function initFirestoreListeners() {
     // F. Votes Real-time Listener (Admin live tally)
     try {
         onSnapshot(collection(db, "votes"), (snap) => {
+            if (snap.empty) {
+                if (Array.isArray(currentState.votes) && currentState.votes.length > 0) {
+                    currentState.votes = [];
+                    notifyStateChanged(false);
+                }
+                return;
+            }
+
             const votesList = [];
             snap.forEach(d => {
                 const cleaned = sanitizeFirestoreData(d.data());
                 votesList.push({ id: d.id, ...(cleaned || {}) });
             });
+
             if (votesList.length > 0) {
                 const merged = mergeVotes(currentState.votes || [], votesList);
                 if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
@@ -556,8 +575,10 @@ function initFirestoreListeners() {
                     notifyStateChanged(false);
                 }
             }
-        }, () => {});
-    } catch (e) {}
+        }, (err) => console.warn('Firestore votes snapshot error:', err));
+    } catch (e) {
+        console.warn('Firestore votes listener init warning:', e);
+    }
 
     // G. Artists Real-time Listener (Cross-device artist detection & updates)
     try {
@@ -640,10 +661,11 @@ async function fetchState(isInitial = false) {
                     updated = true;
                 }
 
-                // Sync votes directly from server
+                // Sync votes directly from server (merge to avoid erasing Firestore live votes)
                 if (Array.isArray(data.votes)) {
-                    if (safeJsonStringify(currentState.votes) !== safeJsonStringify(data.votes)) {
-                        currentState.votes = data.votes;
+                    const merged = mergeVotes(currentState.votes || [], data.votes);
+                    if (safeJsonStringify(currentState.votes) !== safeJsonStringify(merged)) {
+                        currentState.votes = merged;
                         updated = true;
                     }
                 }
@@ -2065,7 +2087,7 @@ export async function submitVote(voteData) {
         if (res.ok) {
             const data = await res.json();
             if (data.votes && Array.isArray(data.votes)) {
-                currentState.votes = data.votes;
+                currentState.votes = mergeVotes(currentState.votes || [], data.votes);
                 notifyStateChanged(true);
             }
             return data;

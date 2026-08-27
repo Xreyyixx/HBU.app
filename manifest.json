@@ -3,8 +3,8 @@
   "short_name": "HariVision",
   "description": "Официальный портал Haribo Broadcasting Union: архив конкурсов, новости, информация о предстоящих сезонах и система Public Vote.",
 
-  "start_url": "/HBU.app/",
-  "scope": "/HBU.app/",
+  "start_url": "/",
+  "scope": "/",
 
   "display": "standalone",
   "background_color": "#060204",
@@ -13,13 +13,13 @@
 
   "icons": [
     {
-      "src": "/HBU.app/icons/HBU_icon.png",
+      "src": "/icons/HBU_icon.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/HBU.app/icons/HBU_icon.png",
+      "src": "/icons/HBU_icon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"

@@ -20,6 +20,7 @@ import {
     verifyAdminSession,
     deleteVote, 
     resetAllVotes,
+    mergeVotes,
     safeJsonStringify 
 } from './data-service.js';
 
@@ -608,7 +609,7 @@ function calculateAndRenderPublicPoints() {
     // Формирование списка для ранжирования
     const results = participants.map((p, idx) => {
         const numVal = p.number !== undefined ? Number(p.number) : (idx + 1);
-        const count = (totals[p.id] || 0) + (totals[String(numVal)] || 0) + (totals[`p${numVal}`] || 0);
+        const count = totals[p.id] || 0;
         const passed = count >= manualThreshold;
         const percent = totalVotesCast > 0 ? ((count / totalVotesCast) * 100).toFixed(1) : '0.0';
         return {
@@ -1482,15 +1483,17 @@ subscribeState((newState) => {
 if (db) {
     try {
         onSnapshot(collection(db, "votes"), (snapshot) => {
-            const votesList = [];
-            snapshot.forEach(docSnap => {
-                const data = docSnap.data() || {};
-                votesList.push({ id: docSnap.id, ...data });
-            });
-            if (votesList.length > 0) {
-                appState.votes = votesList;
-                calculateAndRenderPublicPoints();
+            if (snapshot.empty) {
+                appState.votes = [];
+            } else {
+                const votesList = [];
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data() || {};
+                    votesList.push({ id: docSnap.id, ...data });
+                });
+                appState.votes = mergeVotes(appState.votes || [], votesList);
             }
+            calculateAndRenderPublicPoints();
         }, (err) => {
             console.warn("Direct votes snapshot listener warning:", err);
         });
