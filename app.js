@@ -736,8 +736,12 @@ window.submitVote = async function() {
         };
 
         // Отправка голоса через универсальный сервис (Firestore + REST API + локальное состояние)
-        await submitVoteToService(votePayload);
+        const result = await submitVoteToService(votePayload);
+        const savedId = (result && result.vote && result.vote.id) || (result && result.voteId) || votePayload.id;
         
+        if (savedId) {
+            localStorage.setItem('harivision_my_vote_id', String(savedId));
+        }
         if (systemState.sessionId) {
             localStorage.setItem('harivision_voted_session', systemState.sessionId);
         }
@@ -1236,7 +1240,35 @@ function renderVotingCard() {
 
     const endMs = systemState.endsAt ? (typeof systemState.endsAt === 'string' ? new Date(systemState.endsAt).getTime() : (systemState.endsAt.toMillis ? systemState.endsAt.toMillis() : new Date(systemState.endsAt).getTime())) : null;
     const isExpired = endMs && (endMs <= Date.now());
-    const hasVotedInCurrentSession = localStorage.getItem('harivision_voted_session') === systemState.sessionId && systemState.sessionId;
+    const currentSessionId = systemState.sessionId;
+    const myVoteId = localStorage.getItem('harivision_my_vote_id');
+    const myVoteExistsInCurrentSession = (appState.votes || []).some(v => {
+        if (!v) return false;
+        if (v.sessionId && currentSessionId && v.sessionId !== currentSessionId) return false;
+        if (myVoteId && String(v.id) === String(myVoteId)) return true;
+        if (currentAuthUser && (v.userId === currentAuthUser.uid || (v.userEmail && v.userEmail === currentAuthUser.email))) return true;
+        return false;
+    });
+
+    const hasVotedFlag = localStorage.getItem('harivision_voted_session') === currentSessionId && currentSessionId;
+    // Если голос был аннулирован админом (не найден в списке голосов), сбрасываем признак голосования и разрешаем повторно проголосовать
+    let hasVotedInCurrentSession = false;
+    if (hasVotedFlag) {
+        if (myVoteExistsInCurrentSession || (appState.votes && appState.votes.length === 0)) {
+            // Если голосов вообще 0 (сброс) или голос есть в сессии
+            hasVotedInCurrentSession = myVoteExistsInCurrentSession;
+            if (!myVoteExistsInCurrentSession) {
+                localStorage.removeItem('harivision_voted_session');
+                localStorage.removeItem('harivision_my_vote_id');
+            }
+        } else {
+            hasVotedInCurrentSession = myVoteExistsInCurrentSession;
+            if (!myVoteExistsInCurrentSession) {
+                localStorage.removeItem('harivision_voted_session');
+                localStorage.removeItem('harivision_my_vote_id');
+            }
+        }
+    }
 
     // 1. Экран завершения
     if (hasVotedInCurrentSession) {

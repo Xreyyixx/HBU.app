@@ -318,8 +318,9 @@ window.updateManualThreshold = function(val) {
 };
 
 window.revealResults = function() {
-    updateVotingThreshold(appState.manualThreshold, true);
-    showToast('Public Points раскрыты!');
+    const nextReveal = !appState.revealMode;
+    updateVotingThreshold(appState.manualThreshold || 0, nextReveal);
+    showToast(nextReveal ? 'Public Points раскрыты!' : 'Public Points скрыты');
 };
 
 window.saveRecapUrlFromInput = async function() {
@@ -650,14 +651,34 @@ function calculateAndRenderPublicPoints() {
         return a.number - b.number;
     });
 
-    // Начисление Public Points
-    let currentRank = 1;
-    results.forEach((item) => {
-        if (item.passed) {
-            item.rank = currentRank;
-            item.points = PUBLIC_POINTS_SCALE[currentRank - 1] !== undefined ? PUBLIC_POINTS_SCALE[currentRank - 1] : 0;
-            currentRank++;
+    // Начисление Public Points с поддержкой деления мест (при равенстве голосов):
+    // Участники с одинаковым количеством голосов делят одно и то же место и получают одинаковые баллы.
+    // Участники с 0 голосов или не прошедшие порог получают 0 баллов и статус '-'.
+    let currentRankIndex = 0; // Индекс в шкале баллов (0 -> 1 место / 100 pts)
+    let lastVotesCount = null;
+    let lastAssignedRank = null;
+    let lastAssignedPoints = null;
+
+    results.forEach((item, index) => {
+        if (item.passed && item.count > 0) {
+            if (lastVotesCount !== null && item.count === lastVotesCount) {
+                // Ничья: делят то же самое место и получают те же баллы
+                item.rank = lastAssignedRank;
+                item.points = lastAssignedPoints;
+            } else {
+                // Новое место (с учетом смещения по позиции)
+                const assignedRank = index + 1;
+                const assignedPoints = PUBLIC_POINTS_SCALE[index] !== undefined ? PUBLIC_POINTS_SCALE[index] : 0;
+                
+                item.rank = assignedRank;
+                item.points = assignedPoints;
+                
+                lastVotesCount = item.count;
+                lastAssignedRank = assignedRank;
+                lastAssignedPoints = assignedPoints;
+            }
         } else {
+            // Номера с 0 голосов или не прошедшие порог получают 0 баллов
             item.rank = '-';
             item.points = 0;
         }
