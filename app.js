@@ -1,4 +1,4 @@
-import { db, DEFAULT_PARTICIPANTS, TOTAL_USER_VOTES, MAX_VOTES_PER_PARTICIPANT } from '/config.js';
+import { db, DEFAULT_PARTICIPANTS, TOTAL_USER_VOTES, MAX_VOTES_PER_PARTICIPANT } from './config.js';
 import { doc, onSnapshot, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
     subscribeState, 
@@ -11,7 +11,7 @@ import {
     getCurrentAuthUser,
     calculateBlockedIdsForArtist,
     safeJsonStringify
-} from '/data-service.js';
+} from './data-service.js';
 
 // Доступные эмодзи-реакции
 const AVAILABLE_EMOJIS = ['❤️', '🔥', '👏', '🏆', '🤩', '⚡'];

@@ -17,7 +17,7 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
-// Анонимная авторизация (вызывается только при необходимости, не сбрасывая существующую сессию)
+// Анонимная авторизация для обычных зрителей и PWA ярлыков
 export async function ensureFirebaseAuth() {
     try {
         if (!auth.currentUser) {
@@ -27,7 +27,7 @@ export async function ensureFirebaseAuth() {
         console.warn('Anonymous auth note:', e);
     }
 }
-// Не вызываем signInAnonymously при загрузке скрипта, чтобы Firebase Auth успел восстановить сохраненную сессию из IndexedDB
+ensureFirebaseAuth();
 
 export const TOTAL_USER_VOTES = 10;
 export const MAX_VOTES_PER_PARTICIPANT = 5;

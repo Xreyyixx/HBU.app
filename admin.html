@@ -3,25 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <base href="/">
     <title>HariVision Admin Panel | Haribo Broadcasting Union</title>
-
-    <link rel="manifest" href="/manifest.json">
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
-    <link rel="icon" type="image/png" href="/icons/HBU_icon.png">
-    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#060204">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="HariVision Admin">
-    <meta name="application-name" content="HariVision Admin">
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-    <link rel="apple-touch-icon-precomposed" href="/icons/apple-touch-icon.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
-    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png">
-    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
@@ -79,7 +63,7 @@
                     <span>☁️</span>
                     <span>Синхронизировать с облаком</span>
                 </button>
-                <a href="/" class="text-xs font-bold uppercase tracking-wider text-amber-400 hover:text-amber-300 bg-amber-500/10 px-4 py-2 rounded-xl border border-amber-500/20 transition">
+                <a href="index.html" class="text-xs font-bold uppercase tracking-wider text-amber-400 hover:text-amber-300 bg-amber-500/10 px-4 py-2 rounded-xl border border-amber-500/20 transition">
                     &larr; На сайт
                 </a>
                 <button id="logout-btn" class="text-xs text-rose-400 hover:text-rose-300 uppercase font-bold bg-rose-950/30 px-4 py-2 rounded-xl border border-rose-500/20 transition">
@@ -678,12 +662,12 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').then(reg => {
+                navigator.serviceWorker.register('sw.js').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW registration error:', err));
             });
         }
     </script>
-    <script type="module" src="/admin.js"></script>
+    <script type="module" src="admin.js"></script>
 </body>
 </html>

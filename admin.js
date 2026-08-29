@@ -1,4 +1,4 @@
-import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db } from '/config.js';
+import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db } from './config.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
@@ -23,7 +23,7 @@ import {
     mergeVotes,
     sanitizeFirestoreData,
     safeJsonStringify 
-} from '/data-service.js';
+} from './data-service.js';
 
 let appState = {
     contests: [],

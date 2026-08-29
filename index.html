@@ -3,38 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <base href="/">
     <title>HariVision | Haribo Broadcasting Union Official Portal</title>
     
-    <!-- Clean URL Script: Normalizes path so iOS/Android "Add to Home Screen" always saves root / without /index.html -->
-    <script>
-        if (window.location.pathname.endsWith('/index.html') || window.location.pathname.endsWith('/index.htm')) {
-            const clean = window.location.pathname.replace(/\/index\.html?$/i, '') || '/';
-            const target = clean + (clean.endsWith('/') ? '' : '/') + window.location.search + window.location.hash;
-            try {
-                window.history.replaceState(null, '', target);
-            } catch (e) {}
-        }
-    </script>
-    <link rel="canonical" href="/">
-    
-    <!-- PWA, Favicon & iOS Home Screen Support -->
-    <link rel="manifest" href="/manifest.json">
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
-    <link rel="icon" type="image/png" href="/icons/HBU_icon.png">
-    <link rel="shortcut icon" href="/favicon.ico">
+    <!-- PWA & iOS Support -->
+    <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#060204">
-    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="HariVision">
-    <meta name="application-name" content="HariVision">
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-    <link rel="apple-touch-icon-precomposed" href="/icons/apple-touch-icon.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
-    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png">
-    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png">
+    <link rel="apple-touch-icon" href="/icons/HBU_icon.png">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -161,7 +138,7 @@
         </div>
 
         <div class="border-t border-amber-500/20 pt-4 flex flex-col gap-2">
-            <a href="/admin.html" class="flex items-center justify-center gap-2 py-3 px-4 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase tracking-widest rounded-xl transition">
+            <a href="admin.html" class="flex items-center justify-center gap-2 py-3 px-4 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase tracking-widest rounded-xl transition">
                 <span>⚙️</span>
                 <span>Admin Panel</span>
             </a>
@@ -291,7 +268,7 @@
             <button onclick="navigateToView('contests')" class="hover:text-amber-300 transition">Архив</button>
             <button onclick="navigateToView('news')" class="hover:text-amber-300 transition">Новости</button>
             <button onclick="navigateToView('voting')" class="hover:text-amber-300 transition text-amber-400">Голосование</button>
-            <a href="/admin.html" class="hover:text-amber-300 transition">Admin Panel</a>
+            <a href="admin.html" class="hover:text-amber-300 transition">Admin Panel</a>
         </div>
     </footer>
 
@@ -299,12 +276,12 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js').then(reg => {
+                navigator.serviceWorker.register('sw.js').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW registration error:', err));
             });
         }
     </script>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>
