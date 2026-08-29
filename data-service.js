@@ -1,4 +1,4 @@
-import { db, auth, ensureFirebaseAuth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS } from './config.js';
+import { db, auth, ensureFirebaseAuth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS } from '/config.js';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
     signInWithEmailAndPassword, 

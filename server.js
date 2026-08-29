@@ -12,10 +12,25 @@ const PORT = 3000;
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Clean URL: Redirect /index.html to / for clean PWA start URL and iOS/Android home screen shortcuts
-app.get('/index.html', (req, res) => {
-    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-    res.redirect(301, '/' + qs);
+// Middleware for resolving static files even when requested with subpath prefixes (e.g. /admin/admin.js or /national/app.js)
+app.use((req, res, next) => {
+    const staticExtRegex = /\.(js|mjs|css|json|png|svg|ico|jpg|jpeg|webp|gif|woff|woff2|ttf|eot|map|txt|mp4|webm)$/i;
+    if (staticExtRegex.test(req.path)) {
+        // First try the exact requested path relative to root
+        let filePath = path.join(__dirname, req.path);
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+            return res.sendFile(filePath);
+        }
+        // If not found (e.g. /admin/admin.js or /admin/config.js), try basename in root directory
+        const baseName = path.basename(req.path);
+        filePath = path.join(__dirname, baseName);
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+            return res.sendFile(filePath);
+        }
+        // If still not found, return 404 so HTML is NEVER returned as JavaScript/CSS
+        return res.status(404).send('Asset not found');
+    }
+    next();
 });
 
 // Explicit top-level routes for Admin and National pages
@@ -25,6 +40,10 @@ app.get(['/admin', '/admin.html', '/admin/'], (req, res) => {
 
 app.get(['/national', '/national.html', '/national/'], (req, res) => {
     res.sendFile(path.join(__dirname, 'national.html'));
+});
+
+app.get(['/', '/index.html'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.use(express.static(__dirname));
@@ -611,15 +630,7 @@ app.post('/api/sync', (req, res) => {
     res.json({ success: true, store });
 });
 
-// Front-end routes
-app.get('/admin', (req, res) => {
-    res.sendFile(path.join(__dirname, 'admin.html'));
-});
-
-app.get('/national', (req, res) => {
-    res.sendFile(path.join(__dirname, 'national.html'));
-});
-
+// Catch-all for SPA client routing
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
