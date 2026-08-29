@@ -651,30 +651,31 @@ function calculateAndRenderPublicPoints() {
         return a.number - b.number;
     });
 
-    // Начисление Public Points с поддержкой деления мест (при равенстве голосов):
+    // Начисление Public Points с плотной нумерацией мест (Dense Ranking):
     // Участники с одинаковым количеством голосов делят одно и то же место и получают одинаковые баллы.
-    // Участники с 0 голосов или не прошедшие порог получают 0 баллов и статус '-'.
-    let currentRankIndex = 0; // Индекс в шкале баллов (0 -> 1 место / 100 pts)
+    // Следующий за ними участник получает следующее по порядку место (без пропуска номеров мест).
+    // Например: (3 голоса -> 1 место / 100 pts), (2 голоса -> 2 место / 90 pts), (1 голос -> 3 место / 80 pts).
+    let denseRank = 0;
     let lastVotesCount = null;
     let lastAssignedRank = null;
     let lastAssignedPoints = null;
 
-    results.forEach((item, index) => {
+    results.forEach((item) => {
         if (item.passed && item.count > 0) {
             if (lastVotesCount !== null && item.count === lastVotesCount) {
                 // Ничья: делят то же самое место и получают те же баллы
                 item.rank = lastAssignedRank;
                 item.points = lastAssignedPoints;
             } else {
-                // Новое место (с учетом смещения по позиции)
-                const assignedRank = index + 1;
-                const assignedPoints = PUBLIC_POINTS_SCALE[index] !== undefined ? PUBLIC_POINTS_SCALE[index] : 0;
+                // Следующее порядковое место (плотный ранг)
+                denseRank++;
+                const assignedPoints = PUBLIC_POINTS_SCALE[denseRank - 1] !== undefined ? PUBLIC_POINTS_SCALE[denseRank - 1] : 0;
                 
-                item.rank = assignedRank;
+                item.rank = denseRank;
                 item.points = assignedPoints;
                 
                 lastVotesCount = item.count;
-                lastAssignedRank = assignedRank;
+                lastAssignedRank = denseRank;
                 lastAssignedPoints = assignedPoints;
             }
         } else {
