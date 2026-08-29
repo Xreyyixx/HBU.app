@@ -4,16 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>HariVision Admin Panel | Haribo Broadcasting Union</title>
-    
-    <!-- Clean URL Script for PWA -->
-    <script>
-        if (window.location.pathname.endsWith('/admin.html')) {
-            try {
-                window.history.replaceState(null, '', '/admin' + window.location.search + window.location.hash);
-            } catch (e) {}
-        }
-    </script>
-    <link rel="canonical" href="/admin">
 
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
@@ -687,12 +677,12 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js').then(reg => {
+                navigator.serviceWorker.register('/sw.js').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW registration error:', err));
             });
         }
     </script>
-    <script type="module" src="admin.js"></script>
+    <script type="module" src="/admin.js"></script>
 </body>
 </html>

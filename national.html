@@ -4,16 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>HariVision | Haribo Broadcasting Union - Национальное голосование</title>
-    
-    <!-- Clean URL Script for PWA -->
-    <script>
-        if (window.location.pathname.endsWith('/national.html')) {
-            try {
-                window.history.replaceState(null, '', '/national' + window.location.search + window.location.hash);
-            } catch (e) {}
-        }
-    </script>
-    <link rel="canonical" href="/national">
 
     <!-- PWA, Favicon & iOS Home Screen Support -->
     <link rel="manifest" href="/manifest.json">
@@ -150,6 +140,6 @@
         </div>
     </div>
 
-    <script type="module" src="app.js"></script>
+    <script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -18,6 +18,15 @@ app.get('/index.html', (req, res) => {
     res.redirect(301, '/' + qs);
 });
 
+// Explicit top-level routes for Admin and National pages
+app.get(['/admin', '/admin.html', '/admin/'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+app.get(['/national', '/national.html', '/national/'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'national.html'));
+});
+
 app.use(express.static(__dirname));
 
 // Хранилище данных

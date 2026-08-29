@@ -23,8 +23,8 @@ self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
 
     const url = new URL(event.request.url);
-    // Игнорируем внешние сервисы (Firebase, Google Fonts, CDN)
-    if (url.origin !== self.location.origin) {
+    // Игнорируем внешние сервисы (Firebase, Google Fonts, CDN) и API роуты
+    if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) {
         return;
     }
 
