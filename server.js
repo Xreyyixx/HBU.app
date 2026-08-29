@@ -175,14 +175,14 @@ function loadStore() {
         if (fs.existsSync(STORE_FILE)) {
             const raw = fs.readFileSync(STORE_FILE, 'utf-8');
             const data = JSON.parse(raw);
-            if (data.participants === undefined) data.participants = DEFAULT_PARTICIPANTS;
-            if (data.contests === undefined) data.contests = INITIAL_CONTESTS;
-            if (data.news === undefined) data.news = INITIAL_NEWS;
+            if (!data.participants || data.participants.length === 0) data.participants = DEFAULT_PARTICIPANTS;
+            if (!data.contests || data.contests.length === 0) data.contests = INITIAL_CONTESTS;
+            if (!data.news || data.news.length === 0) data.news = INITIAL_NEWS;
             if (!data.votingState) data.votingState = { status: 'closed', endsAt: null, sessionId: null };
             if (!data.recapVideoUrl) data.recapVideoUrl = 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA';
             if (data.featuredContestId === undefined) data.featuredContestId = 'auto';
             if (!data.adminPassword) data.adminPassword = 'admin';
-            if (!data.votes) data.votes = [];
+            if (!Array.isArray(data.votes)) data.votes = [];
             if (data.manualThreshold === undefined) data.manualThreshold = 0;
             if (data.revealMode === undefined) data.revealMode = false;
             
@@ -230,6 +230,10 @@ function saveStore(data) {
 }
 
 let store = loadStore();
+if (!store.news || store.news.length === 0) store.news = INITIAL_NEWS;
+if (!store.contests || store.contests.length === 0) store.contests = INITIAL_CONTESTS;
+if (!store.participants || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
+saveStore(store);
 
 // SSE Подписчики
 let sseClients = [];
@@ -462,14 +466,15 @@ app.post('/api/participants/reset', (req, res) => {
 
 // --- VOTING STATE & CONTROLS ---
 app.post('/api/voting/state', (req, res) => {
-    const { status, endsAt, sessionId, openedAt } = req.body;
+    const { status, endsAt, sessionId, openedAt, updatedAt } = req.body || {};
     const isNewSession = sessionId && sessionId !== store.votingState.sessionId;
     
     store.votingState = {
         status: status || 'closed',
-        endsAt: endsAt || null,
-        sessionId: sessionId || store.votingState.sessionId,
-        openedAt: openedAt || new Date().toISOString()
+        endsAt: status === 'closed' ? null : (endsAt || null),
+        sessionId: sessionId || store.votingState.sessionId || ('session_' + Date.now()),
+        openedAt: openedAt || store.votingState.openedAt || new Date().toISOString(),
+        updatedAt: updatedAt || Date.now()
     };
 
     if (isNewSession) {
@@ -556,10 +561,26 @@ app.post('/api/votes/reset-all', (req, res) => {
 
 // Full state sync endpoint
 app.post('/api/sync', (req, res) => {
-    const { news, contests, participants, settings, votingState } = req.body || {};
-    if (Array.isArray(news)) store.news = news;
-    if (Array.isArray(contests)) store.contests = contests;
-    if (Array.isArray(participants)) store.participants = participants;
+    const { news, contests, participants, settings, votingState, votes } = req.body || {};
+    if (Array.isArray(news) && news.length > 0) store.news = news;
+    if (Array.isArray(contests) && contests.length > 0) store.contests = contests;
+    if (Array.isArray(participants) && participants.length > 0) store.participants = participants;
+    if (Array.isArray(votes) && votes.length > 0) {
+        const curMap = new Map();
+        (store.votes || []).forEach(v => {
+            if (v && (v.id || v.voterName)) {
+                const key = String(v.id || `${v.voterName}_${v.sessionId || ''}`);
+                curMap.set(key, v);
+            }
+        });
+        votes.forEach(v => {
+            if (v && (v.id || v.voterName)) {
+                const key = String(v.id || `${v.voterName}_${v.sessionId || ''}`);
+                curMap.set(key, { ...(curMap.get(key) || {}), ...v });
+            }
+        });
+        store.votes = Array.from(curMap.values());
+    }
     if (settings && typeof settings === 'object') {
         if (settings.recapVideoUrl !== undefined) store.recapVideoUrl = settings.recapVideoUrl;
         if (settings.featuredContestId !== undefined) store.featuredContestId = settings.featuredContestId;

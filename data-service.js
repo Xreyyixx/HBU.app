@@ -1,4 +1,4 @@
-import { db, auth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS } from './config.js';
+import { db, auth, ensureFirebaseAuth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS } from './config.js';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
     signInWithEmailAndPassword, 
@@ -158,6 +158,9 @@ try {
             currentState.participants = parsed.participants;
         }
         if (parsed.votingState) currentState.votingState = parsed.votingState;
+        if (parsed.votes && Array.isArray(parsed.votes) && parsed.votes.length > 0) {
+            currentState.votes = parsed.votes;
+        }
         if (parsed.recapVideoUrl) currentState.recapVideoUrl = parsed.recapVideoUrl;
         if (parsed.featuredContestId) currentState.featuredContestId = parsed.featuredContestId;
         if (parsed.manualThreshold !== undefined) currentState.manualThreshold = parsed.manualThreshold;
@@ -238,6 +241,8 @@ let sseSource = null;
 
 let isDirectSyncRunning = false;
 
+let lastLocalVotingStateUpdatedAt = 0;
+
 export function mergeVotes(current = [], incoming = []) {
     const curArr = Array.isArray(current) ? current : [];
     const inArr = Array.isArray(incoming) ? incoming : [];
@@ -296,19 +301,23 @@ export async function fetchFirestoreStateDirectly() {
             const votingSnap = await getDoc(doc(db, "system", "voting_state"));
             if (votingSnap.exists()) {
                 const fsState = sanitizeFirestoreData(votingSnap.data()) || {};
-                const endsAtVal = fsState.endsAt ? (fsState.endsAt.toDate ? fsState.endsAt.toDate().toISOString() : fsState.endsAt) : null;
-                if (
-                    currentState.votingState.status !== fsState.status ||
-                    currentState.votingState.endsAt !== endsAtVal ||
-                    currentState.votingState.sessionId !== fsState.sessionId
-                ) {
-                    currentState.votingState = {
-                        ...currentState.votingState,
-                        status: fsState.status || currentState.votingState.status,
-                        endsAt: endsAtVal,
-                        sessionId: fsState.sessionId || currentState.votingState.sessionId
-                    };
-                    stateChanged = true;
+                const incomingUpdatedAt = Number(fsState.updatedAt) || 0;
+                if (!lastLocalVotingStateUpdatedAt || incomingUpdatedAt >= lastLocalVotingStateUpdatedAt) {
+                    const endsAtVal = (fsState.status === 'closed') ? null : (fsState.endsAt ? (fsState.endsAt.toDate ? fsState.endsAt.toDate().toISOString() : fsState.endsAt) : null);
+                    if (
+                        currentState.votingState.status !== fsState.status ||
+                        currentState.votingState.endsAt !== endsAtVal ||
+                        currentState.votingState.sessionId !== fsState.sessionId
+                    ) {
+                        currentState.votingState = {
+                            status: fsState.status || 'closed',
+                            endsAt: endsAtVal,
+                            sessionId: fsState.sessionId || currentState.votingState.sessionId,
+                            openedAt: fsState.openedAt || currentState.votingState.openedAt,
+                            updatedAt: incomingUpdatedAt || Date.now()
+                        };
+                        stateChanged = true;
+                    }
                 }
             }
         } catch (e) {}
@@ -489,12 +498,20 @@ function initFirestoreListeners() {
         onSnapshot(doc(db, "system", "voting_state"), (snap) => {
             if (snap.exists()) {
                 const fsState = sanitizeFirestoreData(snap.data()) || {};
-                const endsAtVal = fsState.endsAt ? (fsState.endsAt.toDate ? fsState.endsAt.toDate().toISOString() : fsState.endsAt) : null;
+                const incomingUpdatedAt = Number(fsState.updatedAt) || 0;
+                
+                // Do not let older snapshot overwrite recent local admin actions
+                if (lastLocalVotingStateUpdatedAt && incomingUpdatedAt < lastLocalVotingStateUpdatedAt) {
+                    return;
+                }
+
+                const endsAtVal = (fsState.status === 'closed') ? null : (fsState.endsAt ? (fsState.endsAt.toDate ? fsState.endsAt.toDate().toISOString() : fsState.endsAt) : null);
                 currentState.votingState = {
-                    ...currentState.votingState,
-                    status: fsState.status || currentState.votingState.status,
+                    status: fsState.status || 'closed',
                     endsAt: endsAtVal,
-                    sessionId: fsState.sessionId || currentState.votingState.sessionId
+                    sessionId: fsState.sessionId || currentState.votingState.sessionId,
+                    openedAt: fsState.openedAt || currentState.votingState.openedAt,
+                    updatedAt: incomingUpdatedAt || Date.now()
                 };
                 notifyStateChanged(false);
             }
@@ -591,10 +608,6 @@ function initFirestoreListeners() {
     try {
         onSnapshot(collection(db, "votes"), (snap) => {
             if (snap.empty) {
-                if (Array.isArray(currentState.votes) && currentState.votes.length > 0) {
-                    currentState.votes = [];
-                    notifyStateChanged(false);
-                }
                 return;
             }
 
@@ -976,11 +989,24 @@ export async function resetParticipantsToDefault() {
 // VOTING SYSTEM CONTROLS
 // -------------------------------------------------------------
 export async function updateVotingState(stateUpdate) {
-    currentState.votingState = { ...currentState.votingState, ...stateUpdate };
+    const updatedAt = Date.now();
+    const cleanPayload = {
+        status: stateUpdate.status || 'closed',
+        endsAt: stateUpdate.status === 'closed' ? null : (stateUpdate.endsAt || null),
+        sessionId: stateUpdate.sessionId || currentState.votingState.sessionId || ('session_' + Date.now()),
+        openedAt: stateUpdate.openedAt || (stateUpdate.status === 'open' ? new Date().toISOString() : (currentState.votingState.openedAt || null)),
+        updatedAt: updatedAt
+    };
+
+    currentState.votingState = { ...currentState.votingState, ...cleanPayload };
+    lastLocalVotingStateUpdatedAt = updatedAt;
     notifyStateChanged(true);
 
     try {
-        await setDoc(doc(db, "system", "voting_state"), stateUpdate, { merge: true });
+        await ensureFirebaseAuth();
+        if (db) {
+            await setDoc(doc(db, "system", "voting_state"), cleanPayload, { merge: true });
+        }
     } catch (e) {
         console.warn('Firestore update voting state error:', e);
     }
@@ -989,7 +1015,7 @@ export async function updateVotingState(stateUpdate) {
         await fetch('/api/voting/state', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: safeJsonStringify(stateUpdate)
+            body: safeJsonStringify(cleanPayload)
         });
     } catch (e) {}
 }
@@ -2174,6 +2200,10 @@ export async function syncAllToFirestore() {
     let serverOk = false;
     let firestoreOk = false;
     let firestoreError = null;
+
+    try {
+        await ensureFirebaseAuth();
+    } catch (e) {}
 
     // Deep sanitize current state to guarantee clean serialization
     const cleanNews = (currentState.news || []).map(n => sanitizeFirestoreData(n)).filter(Boolean);

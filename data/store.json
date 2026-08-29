@@ -83,11 +83,29 @@
       "artistName": null,
       "timestamp": "2026-08-26T17:19:41.513Z",
       "ip": "127.0.0.1"
+    },
+    {
+      "id": "vote_1787844528264_s0rfq7",
+      "voterName": "Тестовый Зритель Live",
+      "allocations": {
+        "p1": 3,
+        "p2": 2
+      },
+      "totalVotesGiven": 5,
+      "isNational": false,
+      "representative": null,
+      "sessionId": "session_1787599214120",
+      "userId": null,
+      "userEmail": null,
+      "userRole": "user",
+      "artistName": null,
+      "timestamp": "2026-08-27T15:28:48.264Z",
+      "ip": "127.0.0.1"
     }
   ],
-  "manualThreshold": 0,
+  "manualThreshold": 1,
   "revealMode": false,
-  "recapVideoUrl": "",
+  "recapVideoUrl": "https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA",
   "featuredContestId": "auto",
   "adminPassword": "admin"
 }

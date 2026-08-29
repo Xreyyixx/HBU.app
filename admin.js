@@ -1,4 +1,4 @@
-import { auth, PUBLIC_POINTS_SCALE, db } from './config.js';
+import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db } from './config.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
@@ -296,7 +296,8 @@ window.openVoting = async function(minutes) {
         status: 'open',
         endsAt: endsAt,
         sessionId: newSessionId,
-        openedAt: new Date().toISOString()
+        openedAt: new Date().toISOString(),
+        updatedAt: Date.now()
     });
     showToast(`Голосование открыто ${minutes > 0 ? 'на ' + minutes + ' мин' : 'без ограничения времени'}`);
 };
@@ -305,7 +306,8 @@ window.closeVoting = async function() {
     await updateVotingState({
         status: 'closed',
         endsAt: null,
-        sessionId: appState.votingState.sessionId
+        sessionId: appState.votingState.sessionId || ('session_' + Date.now()),
+        updatedAt: Date.now()
     });
     showToast('Голосование закрыто');
 };
@@ -439,7 +441,7 @@ function renderAdminParticipants() {
     const container = document.getElementById('admin-participants-list');
     if (!container) return;
 
-    const list = appState.participants || [];
+    const list = (Array.isArray(appState.participants) && appState.participants.length > 0) ? appState.participants : DEFAULT_PARTICIPANTS;
     if (list.length === 0) {
         container.innerHTML = `<div class="col-span-full text-center py-6 text-xs text-slate-400">Нет добавленных участников. Нажмите "+ Добавить номер" или "Сбросить".</div>`;
         return;
@@ -574,7 +576,7 @@ window.resetParticipantsDefaults = function() {
 function calculateAndRenderPublicPoints() {
     // Получаем все голоса
     const votes = Array.isArray(appState.votes) ? appState.votes : [];
-    const participants = appState.participants || [];
+    const participants = (Array.isArray(appState.participants) && appState.participants.length > 0) ? appState.participants : DEFAULT_PARTICIPANTS;
     const manualThreshold = Number(appState.manualThreshold) || 0;
     const revealMode = Boolean(appState.revealMode);
 
@@ -829,13 +831,18 @@ function calculateAndRenderPublicPoints() {
 function updateVotingSessionUI() {
     const vState = appState.votingState || { status: 'closed' };
     const isOpen = vState.status === 'open';
-    const endsAtMs = vState.endsAt ? new Date(vState.endsAt).getTime() : null;
-    const isExpired = endsAtMs && endsAtMs <= Date.now();
+    const endsAtMs = (isOpen && vState.endsAt) ? new Date(vState.endsAt).getTime() : null;
+    const isExpired = endsAtMs ? endsAtMs <= Date.now() : false;
 
     const indicator = document.getElementById('live-indicator');
     const openControls = document.getElementById('open-controls');
     const closeControls = document.getElementById('close-controls');
     const timerDisplay = document.getElementById('timer-display');
+
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
 
     if (isOpen && !isExpired) {
         if (indicator) {
@@ -845,15 +852,14 @@ function updateVotingSessionUI() {
         if (openControls) openControls.classList.add('hidden');
         if (closeControls) closeControls.classList.remove('hidden');
 
-        if (timerInterval) clearInterval(timerInterval);
-        timerInterval = setInterval(() => {
+        const updateTimerText = () => {
             if (!endsAtMs) {
                 if (timerDisplay) timerDisplay.innerText = "Голосование открыто без лимита времени";
                 return;
             }
             const diff = endsAtMs - Date.now();
             if (diff <= 0) {
-                clearInterval(timerInterval);
+                if (timerInterval) clearInterval(timerInterval);
                 if (timerDisplay) timerDisplay.innerText = "Время голосования истекло";
                 updateVotingSessionUI();
             } else {
@@ -861,7 +867,10 @@ function updateVotingSessionUI() {
                 const secs = Math.floor((diff % 60000) / 1000);
                 if (timerDisplay) timerDisplay.innerText = `Голосование завершится через: ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
             }
-        }, 1000);
+        };
+
+        updateTimerText();
+        timerInterval = setInterval(updateTimerText, 1000);
     } else {
         if (indicator) {
             indicator.className = "flex items-center gap-2 text-xs font-bold uppercase tracking-widest px-3 py-1 bg-rose-950/40 text-rose-400 border border-rose-500/30 rounded-full";
@@ -869,8 +878,7 @@ function updateVotingSessionUI() {
         }
         if (openControls) openControls.classList.remove('hidden');
         if (closeControls) closeControls.classList.add('hidden');
-        if (timerInterval) clearInterval(timerInterval);
-        if (timerDisplay) timerDisplay.innerText = "Голосование не активно";
+        if (timerDisplay) timerDisplay.innerText = isExpired ? "Время голосования истекло" : "Голосование не активно";
     }
 }
 
@@ -1497,18 +1505,16 @@ subscribeState((newState) => {
 if (db) {
     try {
         onSnapshot(collection(db, "votes"), (snapshot) => {
-            if (snapshot.empty) {
-                appState.votes = [];
-            } else {
+            if (!snapshot.empty) {
                 const votesList = [];
                 snapshot.forEach(docSnap => {
                     const raw = docSnap.data() || {};
                     const cleaned = sanitizeFirestoreData(raw) || {};
                     votesList.push({ id: docSnap.id, ...cleaned });
                 });
-                appState.votes = votesList;
+                appState.votes = mergeVotes(appState.votes || [], votesList);
+                calculateAndRenderPublicPoints();
             }
-            calculateAndRenderPublicPoints();
         }, (err) => {
             console.warn("Direct votes snapshot listener warning:", err);
         });

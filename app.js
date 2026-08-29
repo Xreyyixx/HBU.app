@@ -682,22 +682,13 @@ window.navigateToVotingSubPage = function(subPage) {
 };
 
 window.submitVote = async function() {
-    // 1. Обязательный вход для голосования
-    if (!currentAuthUser) {
-        alert("Для голосования необходимо войти в аккаунт или зарегистрироваться.");
-        if (typeof openAuthModal === 'function') {
-            openAuthModal('voting');
-        }
-        return;
-    }
-
     const inputName = document.getElementById('voter-name-input');
-    const nameValue = inputName ? inputName.value.trim() : (currentAuthUser.displayName || currentAuthUser.login || userName.trim());
-
+    let nameValue = inputName ? inputName.value.trim() : '';
+    if (!nameValue && currentAuthUser) {
+        nameValue = currentAuthUser.displayName || currentAuthUser.login || currentAuthUser.email || '';
+    }
     if (!nameValue) {
-        alert("Пожалуйста, введите ваше имя перед отправкой голоса.");
-        if (inputName) inputName.focus();
-        return;
+        nameValue = userName.trim() || 'Зритель ' + Math.floor(100 + Math.random() * 900);
     }
 
     if (isNational && !selectedRepresentative) {
@@ -705,7 +696,7 @@ window.submitVote = async function() {
         return;
     }
 
-    // 2. Блокировка собственных номеров для артиста
+    // Блокировка собственных номеров для артиста
     if (currentAuthUser && currentAuthUser.role === 'artist') {
         const blockedIds = currentAuthUser.blockedParticipantIds || calculateBlockedIdsForArtist(currentAuthUser.artistData, participantsData);
         blockedIds.forEach(bid => {
@@ -1299,12 +1290,12 @@ function renderVotingCard() {
                     <p class="text-xs text-slate-300 font-medium mb-6 leading-relaxed">Вам доступно 10 голосов. Распределите их между номерами (до 5 голосов одному выступлению).</p>
                     
                     ${!currentAuthUser ? `
-                        <div class="mb-5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-left flex items-center justify-between">
+                        <div class="mb-5 p-3.5 rounded-xl bg-[#0a0305] border border-amber-500/20 text-left flex items-center justify-between">
                             <div>
-                                <div class="text-xs font-bold text-amber-300 mb-0.5">🔒 Вход обязателен</div>
-                                <div class="text-[11px] text-slate-300">Войдите или зарегистрируйтесь для голосования.</div>
+                                <div class="text-xs font-bold text-amber-300 mb-0.5">👤 Голосование зрителя</div>
+                                <div class="text-[11px] text-slate-300">Доступно без входа. Артисты могут войти в аккаунт.</div>
                             </div>
-                            <button onclick="openAuthModal('voting')" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase rounded-lg shadow transition cursor-pointer">Войти</button>
+                            <button onclick="openAuthModal('voting')" class="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/40 text-amber-300 font-black text-xs uppercase rounded-lg border border-amber-500/30 transition cursor-pointer">Вход / Артист</button>
                         </div>
                     ` : (currentAuthUser.role === 'artist' ? `
                         <div class="mb-5 p-3 rounded-xl bg-amber-500/15 border border-amber-500/35 text-left flex items-center justify-between">
@@ -1353,22 +1344,6 @@ function renderVotingCard() {
     } 
     // 5. Экран выбора номеров и распределения
     else if (currentVotingSubPage === 'voting') {
-        if (!currentAuthUser) {
-            card.innerHTML = `
-                <div class="flex flex-col items-center text-center my-auto py-10 page-fade">
-                    <div class="w-16 h-16 bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mb-4 text-amber-400 rounded-2xl shadow-[0_0_25px_rgba(245,158,11,0.2)]">
-                        <span class="text-3xl">🔒</span>
-                    </div>
-                    <h2 class="text-xl font-black text-white uppercase tracking-wider mb-2">Требуется авторизация</h2>
-                    <p class="text-xs text-slate-300 font-medium mb-6 max-w-sm leading-relaxed">Для участия в официальном голосовании HariVision необходимо войти в аккаунт зрителя или артиста.</p>
-                    <button onclick="openAuthModal('voting')" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest px-8 py-4 transition shadow-lg rounded-xl cursor-pointer">
-                        Войти / Зарегистрироваться
-                    </button>
-                </div>
-            `;
-            return;
-        }
-
         const participants = participantsData || DEFAULT_PARTICIPANTS;
 
         if (isNational && !selectedRepresentative) {
