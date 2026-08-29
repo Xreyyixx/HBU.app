@@ -712,15 +712,17 @@ window.submitVote = async function() {
     try {
         const nowIso = new Date().toISOString();
         const voteId = 'vote_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+        const currentUid = (currentAuthUser && currentAuthUser.uid) || (auth.currentUser ? auth.currentUser.uid : null);
         const votePayload = {
             id: voteId,
+            voterUid: currentUid,
+            userId: currentUid,
             voterName: nameValue,
             allocations: { ...userAllocations },
             totalVotesGiven: totalUsed,
             isNational: Boolean(isNational),
             representative: selectedRepresentative || null,
             sessionId: systemState.sessionId || null,
-            userId: currentAuthUser ? currentAuthUser.uid : null,
             userEmail: currentAuthUser ? currentAuthUser.email : null,
             userRole: currentAuthUser ? currentAuthUser.role : 'user',
             artistName: (currentAuthUser && currentAuthUser.role === 'artist') ? currentAuthUser.displayName : null,

@@ -604,24 +604,17 @@ function initFirestoreListeners() {
         }, (err) => console.warn('Firestore contests collection error:', err));
     } catch (e) {}
 
-    // F. Votes Real-time Listener (Admin live tally)
+    // F. Votes Real-time Listener (Cross-device real-time sync)
     try {
         onSnapshot(collection(db, "votes"), (snap) => {
-            if (snap.empty) {
-                return;
-            }
-
             const votesList = [];
             snap.forEach(d => {
                 const cleaned = sanitizeFirestoreData(d.data());
                 votesList.push({ id: d.id, ...(cleaned || {}) });
             });
 
-            if (votesList.length > 0) {
-                const merged = mergeVotes(currentState.votes || [], votesList);
-                currentState.votes = merged;
-                notifyStateChanged(false);
-            }
+            currentState.votes = votesList;
+            notifyStateChanged(false);
         }, (err) => console.warn('Firestore votes snapshot error:', err));
     } catch (e) {
         console.warn('Firestore votes listener init warning:', e);
@@ -2115,10 +2108,29 @@ export async function verifyAdminSession() {
 // VOTES SUBMISSION & MANAGEMENT
 // -------------------------------------------------------------
 export async function submitVote(voteData) {
+    await ensureFirebaseAuth();
+    const currentUid = auth.currentUser ? auth.currentUser.uid : null;
     const voteId = voteData.id || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
-    const votePayload = { ...voteData, id: voteId, createdAt: voteData.createdAt || new Date().toISOString() };
+    const votePayload = { 
+        ...voteData, 
+        id: voteId, 
+        voterUid: voteData.voterUid || currentUid || voteData.userId || null,
+        userId: voteData.userId || currentUid || null,
+        createdAt: voteData.createdAt || new Date().toISOString() 
+    };
 
-    // 1. Optimistic local state update
+    // 1. Direct Firestore write (primary cloud persistence for all devices)
+    let firestoreSaved = false;
+    try {
+        if (db) {
+            await setDoc(doc(db, "votes", voteId), votePayload);
+            firestoreSaved = true;
+        }
+    } catch (e) {
+        console.warn('Firestore direct vote submit error:', e);
+    }
+
+    // 2. Local state update
     if (!currentState.votes) currentState.votes = [];
     const existIdx = currentState.votes.findIndex(v => v.id === voteId);
     if (existIdx >= 0) {
@@ -2128,16 +2140,7 @@ export async function submitVote(voteData) {
     }
     notifyStateChanged(true);
 
-    // 2. Save directly to Firestore for serverless / GitHub Pages compatibility
-    try {
-        if (db) {
-            await setDoc(doc(db, "votes", voteId), votePayload);
-        }
-    } catch (e) {
-        console.warn('Firestore direct vote submit error:', e);
-    }
-
-    // 3. Save to backend API
+    // 3. Optional local backend API save (fallback when Node server is active)
     try {
         const res = await fetch('/api/vote', {
             method: 'POST',
@@ -2156,7 +2159,7 @@ export async function submitVote(voteData) {
         console.warn('API vote submit warning:', e);
     }
 
-    return { success: true, vote: votePayload };
+    return { success: true, vote: votePayload, firestoreSaved };
 }
 
 export async function deleteVote(voteId) {

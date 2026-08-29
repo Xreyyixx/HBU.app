@@ -2,42 +2,43 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Default open read for contest data & state
+    // Votes collection - allow all devices to submit, read and sync votes
+    match /votes/{voteId} {
+      allow read, write: if true;
+    }
+    
+    // System document configuration and live voting state
     match /system/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
     
+    // News articles and live emoji reactions
     match /news/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
     
+    // Contests archive and active season data
     match /contests/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
     
+    // Participants list
     match /participants/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
+    // Users and artist accounts
     match /users/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
+    }
+
+    match /artists/{document=**} {
+      allow read, write: if true;
     }
 
     match /artistAccounts/{document=**} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    // Votes collection - allow viewers & artists to submit votes
-    match /votes/{voteId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if true;
+      allow read, write: if true;
     }
   }
 }
+
