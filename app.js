@@ -31,6 +31,7 @@ let activeModalNewsId = null;
 let contestsData = [];
 let newsData = [];
 let participantsData = DEFAULT_PARTICIPANTS;
+let votesData = [];
 
 // Состояние голосования
 let selectedRepresentative = null;
@@ -1234,7 +1235,7 @@ function renderVotingCard() {
     const isExpired = endMs && (endMs <= Date.now());
     const currentSessionId = systemState.sessionId;
     const myVoteId = localStorage.getItem('harivision_my_vote_id');
-    const myVoteExistsInCurrentSession = (appState.votes || []).some(v => {
+    const myVoteExistsInCurrentSession = (votesData || []).some(v => {
         if (!v) return false;
         if (v.sessionId && currentSessionId && v.sessionId !== currentSessionId) return false;
         if (myVoteId && String(v.id) === String(myVoteId)) return true;
@@ -1246,7 +1247,7 @@ function renderVotingCard() {
     // Если голос был аннулирован админом (не найден в списке голосов), сбрасываем признак голосования и разрешаем повторно проголосовать
     let hasVotedInCurrentSession = false;
     if (hasVotedFlag) {
-        if (myVoteExistsInCurrentSession || (appState.votes && appState.votes.length === 0)) {
+        if (myVoteExistsInCurrentSession || (votesData && votesData.length === 0)) {
             // Если голосов вообще 0 (сброс) или голос есть в сессии
             hasVotedInCurrentSession = myVoteExistsInCurrentSession;
             if (!myVoteExistsInCurrentSession) {
@@ -1548,6 +1549,7 @@ subscribeState((state) => {
     contestsData = state.contests || [];
     newsData = state.news || [];
     participantsData = state.participants || DEFAULT_PARTICIPANTS;
+    votesData = state.votes || [];
     
     const newVotingState = state.votingState || { status: 'closed', endsAt: null, sessionId: null };
     const savedSession = localStorage.getItem('harivision_voted_session');
