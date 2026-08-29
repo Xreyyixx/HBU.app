@@ -4,6 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>HariVision | Haribo Broadcasting Union - Национальное голосование</title>
+    
+    <!-- Clean URL Script for PWA -->
+    <script>
+        if (window.location.pathname.endsWith('/national.html')) {
+            try {
+                window.history.replaceState(null, '', '/national' + window.location.search + window.location.hash);
+            } catch (e) {}
+        }
+    </script>
+    <link rel="canonical" href="/national">
+
     <!-- PWA, Favicon & iOS Home Screen Support -->
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
@@ -15,7 +26,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="HariVision">
+    <meta name="application-name" content="HariVision">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="apple-touch-icon-precomposed" href="/icons/apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png">
     <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png">

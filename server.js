@@ -11,6 +11,13 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Clean URL: Redirect /index.html to / for clean PWA start URL and iOS/Android home screen shortcuts
+app.get('/index.html', (req, res) => {
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    res.redirect(301, '/' + qs);
+});
+
 app.use(express.static(__dirname));
 
 // Хранилище данных

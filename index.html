@@ -5,6 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>HariVision | Haribo Broadcasting Union Official Portal</title>
     
+    <!-- Clean URL Script: Normalizes path so iOS/Android "Add to Home Screen" always saves root / without /index.html -->
+    <script>
+        if (window.location.pathname.endsWith('/index.html') || window.location.pathname.endsWith('/index.htm')) {
+            const clean = window.location.pathname.replace(/\/index\.html?$/i, '') || '/';
+            const target = clean + (clean.endsWith('/') ? '' : '/') + window.location.search + window.location.hash;
+            try {
+                window.history.replaceState(null, '', target);
+            } catch (e) {}
+        }
+    </script>
+    <link rel="canonical" href="/">
+    
     <!-- PWA, Favicon & iOS Home Screen Support -->
     <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
@@ -16,7 +28,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="HariVision">
+    <meta name="application-name" content="HariVision">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="apple-touch-icon-precomposed" href="/icons/apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png">
     <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png">

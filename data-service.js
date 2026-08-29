@@ -607,20 +607,23 @@ function initFirestoreListeners() {
     // F. Votes Real-time Listener (Admin live tally)
     try {
         onSnapshot(collection(db, "votes"), (snap) => {
-            if (snap.empty) {
-                return;
-            }
-
             const votesList = [];
             snap.forEach(d => {
                 const cleaned = sanitizeFirestoreData(d.data());
                 votesList.push({ id: d.id, ...(cleaned || {}) });
             });
 
+            if (snap.empty) {
+                if (Array.isArray(currentState.votes) && currentState.votes.length > 0 && currentState.votingState?.status === 'open') {
+                    // Only if empty during open session
+                }
+                return;
+            }
+
             if (votesList.length > 0) {
                 const merged = mergeVotes(currentState.votes || [], votesList);
                 currentState.votes = merged;
-                notifyStateChanged(false);
+                notifyStateChanged(true);
             }
         }, (err) => console.warn('Firestore votes snapshot error:', err));
     } catch (e) {
@@ -2030,7 +2033,7 @@ export async function logoutUser() {
     notifyAuthChanged(null);
 }
 
-// Автоматическая синхронизация сессии Firebase Auth
+// Автоматическая синхронизация сессии Firebase Auth (не сбрасывает сессию при старте приложения)
 onAuthStateChanged(auth, async (fbUser) => {
     if (fbUser && !fbUser.isAnonymous) {
         try {
@@ -2064,7 +2067,7 @@ onAuthStateChanged(auth, async (fbUser) => {
                 uid: fbUser.uid,
                 email: rawEmail,
                 login: cleanLogin,
-                displayName: cleanLogin,
+                displayName: userProfile?.displayName || cleanLogin,
                 role: isArtist ? 'artist' : 'user',
                 artistData: mergedArtistData,
                 blockedParticipantIds: blockedIds
@@ -2073,11 +2076,9 @@ onAuthStateChanged(auth, async (fbUser) => {
         } catch (e) {
             console.warn('Sync auth user error:', e);
         }
-    } else if (!fbUser) {
-        if (!currentAuthUser?.artistData) {
-            notifyAuthChanged(null);
-        }
     }
+    // При fbUser === null или fbUser.isAnonymous НЕ сбрасываем сохраненную сессию, 
+    // чтобы вход пользователя не терялся при открытии PWA или перезагрузке страницы.
 });
 
 export async function loginAdminServer(emailOrUsername, password) {
@@ -2116,7 +2117,8 @@ export async function verifyAdminSession() {
 // -------------------------------------------------------------
 export async function submitVote(voteData) {
     const voteId = voteData.id || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
-    const votePayload = { ...voteData, id: voteId, createdAt: voteData.createdAt || new Date().toISOString() };
+    const rawPayload = { ...voteData, id: voteId, createdAt: voteData.createdAt || new Date().toISOString() };
+    const votePayload = sanitizeFirestoreData(rawPayload) || rawPayload;
 
     // 1. Optimistic local state update
     if (!currentState.votes) currentState.votes = [];
@@ -2128,7 +2130,7 @@ export async function submitVote(voteData) {
     }
     notifyStateChanged(true);
 
-    // 2. Save directly to Firestore for serverless / GitHub Pages compatibility
+    // 2. Save directly to Firestore for real-time cloud sync and GitHub Pages / mobile compatibility
     try {
         if (db) {
             await setDoc(doc(db, "votes", voteId), votePayload);
