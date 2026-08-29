@@ -669,14 +669,6 @@ function updateVoteUIOnly(targetParticipantId) {
 }
 
 window.navigateToVotingSubPage = function(subPage) {
-    if ((subPage === 'recap' || subPage === 'voting') && !currentAuthUser) {
-        if (typeof openAuthModal === 'function') {
-            openAuthModal('voting');
-        } else {
-            alert("Пожалуйста, войдите в аккаунт или зарегистрируйтесь для участия в голосовании.");
-        }
-        return;
-    }
     currentVotingSubPage = subPage;
     renderVotingCard();
 };
