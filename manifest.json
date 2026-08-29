@@ -1,10 +1,10 @@
 {
   "name": "HariVision | Haribo Broadcasting Union",
-  "short_name": "HariVision",
+  "short_name": "HBU",
   "description": "Официальный портал Haribo Broadcasting Union: архив конкурсов, новости, информация о предстоящих сезонах и система Public Vote.",
 
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "/HBU.app/",
+  "scope": "/HBU.app/",
 
   "display": "standalone",
   "background_color": "#060204",
