@@ -22,7 +22,8 @@ import {
     resetAllVotes,
     mergeVotes,
     sanitizeFirestoreData,
-    safeJsonStringify 
+    safeJsonStringify,
+    renderVideoPlayerHTML 
 } from './data-service.js';
 
 let appState = {
@@ -926,6 +927,10 @@ function renderAdminNews() {
                 </div>
                 <h3 class="text-sm font-bold text-white uppercase tracking-wide line-clamp-2 mb-2">${n.title}</h3>
                 <p class="text-xs text-slate-300 line-clamp-3 leading-relaxed font-normal">${n.summary}</p>
+                <div class="flex items-center gap-1.5 mt-2.5">
+                    ${n.coverImage ? '<span class="text-[9px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">📷 Фото</span>' : ''}
+                    ${n.videoUrl ? '<span class="text-[9px] font-bold bg-red-950/60 text-red-300 border border-red-500/40 px-2 py-0.5 rounded-full">🎬 Плеер</span>' : ''}
+                </div>
             </div>
 
             <div class="pt-4 mt-4 border-t border-amber-500/15 flex items-center justify-between gap-3">
@@ -1054,6 +1059,31 @@ window.handleNewsImageDrop = function(e) {
     }
 };
 
+window.updateNewsVideoPreview = function(url) {
+    const container = document.getElementById('news-video-preview-container');
+    const playerEl = document.getElementById('news-video-preview-player');
+    const input = document.getElementById('news-input-video');
+    if (!container || !playerEl) return;
+
+    const val = (url !== undefined ? url : (input ? input.value : '')).trim();
+    if (val) {
+        const playerHtml = renderVideoPlayerHTML(val, 'Тест плеера');
+        if (playerHtml) {
+            playerEl.innerHTML = playerHtml;
+            container.classList.remove('hidden');
+            return;
+        }
+    }
+    playerEl.innerHTML = '';
+    container.classList.add('hidden');
+};
+
+window.clearNewsVideo = function() {
+    const input = document.getElementById('news-input-video');
+    if (input) input.value = '';
+    window.updateNewsVideoPreview('');
+};
+
 window.openNewsEditorModal = function(newsId) {
     const modal = document.getElementById('news-editor-modal');
     const titleEl = document.getElementById('news-editor-title');
@@ -1073,12 +1103,14 @@ window.openNewsEditorModal = function(newsId) {
             document.getElementById('news-input-summary').value = article.summary || '';
             document.getElementById('news-input-content').value = article.content || '';
             window.updateNewsImagePreview(article.coverImage || '');
+            window.updateNewsVideoPreview(article.videoUrl || '');
         }
     } else {
         titleEl.innerText = "Создание новой публикации";
         document.getElementById('news-edit-id').value = '';
         document.getElementById('news-input-date').value = new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
         window.updateNewsImagePreview('');
+        window.updateNewsVideoPreview('');
     }
 
     modal.classList.remove('hidden');
@@ -1087,6 +1119,7 @@ window.openNewsEditorModal = function(newsId) {
 window.closeNewsEditorModal = function() {
     document.getElementById('news-editor-modal').classList.add('hidden');
     window.updateNewsImagePreview('');
+    window.updateNewsVideoPreview(''); // stops background player audio
 };
 
 document.getElementById('news-form').addEventListener('submit', async (e) => {
@@ -1106,8 +1139,8 @@ document.getElementById('news-form').addEventListener('submit', async (e) => {
         category,
         tag: category,
         date,
-        coverImage: coverImage || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=1200&auto=format&fit=crop',
-        videoUrl,
+        coverImage: coverImage || (videoUrl ? '' : 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=1200&auto=format&fit=crop'),
+        videoUrl: videoUrl || '',
         summary,
         content
     };

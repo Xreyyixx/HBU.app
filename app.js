@@ -10,7 +10,8 @@ import {
     logoutUser,
     getCurrentAuthUser,
     calculateBlockedIdsForArtist,
-    safeJsonStringify
+    safeJsonStringify,
+    renderVideoPlayerHTML
 } from './data-service.js';
 
 // Доступные эмодзи-реакции
@@ -535,13 +536,41 @@ window.openNewsModal = function(newsId) {
     document.getElementById('modal-news-content').innerText = article.content;
 
     const mediaContainer = document.getElementById('modal-news-media');
-    if (article.videoUrl) {
-        mediaContainer.innerHTML = `<div class="aspect-video w-full"><iframe class="w-full h-full" src="${article.videoUrl}" frameborder="0" allowfullscreen></iframe></div>`;
-        mediaContainer.classList.remove('hidden');
-    } else if (article.coverImage) {
-        mediaContainer.innerHTML = `<img src="${article.coverImage}" alt="${article.title}" class="w-full h-56 object-cover" />`;
+    let mediaHtml = '';
+
+    // 1. Фотография / Обложка новости (если есть)
+    if (article.coverImage && article.coverImage.trim()) {
+        mediaHtml += `
+            <div class="w-full rounded-2xl overflow-hidden border border-amber-500/20 bg-black/40 shadow-lg relative">
+                <img src="${article.coverImage}" alt="${article.title || 'Изображение новости'}" class="w-full max-h-80 object-cover" />
+            </div>
+        `;
+    }
+
+    // 2. Встроенный видеоплеер (если указана ссылка на видео/плеер)
+    if (article.videoUrl && article.videoUrl.trim()) {
+        const playerHtml = renderVideoPlayerHTML(article.videoUrl, article.title);
+        if (playerHtml) {
+            mediaHtml += `
+                <div class="w-full flex flex-col gap-2">
+                    <div class="flex items-center justify-between px-1">
+                        <span class="text-[10px] font-bold text-amber-400 uppercase tracking-widest flex items-center gap-1.5">
+                            <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                            Видеоплеер / Запись
+                        </span>
+                        <span class="text-[10px] font-mono text-slate-400">HariVision Media</span>
+                    </div>
+                    ${playerHtml}
+                </div>
+            `;
+        }
+    }
+
+    if (mediaHtml) {
+        mediaContainer.innerHTML = mediaHtml;
         mediaContainer.classList.remove('hidden');
     } else {
+        mediaContainer.innerHTML = '';
         mediaContainer.classList.add('hidden');
     }
 
@@ -552,6 +581,11 @@ window.openNewsModal = function(newsId) {
 
 window.closeNewsModal = function() {
     activeModalNewsId = null;
+    const mediaContainer = document.getElementById('modal-news-media');
+    if (mediaContainer) {
+        mediaContainer.innerHTML = ''; // Немедленно останавливает воспроизведение при закрытии окна
+        mediaContainer.classList.add('hidden');
+    }
     document.getElementById('news-modal').classList.add('hidden');
 };
 
@@ -903,8 +937,23 @@ function getHomeHTML() {
                                     <div class="absolute top-3 left-3 bg-[#0d0408]/80 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-500/30 text-[10px] font-bold text-amber-400 uppercase">
                                         ${n.category || n.tag || 'Новость'}
                                     </div>
+                                    ${n.videoUrl ? `
+                                        <div class="absolute bottom-3 right-3 bg-red-600/90 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/30 text-[10px] font-black text-white uppercase flex items-center gap-1 shadow-lg">
+                                            <span>▶ Плеер</span>
+                                        </div>
+                                    ` : ''}
                                 </div>
-                            ` : ''}
+                            ` : (n.videoUrl ? `
+                                <div class="w-full h-44 overflow-hidden relative bg-[#16070b] flex items-center justify-center border-b border-amber-500/15 group-hover:bg-[#1f0910] transition">
+                                    <div class="text-center flex flex-col items-center gap-1.5">
+                                        <div class="w-10 h-10 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-400 text-sm">▶</div>
+                                        <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Смотреть видео / плеер</span>
+                                    </div>
+                                    <div class="absolute top-3 left-3 bg-[#0d0408]/80 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-500/30 text-[10px] font-bold text-amber-400 uppercase">
+                                        ${n.category || n.tag || 'Новость'}
+                                    </div>
+                                </div>
+                            ` : '')}
 
                             <div class="p-6 flex flex-col justify-between flex-grow">
                                 <div>
@@ -1188,8 +1237,23 @@ function getNewsHTML() {
                                 <div class="absolute top-3 left-3 bg-[#0d0408]/80 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-500/30 text-[10px] font-bold text-amber-400 uppercase">
                                     ${n.category || n.tag || 'Новость'}
                                 </div>
+                                ${n.videoUrl ? `
+                                    <div class="absolute bottom-3 right-3 bg-red-600/90 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/30 text-[10px] font-black text-white uppercase flex items-center gap-1 shadow-lg">
+                                        <span>▶ Плеер</span>
+                                    </div>
+                                ` : ''}
                             </div>
-                        ` : ''}
+                        ` : (n.videoUrl ? `
+                            <div class="w-full h-48 overflow-hidden relative bg-[#16070b] flex items-center justify-center border-b border-amber-500/15 group-hover:bg-[#1f0910] transition">
+                                <div class="text-center flex flex-col items-center gap-1.5">
+                                    <div class="w-10 h-10 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-400 text-sm">▶</div>
+                                    <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Смотреть видео / плеер</span>
+                                </div>
+                                <div class="absolute top-3 left-3 bg-[#0d0408]/80 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-500/30 text-[10px] font-bold text-amber-400 uppercase">
+                                    ${n.category || n.tag || 'Новость'}
+                                </div>
+                            </div>
+                        ` : '')}
 
                         <div class="p-6 flex flex-col justify-between flex-grow">
                             <div>

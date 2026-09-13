@@ -747,6 +747,105 @@ export function subscribeVotes(callback) {
 }
 
 // -------------------------------------------------------------
+// VIDEO PLAYER UTILITIES FOR NEWS & MEDIA
+// -------------------------------------------------------------
+export function parseVideoEmbedUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return null;
+    let url = rawUrl.trim();
+    if (!url) return null;
+
+    // Check if user pasted full <iframe> tag
+    const iframeMatch = url.match(/src=["']([^"']+)["']/i);
+    if (iframeMatch) {
+        url = iframeMatch[1].trim();
+    }
+
+    // Direct video file
+    if (/\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url)) {
+        return { type: 'video', src: url };
+    }
+
+    // Rutube Embed
+    if (url.includes('rutube.ru/play/embed/')) {
+        return { type: 'iframe', src: url };
+    }
+
+    // Rutube standard link: /video/ID/ or /video/private/ID/
+    const rutubeMatch = url.match(/rutube\.ru\/video\/(?:private\/)?([a-zA-Z0-9_-]+)/i);
+    if (rutubeMatch) {
+        const queryIndex = url.indexOf('?');
+        const query = queryIndex !== -1 ? url.substring(queryIndex) : '';
+        return { type: 'iframe', src: `https://rutube.ru/play/embed/${rutubeMatch[1]}/${query}` };
+    }
+
+    // YouTube Embed
+    if (url.includes('youtube.com/embed/')) {
+        return { type: 'iframe', src: url };
+    }
+
+    // YouTube watch or shorts or youtu.be
+    const ytMatch = url.match(/(?:youtube\.com\/(?:watch\?.*v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+    if (ytMatch) {
+        return { type: 'iframe', src: `https://www.youtube.com/embed/${ytMatch[1]}` };
+    }
+
+    // VK Video Embed
+    if (url.includes('vk.com/video_ext.php')) {
+        return { type: 'iframe', src: url };
+    }
+
+    // VK video link
+    const vkMatch = url.match(/(?:vk\.com|vkvideo\.ru)\/video(-?\d+_\d+)/i);
+    if (vkMatch) {
+        const parts = vkMatch[1].split('_');
+        return { type: 'iframe', src: `https://vk.com/video_ext.php?oid=${parts[0]}&id=${parts[1]}&hd=2` };
+    }
+
+    // Vimeo
+    if (url.includes('player.vimeo.com/video/')) {
+        return { type: 'iframe', src: url };
+    }
+    const vimeoMatch = url.match(/vimeo\.com\/(\d+)/i);
+    if (vimeoMatch) {
+        return { type: 'iframe', src: `https://player.vimeo.com/video/${vimeoMatch[1]}` };
+    }
+
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+        return { type: 'iframe', src: url };
+    }
+
+    return null;
+}
+
+export function renderVideoPlayerHTML(url, title = 'Видеоплеер', customClass = '') {
+    const parsed = parseVideoEmbedUrl(url);
+    if (!parsed) return '';
+
+    if (parsed.type === 'video') {
+        return `
+            <div class="relative w-full rounded-2xl overflow-hidden border border-amber-500/30 bg-black shadow-2xl ${customClass}">
+                <video controls preload="metadata" class="w-full aspect-video rounded-2xl bg-black" src="${parsed.src}">
+                    Ваш браузер не поддерживает встроенное видео.
+                </video>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="relative w-full aspect-video rounded-2xl overflow-hidden border border-amber-500/30 bg-black shadow-2xl ${customClass}">
+            <iframe 
+                class="w-full h-full rounded-2xl" 
+                src="${parsed.src}" 
+                title="${title || 'Видеоплеер HariVision'}"
+                frameborder="0" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                allowfullscreen>
+            </iframe>
+        </div>
+    `;
+}
+
+// -------------------------------------------------------------
 // CRUD: NEWS
 // -------------------------------------------------------------
 export async function saveNewsArticle(article) {

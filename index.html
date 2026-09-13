@@ -157,14 +157,15 @@
     </main>
 
     <!-- News Article Modal -->
-    <div id="news-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-5">
+    <div id="news-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-5" onclick="if(event.target===this) closeNewsModal()">
         <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 flex flex-col gap-5 rounded-3xl shadow-[0_20px_70px_rgba(0,0,0,0.9)] page-fade">
             <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
                 <span id="modal-news-tag" class="text-[10px] font-bold uppercase tracking-widest px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full"></span>
                 <button onclick="closeNewsModal()" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white bg-[#16070b] border border-amber-500/20 rounded-xl transition font-bold text-sm">✕</button>
             </div>
             
-            <div id="modal-news-media" class="w-full rounded-2xl overflow-hidden border border-amber-500/20 hidden"></div>
+            <!-- Медиа-блок новости: Фотография и Видеоплеер (могут отображаться оба одновременно) -->
+            <div id="modal-news-media" class="w-full flex flex-col gap-4 hidden"></div>
             
             <div>
                 <span id="modal-news-date" class="text-[10px] font-mono text-amber-400/80 block mb-1"></span>

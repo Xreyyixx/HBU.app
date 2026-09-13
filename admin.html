@@ -418,8 +418,25 @@
                 </div>
 
                 <div>
-                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Ссылка на видео (Embed URL / Rutube / YouTube)</label>
-                    <input type="url" id="news-input-video" placeholder="https://rutube.ru/play/embed/..." class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    <div class="flex items-center justify-between mb-1">
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Ссылка на видео / плеер (Rutube / YouTube / VK / MP4)</label>
+                        <span class="text-[9px] text-amber-400/80 font-mono">Можно добавлять вместе с фото</span>
+                    </div>
+                    <div class="bg-[#16070b] border border-amber-500/25 p-3 rounded-2xl flex flex-col gap-2.5">
+                        <input type="text" id="news-input-video" placeholder="https://rutube.ru/play/embed/... или https://youtube.com/watch?v=..." oninput="updateNewsVideoPreview(this.value)" class="w-full bg-[#0a0305] border border-amber-500/20 px-3.5 py-2 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 font-mono" />
+                        <div class="text-[10px] text-slate-400 leading-relaxed">
+                            Поддерживаются: Rutube (ссылка на видео или embed), YouTube (watch, shorts, embed), VK Видео, Vimeo, прямые файлы (.mp4) или код &lt;iframe&gt;.
+                        </div>
+
+                        <!-- Превью плеера в админке -->
+                        <div id="news-video-preview-container" class="mt-1 hidden">
+                            <div class="flex items-center justify-between text-[10px] font-bold text-amber-400/90 mb-1.5">
+                                <span>🎬 Тест плеера:</span>
+                                <button type="button" onclick="clearNewsVideo()" class="text-rose-400 hover:text-rose-300 uppercase">✕ Удалить видео</button>
+                            </div>
+                            <div id="news-video-preview-player" class="w-full rounded-xl overflow-hidden border border-amber-500/20 bg-black"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div>
