@@ -130,7 +130,7 @@ try {
 
 let currentState = {
     contests: INITIAL_CONTESTS,
-    news: INITIAL_NEWS,
+    news: sortNewsDescending(INITIAL_NEWS),
     participants: DEFAULT_PARTICIPANTS,
     votingState: { status: 'closed', endsAt: null, sessionId: null },
     recapVideoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
@@ -152,7 +152,7 @@ try {
             currentState.contests = parsed.contests;
         }
         if (parsed.news && Array.isArray(parsed.news) && parsed.news.length > 0) {
-            currentState.news = parsed.news;
+            currentState.news = sortNewsDescending(parsed.news);
         }
         if (parsed.participants && Array.isArray(parsed.participants) && parsed.participants.length > 0) {
             currentState.participants = parsed.participants;
@@ -345,8 +345,9 @@ export async function fetchFirestoreStateDirectly() {
                 newsItems.push({ id: d.id, ...(cleaned || {}) });
             });
             if (newsItems.length > 0) {
-                if (safeJsonStringify(currentState.news) !== safeJsonStringify(newsItems)) {
-                    currentState.news = newsItems;
+                const sortedNews = sortNewsDescending(newsItems);
+                if (safeJsonStringify(currentState.news) !== safeJsonStringify(sortedNews)) {
+                    currentState.news = sortedNews;
                     stateChanged = true;
                 }
             } else if (newsSnap.empty && currentState.news && currentState.news.length > 0) {
@@ -568,7 +569,7 @@ function initFirestoreListeners() {
                 newsItems.push({ id: d.id, ...(cleaned || {}) });
             });
             if (newsItems.length > 0) {
-                currentState.news = newsItems;
+                currentState.news = sortNewsDescending(newsItems);
                 notifyStateChanged(false);
             }
         }, (err) => console.warn('Firestore news error:', err));
@@ -845,17 +846,99 @@ export function renderVideoPlayerHTML(url, title = 'Видеоплеер', custo
     `;
 }
 
+export function isVideoUrlOrEmbed(str) {
+    if (!str || typeof str !== 'string') return false;
+    const trimmed = str.trim();
+    return trimmed.startsWith('http://') || 
+           trimmed.startsWith('https://') || 
+           trimmed.startsWith('<iframe') ||
+           /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(trimmed) ||
+           /rutube\.ru|youtube\.com|youtu\.be|vk\.com|vkvideo\.ru|vimeo\.com/i.test(trimmed);
+}
+
+export function parseNewsDateToTimestamp(article) {
+    if (!article) return 0;
+    let baseTime = 0;
+    if (article.date && typeof article.date === 'string') {
+        const dStr = article.date.toLowerCase().trim();
+        const months = {
+            'янв': 0, 'января': 0,
+            'фев': 1, 'февраля': 1,
+            'мар': 2, 'марта': 2,
+            'апр': 3, 'апреля': 3,
+            'май': 4, 'мая': 4,
+            'июн': 5, 'июня': 5,
+            'июл': 6, 'июля': 6,
+            'авг': 7, 'августа': 7,
+            'сен': 8, 'сентября': 8,
+            'окт': 9, 'октября': 9,
+            'ноя': 10, 'ноября': 10,
+            'дек': 11, 'декабря': 11
+        };
+        const ruMatch = dStr.match(/(\d{1,2})\s+([а-яё]+)\s+(\d{4})/);
+        if (ruMatch) {
+            const day = parseInt(ruMatch[1], 10);
+            const mStr = ruMatch[2];
+            const year = parseInt(ruMatch[3], 10);
+            for (const [k, v] of Object.entries(months)) {
+                if (mStr.startsWith(k)) {
+                    baseTime = new Date(Date.UTC(year, v, day, 12, 0, 0)).getTime();
+                    break;
+                }
+            }
+        }
+        if (!baseTime) {
+            const std = new Date(article.date).getTime();
+            if (!isNaN(std)) baseTime = std;
+        }
+    }
+
+    let exactCreated = 0;
+    if (typeof article.createdAt === 'number' && !isNaN(article.createdAt)) {
+        exactCreated = article.createdAt;
+    } else if (article.createdAt) {
+        const p = new Date(article.createdAt).getTime();
+        if (!isNaN(p)) exactCreated = p;
+    } else if (typeof article.id === 'string') {
+        const m = article.id.match(/news-(\d{10,})/);
+        if (m) exactCreated = parseInt(m[1], 10);
+    }
+
+    if (baseTime > 0) {
+        if (exactCreated > 0) {
+            return baseTime + (exactCreated % 86400000);
+        }
+        return baseTime;
+    }
+    return exactCreated || 0;
+}
+
+export function sortNewsDescending(list = []) {
+    if (!Array.isArray(list)) return [];
+    return [...list].sort((a, b) => {
+        const timeA = parseNewsDateToTimestamp(a);
+        const timeB = parseNewsDateToTimestamp(b);
+        if (timeA !== timeB) {
+            return timeB - timeA; // Most recent/newest first
+        }
+        return String(b.id || '').localeCompare(String(a.id || ''));
+    });
+}
+
 // -------------------------------------------------------------
 // CRUD: NEWS
 // -------------------------------------------------------------
 export async function saveNewsArticle(article) {
     if (!article.id) article.id = 'news-' + Date.now();
+    if (!article.createdAt) article.createdAt = Date.now();
+    article.updatedAt = Date.now();
     const idx = (currentState.news || []).findIndex(n => n.id === article.id);
     if (idx >= 0) {
         currentState.news[idx] = { ...currentState.news[idx], ...article };
     } else {
-        currentState.news.unshift(article);
+        currentState.news.push(article);
     }
+    currentState.news = sortNewsDescending(currentState.news);
     notifyStateChanged(true);
 
     // Save to Firestore (Cross-device persistence)
@@ -875,7 +958,7 @@ export async function saveNewsArticle(article) {
         if (res.ok) {
             const data = await res.json();
             if (data.news) {
-                currentState.news = data.news;
+                currentState.news = sortNewsDescending(data.news);
                 notifyStateChanged(true);
             }
         }
@@ -885,7 +968,7 @@ export async function saveNewsArticle(article) {
 }
 
 export async function deleteNewsArticle(articleId) {
-    currentState.news = (currentState.news || []).filter(n => n.id !== articleId);
+    currentState.news = sortNewsDescending((currentState.news || []).filter(n => n.id !== articleId));
     notifyStateChanged(true);
 
     // Delete from Firestore
@@ -901,7 +984,7 @@ export async function deleteNewsArticle(articleId) {
         if (res.ok) {
             const data = await res.json();
             if (data.news) {
-                currentState.news = data.news;
+                currentState.news = sortNewsDescending(data.news);
                 notifyStateChanged(true);
             }
         }

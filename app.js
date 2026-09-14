@@ -11,7 +11,8 @@ import {
     getCurrentAuthUser,
     calculateBlockedIdsForArtist,
     safeJsonStringify,
-    renderVideoPlayerHTML
+    renderVideoPlayerHTML,
+    sortNewsDescending
 } from './data-service.js';
 
 // Доступные эмодзи-реакции
@@ -852,7 +853,8 @@ function getHomeHTML() {
     }
 
     const completedContests = contestsData.filter(c => c.status === 'completed');
-    const latestNews = newsData.slice(0, 3);
+    const sortedNews = sortNewsDescending(newsData);
+    const latestNews = sortedNews.slice(0, 3);
     const isLive = featuredContest.status === 'live';
     const isCompleted = featuredContest.status === 'completed';
 
@@ -1165,47 +1167,165 @@ function getContestDetailHTML(contestId) {
                 </div>
             </div>
 
-            <!-- Участвующие страны и открытки -->
+            <!-- Участвующие страны, видео-открытки и полные выступления -->
             <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 md:p-8 rounded-3xl backdrop-blur-xl">
-                <h2 class="text-lg font-bold text-white uppercase tracking-wider mb-6 flex items-center gap-2">
-                    <span>🌍</span> Участвующие страны и презентации (Открытки)
-                </h2>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    ${(c.countries || []).map((country, idx) => `
-                        <div class="bg-[#16070b] border border-amber-500/15 p-4 rounded-2xl flex flex-col justify-between">
-                            <div>
-                                <div class="flex items-center justify-between mb-2">
-                                    <span class="text-2xl">${country.flag || '🏳️'}</span>
-                                    ${country.rank ? `<span class="text-xs font-mono font-bold text-amber-400 px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">${country.rank} место (${country.points}p)</span>` : `<span class="text-[10px] text-slate-500 font-mono">Номер ${idx + 1}</span>`}
-                                </div>
-                                <h3 class="text-sm font-bold text-white uppercase">${country.country}</h3>
-                                <div class="text-xs text-amber-300 font-medium">${country.artist || 'TBD'}</div>
-                                <div class="text-[11px] text-slate-400 italic mb-3">«${country.song || 'TBD'}»</div>
-                            </div>
-                            
-                            ${country.postcard ? `
-                                <div class="text-[10px] text-amber-500/80 bg-[#0a0305] p-2 rounded-xl border border-amber-500/10 mt-2">
-                                    <span class="font-bold text-amber-400 block mb-0.5">Открытка:</span>
-                                    ${country.postcard}
-                                </div>
-                            ` : ''}
-                        </div>
-                    `).join('')}
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-6 border-b border-amber-500/15 pb-4">
+                    <div>
+                        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Программа конкурса</div>
+                        <h2 class="text-xl md:text-2xl font-black text-white uppercase tracking-wide flex items-center gap-2">
+                            <span>🌍</span> Участвующие страны, видео-открытки и выступления
+                        </h2>
+                    </div>
+                    <div class="text-xs text-slate-400 font-medium">
+                        Участников: <span class="text-amber-400 font-bold font-mono">${(c.countries || []).length}</span>
+                    </div>
                 </div>
+
+                ${(!c.countries || c.countries.length === 0) ? `
+                    <div class="text-center py-12 text-slate-400 text-xs">
+                        Информация об участниках этого сезона готовится к публикации.
+                    </div>
+                ` : `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        ${(c.countries || []).map((country, idx) => {
+                            const hasPostcardVid = Boolean(country.postcardVideo && country.postcardVideo.trim());
+                            const hasPerfVid = Boolean(country.performanceVideo && country.performanceVideo.trim());
+                            const hasBoth = hasPostcardVid && hasPerfVid;
+
+                            return `
+                            <div class="bg-[#16070b]/95 border border-amber-500/20 hover:border-amber-500/40 p-5 rounded-3xl flex flex-col justify-between gap-4 transition shadow-xl">
+                                <div>
+                                    <!-- Верхняя плашка карточки -->
+                                    <div class="flex items-center justify-between gap-2 border-b border-amber-500/10 pb-3 mb-3">
+                                        <div class="flex items-center gap-3">
+                                            <span class="text-3xl leading-none filter drop-shadow">${country.flag || '🏳️'}</span>
+                                            <div>
+                                                <div class="flex items-center gap-2">
+                                                    <span class="text-xs font-mono font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">#${idx + 1}</span>
+                                                    <h3 class="text-base font-black text-white uppercase tracking-wide">${country.country}</h3>
+                                                </div>
+                                                <div class="text-xs text-amber-300 font-bold tracking-wide">${country.artist || 'Артист не указан'}</div>
+                                            </div>
+                                        </div>
+                                        ${country.rank ? `
+                                            <div class="text-right">
+                                                <span class="text-xs font-mono font-bold text-amber-400 px-2.5 py-1 bg-amber-500/15 rounded-full border border-amber-500/30 whitespace-nowrap block">
+                                                    ${country.rank} место
+                                                </span>
+                                                ${country.points !== undefined && country.points !== null ? `<span class="text-[10px] text-slate-400 font-mono block mt-0.5">${country.points} pts</span>` : ''}
+                                            </div>
+                                        ` : ''}
+                                    </div>
+
+                                    ${country.song ? `
+                                        <div class="text-xs text-slate-300 italic mb-3 flex items-center gap-1.5 bg-[#0a0305]/60 px-3 py-1.5 rounded-xl border border-amber-500/10">
+                                            <span class="text-amber-400">🎵</span>
+                                            <span class="font-medium text-white">«${country.song}»</span>
+                                        </div>
+                                    ` : ''}
+
+                                    <!-- МЕДИА-БЛОК (ВИДЕО-ОТКРЫТКА И/ИЛИ ВЫСТУПЛЕНИЕ) -->
+                                    ${hasBoth ? `
+                                        <!-- Переключатель вкладок: Открытка / Выступление -->
+                                        <div class="flex items-center gap-1.5 p-1 bg-[#0a0305] border border-amber-500/20 rounded-xl mb-3">
+                                            <button 
+                                                id="tab-btn-postcard-${c.id}-${idx}" 
+                                                onclick="switchContestParticipantVideoTab('${c.id}', ${idx}, 'postcard')" 
+                                                class="flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition flex items-center justify-center gap-1">
+                                                <span>🎬</span>
+                                                <span>Видео-открытка</span>
+                                            </button>
+                                            <button 
+                                                id="tab-btn-perf-${c.id}-${idx}" 
+                                                onclick="switchContestParticipantVideoTab('${c.id}', ${idx}, 'performance')" 
+                                                class="flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-white border border-amber-500/20 transition flex items-center justify-center gap-1">
+                                                <span>🎤</span>
+                                                <span>Выступление</span>
+                                            </button>
+                                        </div>
+
+                                        <div id="media-postcard-${c.id}-${idx}">
+                                            ${renderVideoPlayerHTML(country.postcardVideo, 'Видео-открытка: ' + country.country + ' (' + (country.artist || '') + ')', 'w-full aspect-video rounded-2xl overflow-hidden border border-amber-500/20 bg-black')}
+                                            <div class="text-[10px] text-amber-300/80 font-mono mt-1 flex items-center gap-1">
+                                                <span>🎬</span> Видео-открытка артиста
+                                            </div>
+                                        </div>
+
+                                        <div id="media-performance-${c.id}-${idx}" class="hidden">
+                                            ${renderVideoPlayerHTML(country.performanceVideo, 'Выступление: ' + country.country + ' (' + (country.artist || '') + ')', 'w-full aspect-video rounded-2xl overflow-hidden border border-amber-500/20 bg-black')}
+                                            <div class="text-[10px] text-amber-300/80 font-mono mt-1 flex items-center gap-1">
+                                                <span>🎤</span> Полная запись концертного номера
+                                            </div>
+                                        </div>
+                                    ` : (hasPostcardVid ? `
+                                        <div class="flex flex-col gap-1.5">
+                                            <div class="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                                                <span>🎬</span> Видео-открытка артиста
+                                            </div>
+                                            ${renderVideoPlayerHTML(country.postcardVideo, 'Видео-открытка: ' + country.country, 'w-full aspect-video rounded-2xl overflow-hidden border border-amber-500/20 bg-black')}
+                                        </div>
+                                    ` : (hasPerfVid ? `
+                                        <div class="flex flex-col gap-1.5">
+                                            <div class="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                                                <span>🎤</span> Полное выступление (Live Performance)
+                                            </div>
+                                            ${renderVideoPlayerHTML(country.performanceVideo, 'Выступление: ' + country.country, 'w-full aspect-video rounded-2xl overflow-hidden border border-amber-500/20 bg-black')}
+                                        </div>
+                                    ` : `
+                                        <div class="py-6 px-4 rounded-2xl bg-[#0a0305]/70 border border-dashed border-amber-500/20 text-center flex flex-col items-center justify-center gap-2">
+                                            <span class="text-xl">🎬</span>
+                                            <span class="text-[11px] text-slate-400 font-medium">Видео-открытка и запись выступления готовятся к публикации</span>
+                                        </div>
+                                    `))}
+
+                                    <!-- Текстовое описание открытки (если есть) -->
+                                    ${country.postcard ? `
+                                        <div class="text-[11px] text-amber-200/90 bg-[#0a0305] p-3 rounded-xl border border-amber-500/15 mt-3 leading-relaxed">
+                                            <span class="font-bold text-amber-400 block mb-0.5 uppercase text-[9px] tracking-widest">Тематика открытки:</span>
+                                            ${country.postcard}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `}
             </div>
         </div>
     `;
 }
+
+window.switchContestParticipantVideoTab = function(contestId, idx, tab) {
+    const postcardEl = document.getElementById(`media-postcard-${contestId}-${idx}`);
+    const perfEl = document.getElementById(`media-performance-${contestId}-${idx}`);
+    const postcardBtn = document.getElementById(`tab-btn-postcard-${contestId}-${idx}`);
+    const perfBtn = document.getElementById(`tab-btn-perf-${contestId}-${idx}`);
+
+    if (postcardEl && perfEl && postcardBtn && perfBtn) {
+        if (tab === 'postcard') {
+            postcardEl.classList.remove('hidden');
+            perfEl.classList.add('hidden');
+            postcardBtn.className = "flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition flex items-center justify-center gap-1";
+            perfBtn.className = "flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-white border border-amber-500/20 transition flex items-center justify-center gap-1";
+        } else {
+            postcardEl.classList.add('hidden');
+            perfEl.classList.remove('hidden');
+            postcardBtn.className = "flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-white border border-amber-500/20 transition flex items-center justify-center gap-1";
+            perfBtn.className = "flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition flex items-center justify-center gap-1";
+        }
+    }
+};
 
 // -------------------------------------------------------------
 // ШАБЛОН СТРАНИЦЫ НОВОСТЕЙ
 // -------------------------------------------------------------
 function getNewsHTML() {
     const categories = ['all', 'Конкурс', 'Анонс', 'Архив', 'Организация'];
+    const sortedNews = sortNewsDescending(newsData);
     const filteredNews = currentNewsFilter === 'all' 
-        ? newsData 
-        : newsData.filter(n => (n.category === currentNewsFilter || n.tag === currentNewsFilter));
+        ? sortedNews 
+        : sortedNews.filter(n => (n.category === currentNewsFilter || n.tag === currentNewsFilter));
 
     return `
         <div class="flex flex-col gap-6 page-fade">
@@ -1613,7 +1733,7 @@ subscribeState((state) => {
     const prevSession = systemState.sessionId;
 
     contestsData = state.contests || [];
-    newsData = state.news || [];
+    newsData = sortNewsDescending(state.news || []);
     participantsData = state.participants || DEFAULT_PARTICIPANTS;
     votesData = state.votes || [];
     

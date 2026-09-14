@@ -67,12 +67,45 @@ export const INITIAL_CONTESTS = [
             points: 240
         },
         countries: [
-            { id: 'c1', country: 'Германия', flag: '🇩🇪', artist: 'Elena & The Echoes', song: 'Neon Heartbeat', rank: 1, points: 240, postcard: 'Открытка: Гамбургский порт на рассвете' },
-            { id: 'c2', country: 'Франция', flag: '🇫🇷', artist: 'Julian Vane', song: 'Lumière d\'Or', rank: 2, points: 190, postcard: 'Открытка: Ночной Париж и неоновые огни' },
-            { id: 'c3', country: 'Италия', flag: '🇮🇹', artist: 'Chiara Bellini', song: 'Sinfonia Solare', rank: 3, points: 175, postcard: 'Открытка: Тосканские холмы и побережье' },
-            { id: 'c4', country: 'Испания', flag: '🇪🇸', artist: 'Mateo Cruz', song: 'Fuego Eterno', rank: 4, points: 140, postcard: 'Открытка: Солнечная Севилья' },
-            { id: 'c5', country: 'Швеция', flag: '🇸🇪', artist: 'Astrid Lind', song: 'Nordic Glow', rank: 5, points: 120, postcard: 'Открытка: Стокгольмские архипелаги' },
-            { id: 'c6', country: 'Польша', flag: '🇵🇱', artist: 'Marek Kowal', song: 'Echoes of Dawn', rank: 6, points: 95, postcard: 'Открытка: Варшавский старый город' }
+            { 
+                id: 'c1', 
+                country: 'Германия', 
+                flag: '🇩🇪', 
+                artist: 'Elena & The Echoes', 
+                song: 'Neon Heartbeat', 
+                rank: 1, 
+                points: 240, 
+                postcard: 'Открытка: Гамбургский порт на рассвете',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { 
+                id: 'c2', 
+                country: 'Франция', 
+                flag: '🇫🇷', 
+                artist: 'Julian Vane', 
+                song: 'Lumière d\'Or', 
+                rank: 2, 
+                points: 190, 
+                postcard: 'Открытка: Ночной Париж и неоновые огни',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { 
+                id: 'c3', 
+                country: 'Италия', 
+                flag: '🇮🇹', 
+                artist: 'Chiara Bellini', 
+                song: 'Sinfonia Solare', 
+                rank: 3, 
+                points: 175, 
+                postcard: 'Открытка: Тосканские холмы и побережье',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { id: 'c4', country: 'Испания', flag: '🇪🇸', artist: 'Mateo Cruz', song: 'Fuego Eterno', rank: 4, points: 140, postcard: 'Открытка: Солнечная Севилья', postcardVideo: '', performanceVideo: '' },
+            { id: 'c5', country: 'Швеция', flag: '🇸🇪', artist: 'Astrid Lind', song: 'Nordic Glow', rank: 5, points: 120, postcard: 'Открытка: Стокгольмские архипелаги', postcardVideo: '', performanceVideo: '' },
+            { id: 'c6', country: 'Польша', flag: '🇵🇱', artist: 'Marek Kowal', song: 'Echoes of Dawn', rank: 6, points: 95, postcard: 'Открытка: Варшавский старый город', postcardVideo: '', performanceVideo: '' }
         ],
         knownDetails: []
     },
@@ -91,14 +124,36 @@ export const INITIAL_CONTESTS = [
         recapUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
         winner: null,
         countries: [
-            { id: 'p1', country: 'Австрия', flag: '🇦🇹', artist: 'Participant 1', song: 'Golden Radiance', rank: null, points: null, postcard: 'Дворец Шёнбрунн и симфония огней' },
-            { id: 'p2', country: 'Нидерланды', flag: '🇳🇱', artist: 'Participant 2', song: 'Amsterdam Pulse', rank: null, points: null, postcard: 'Каналы Амстердама в лучах заката' },
-            { id: 'p3', country: 'Норвегия', flag: '🇳🇴', artist: 'Participant 3', song: 'Aurora Chords', rank: null, points: null, postcard: 'Северное сияние над фьордами' },
-            { id: 'p4', country: 'Великобритания', flag: '🇬🇧', artist: 'Participant 4', song: 'London Sky', rank: null, points: null, postcard: 'Вечерний берег Темзы' },
-            { id: 'p5', country: 'Швейцария', flag: '🇨🇭', artist: 'Participant 5', song: 'Alpine Whisper', rank: null, points: null, postcard: 'Вершины Альп и зеркальные озера' },
-            { id: 'p6', country: 'Финляндия', flag: '🇫🇮', artist: 'Participant 6', song: 'Midnight Sun', rank: null, points: null, postcard: 'Хельсинки и озерный край' },
-            { id: 'p7', country: 'Португалия', flag: '🇵🇹', artist: 'Participant 7', song: 'Oceano Dourado', rank: null, points: null, postcard: 'Атлантические утесы Лиссабона' },
-            { id: 'p8', country: 'Бельгия', flag: '🇧🇪', artist: 'Participant 8', song: 'Velvet Dreams', rank: null, points: null, postcard: 'Гранд-Плас в сиянии прожекторов' }
+            { 
+                id: 'p1', 
+                country: 'Австрия', 
+                flag: '🇦🇹', 
+                artist: 'Participant 1', 
+                song: 'Golden Radiance', 
+                rank: null, 
+                points: null, 
+                postcard: 'Дворец Шёнбрунн и симфония огней',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { 
+                id: 'p2', 
+                country: 'Нидерланды', 
+                flag: '🇳🇱', 
+                artist: 'Participant 2', 
+                song: 'Amsterdam Pulse', 
+                rank: null, 
+                points: null, 
+                postcard: 'Каналы Амстердама в лучах заката',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { id: 'p3', country: 'Норвегия', flag: '🇳🇴', artist: 'Participant 3', song: 'Aurora Chords', rank: null, points: null, postcard: 'Северное сияние над фьордами', postcardVideo: '', performanceVideo: '' },
+            { id: 'p4', country: 'Великобритания', flag: '🇬🇧', artist: 'Participant 4', song: 'London Sky', rank: null, points: null, postcard: 'Вечерний берег Темзы', postcardVideo: '', performanceVideo: '' },
+            { id: 'p5', country: 'Швейцария', flag: '🇨🇭', artist: 'Participant 5', song: 'Alpine Whisper', rank: null, points: null, postcard: 'Вершины Альп и зеркальные озера', postcardVideo: '', performanceVideo: '' },
+            { id: 'p6', country: 'Финляндия', flag: '🇫🇮', artist: 'Participant 6', song: 'Midnight Sun', rank: null, points: null, postcard: 'Хельсинки и озерный край', postcardVideo: '', performanceVideo: '' },
+            { id: 'p7', country: 'Португалия', flag: '🇵🇹', artist: 'Participant 7', song: 'Oceano Dourado', rank: null, points: null, postcard: 'Атлантические утесы Лиссабона', postcardVideo: '', performanceVideo: '' },
+            { id: 'p8', country: 'Бельгия', flag: '🇧🇪', artist: 'Participant 8', song: 'Velvet Dreams', rank: null, points: null, postcard: 'Гранд-Плас в сиянии прожекторов', postcardVideo: '', performanceVideo: '' }
         ],
         knownDetails: [
             'Все 8 финалистов утвердили сценические постановки и визуальные эффекты.',
@@ -122,14 +177,14 @@ export const INITIAL_CONTESTS = [
         recapUrl: '',
         winner: null,
         countries: [
-            { id: 'a1', country: 'Чехия (Хозяева)', flag: '🇨🇿', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Пражский град и Карлов мост' },
-            { id: 'a2', country: 'Германия', flag: '🇩🇪', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Берлинский модерн' },
-            { id: 'a3', country: 'Франция', flag: '🇫🇷', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Лазурный берег' },
-            { id: 'a4', country: 'Италия', flag: '🇮🇹', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Венецианская лагуна' },
-            { id: 'a5', country: 'Швеция', flag: '🇸🇪', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Северные леса' },
-            { id: 'a6', country: 'Испания', flag: '🇪🇸', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Мадридские площади' },
-            { id: 'a7', country: 'Япония (Специальный гость)', flag: '🇯🇵', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Токио Неон' },
-            { id: 'a8', country: 'Австралия (Ассоциированный член)', flag: '🇦🇺', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Сиднейская гавань' }
+            { id: 'a1', country: 'Чехия (Хозяева)', flag: '🇨🇿', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Пражский град и Карлов мост', postcardVideo: '', performanceVideo: '' },
+            { id: 'a2', country: 'Германия', flag: '🇩🇪', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Берлинский модерн', postcardVideo: '', performanceVideo: '' },
+            { id: 'a3', country: 'Франция', flag: '🇫🇷', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Лазурный берег', postcardVideo: '', performanceVideo: '' },
+            { id: 'a4', country: 'Италия', flag: '🇮🇹', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Венецианская лагуна', postcardVideo: '', performanceVideo: '' },
+            { id: 'a5', country: 'Швеция', flag: '🇸🇪', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Северные леса', postcardVideo: '', performanceVideo: '' },
+            { id: 'a6', country: 'Испания', flag: '🇪🇸', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Мадридские площади', postcardVideo: '', performanceVideo: '' },
+            { id: 'a7', country: 'Япония (Специальный гость)', flag: '🇯🇵', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Токио Неон', postcardVideo: '', performanceVideo: '' },
+            { id: 'a8', country: 'Австралия (Ассоциированный член)', flag: '🇦🇺', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Сиднейская гавань', postcardVideo: '', performanceVideo: '' }
         ],
         knownDetails: [
             'Подтверждено участие 12 стран-вещателей Haribo Broadcasting Union.',
@@ -146,6 +201,7 @@ export const INITIAL_NEWS = [
         id: 'news-1',
         title: 'Грандиозный старт финала HariVision August 2026: открыто голосование зрителей',
         date: '24 августа 2026',
+        createdAt: new Date('2026-08-24T12:00:00Z').getTime(),
         category: 'Конкурс',
         tag: 'Финал',
         summary: 'Официальный портал Haribo Broadcasting Union запустил систему Public Vote для финала августовского сезона.',
@@ -161,6 +217,7 @@ export const INITIAL_NEWS = [
         id: 'news-2',
         title: 'Haribo Broadcasting Union раскрывает детали предстоящего сезона Autumn 2026',
         date: '22 августа 2026',
+        createdAt: new Date('2026-08-22T12:00:00Z').getTime(),
         category: 'Анонс',
         tag: 'Autumn 2026',
         summary: 'Осенний сезон HariVision пройдет в Праге под слоганом «Amber Twilight» с рекордным составом стран-участниц.',
@@ -174,6 +231,7 @@ export const INITIAL_NEWS = [
         id: 'news-3',
         title: 'Итоги HariVision July 2026: Германия завоевала хрустальное сердце конкурса',
         date: '19 июля 2026',
+        createdAt: new Date('2026-07-19T12:00:00Z').getTime(),
         category: 'Архив',
         tag: 'Итоги',
         summary: 'Дуэт Elena & The Echoes одержал победу в драматической борьбе с композицией «Neon Heartbeat».',

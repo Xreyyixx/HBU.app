@@ -658,13 +658,24 @@
                     <span class="text-[10px] text-slate-500 mt-1 block">Артист с этим логином/email при входе в систему получит статус артиста, и его голос за этот номер будет заблокирован.</span>
                 </div>
 
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">🎬 Видео-открытка артиста (Postcard URL)</label>
+                        <input type="text" id="participant-input-postcard-video" placeholder="https://rutube.ru/play/embed/... или YouTube" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">🎤 Видео полного выступления (Performance URL)</label>
+                        <input type="text" id="participant-input-performance-video" placeholder="https://rutube.ru/play/embed/... или YouTube" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                </div>
+
                 <div>
-                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Ссылка на видео (Embed URL / Thank you video)</label>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Ссылка на Thank-you видео (опционально)</label>
                     <input type="text" id="participant-input-video" placeholder="videos/thank_you_p1.mp4 или https://..." class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
                 </div>
 
                 <div>
-                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Презентация / Открытка (опционально)</label>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Описание открытки (текст, опционально)</label>
                     <input type="text" id="participant-input-postcard" placeholder="Открытка: Дворец Шёнбрунн и симфония огней" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
                 </div>
 

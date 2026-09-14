@@ -23,7 +23,8 @@ import {
     mergeVotes,
     sanitizeFirestoreData,
     safeJsonStringify,
-    renderVideoPlayerHTML 
+    renderVideoPlayerHTML,
+    sortNewsDescending 
 } from './data-service.js';
 
 let appState = {
@@ -496,6 +497,8 @@ window.openParticipantEditorModal = function(participantId) {
             document.getElementById('participant-input-artist').value = p.artist || '';
             document.getElementById('participant-input-song').value = p.song || '';
             document.getElementById('participant-input-artist-login').value = p.artistLogin || p.linkedArtistLogin || '';
+            document.getElementById('participant-input-postcard-video').value = p.postcardVideo || '';
+            document.getElementById('participant-input-performance-video').value = p.performanceVideo || '';
             document.getElementById('participant-input-video').value = p.videoUrl || '';
             document.getElementById('participant-input-postcard').value = p.postcard || '';
         }
@@ -506,6 +509,8 @@ window.openParticipantEditorModal = function(participantId) {
         document.getElementById('participant-input-number').value = nextNum;
         document.getElementById('participant-input-name').value = `Number ${nextNum}`;
         document.getElementById('participant-input-artist-login').value = '';
+        document.getElementById('participant-input-postcard-video').value = '';
+        document.getElementById('participant-input-performance-video').value = '';
     }
 
     modal.classList.remove('hidden');
@@ -525,6 +530,8 @@ document.getElementById('participant-form').addEventListener('submit', async (e)
     const artist = document.getElementById('participant-input-artist').value.trim();
     const song = document.getElementById('participant-input-song').value.trim();
     const artistLogin = document.getElementById('participant-input-artist-login').value.trim();
+    const postcardVideo = document.getElementById('participant-input-postcard-video').value.trim();
+    const performanceVideo = document.getElementById('participant-input-performance-video').value.trim();
     const videoUrl = document.getElementById('participant-input-video').value.trim();
     const postcard = document.getElementById('participant-input-postcard').value.trim();
 
@@ -537,6 +544,8 @@ document.getElementById('participant-form').addEventListener('submit', async (e)
         artist: artist || '',
         song: song || '',
         artistLogin: artistLogin || '',
+        postcardVideo: postcardVideo || '',
+        performanceVideo: performanceVideo || '',
         videoUrl: videoUrl || `videos/thank_you_${id || 'p' + number}.mp4`,
         postcard
     };
@@ -912,7 +921,7 @@ function renderAdminNews() {
     const container = document.getElementById('admin-news-list');
     if (!container) return;
 
-    const list = appState.news || [];
+    const list = sortNewsDescending(appState.news || []);
     if (list.length === 0) {
         container.innerHTML = `<div class="col-span-full text-center py-10 text-xs text-slate-400">Список новостей пуст. Создайте первую публикацию!</div>`;
         return;
@@ -1183,16 +1192,21 @@ function renderContestModalParticipants() {
         return;
     }
 
-    container.innerHTML = currentEditingContestParticipants.map((p, idx) => `
-        <div class="bg-[#0a0305] border border-amber-500/20 hover:border-amber-500/40 p-3.5 rounded-xl flex flex-col gap-2.5 transition shadow-sm">
+    container.innerHTML = currentEditingContestParticipants.map((p, idx) => {
+        const hasPostcardVid = Boolean(p.postcardVideo && p.postcardVideo.trim());
+        const hasPerfVid = Boolean(p.performanceVideo && p.performanceVideo.trim());
+
+        return `
+        <div class="bg-[#0a0305] border border-amber-500/20 hover:border-amber-500/40 p-4 rounded-2xl flex flex-col gap-3 transition shadow-sm">
             <div class="flex items-center justify-between gap-2 border-b border-amber-500/10 pb-2">
                 <div class="flex items-center gap-2">
                     <span class="text-xs font-mono font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">#${idx + 1}</span>
                     <span class="text-xs font-bold text-white uppercase">${p.country || 'Новая страна'}</span>
+                    ${p.artist ? `<span class="text-xs text-amber-300 font-medium">(${p.artist})</span>` : ''}
                 </div>
                 <div class="flex items-center gap-1.5">
-                    <button type="button" onclick="moveContestParticipantUp(${idx})" class="text-[10px] px-2 py-0.5 bg-[#16070b] hover:bg-amber-500/20 text-slate-300 rounded border border-amber-500/20 ${idx === 0 ? 'opacity-30 cursor-not-allowed' : ''}" ${idx === 0 ? 'disabled' : ''}>▲</button>
-                    <button type="button" onclick="moveContestParticipantDown(${idx})" class="text-[10px] px-2 py-0.5 bg-[#16070b] hover:bg-amber-500/20 text-slate-300 rounded border border-amber-500/20 ${idx === currentEditingContestParticipants.length - 1 ? 'opacity-30 cursor-not-allowed' : ''}" ${idx === currentEditingContestParticipants.length - 1 ? 'disabled' : ''}>▼</button>
+                    <button type="button" onclick="moveContestParticipantUp(${idx})" title="Переместить выше" class="text-[10px] px-2 py-0.5 bg-[#16070b] hover:bg-amber-500/20 text-slate-300 rounded border border-amber-500/20 ${idx === 0 ? 'opacity-30 cursor-not-allowed' : ''}" ${idx === 0 ? 'disabled' : ''}>▲</button>
+                    <button type="button" onclick="moveContestParticipantDown(${idx})" title="Переместить ниже" class="text-[10px] px-2 py-0.5 bg-[#16070b] hover:bg-amber-500/20 text-slate-300 rounded border border-amber-500/20 ${idx === currentEditingContestParticipants.length - 1 ? 'opacity-30 cursor-not-allowed' : ''}" ${idx === currentEditingContestParticipants.length - 1 ? 'disabled' : ''}>▼</button>
                     <button type="button" onclick="removeParticipantFromCurrentContest(${idx})" class="text-[10px] px-2.5 py-0.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 font-bold rounded border border-rose-500/30 transition">✕ Удалить</button>
                 </div>
             </div>
@@ -1223,17 +1237,60 @@ function renderContestModalParticipants() {
                 </div>
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Баллы (Public Pts)</label>
-                    <input type="number" value="${p.points !== undefined && p.points !== null ? p.points : ''}" placeholder="240" oninput="updateContestParticipantField(${idx}, 'points', this.value ? parseInt(this.value, 10) : null)" class="w-full bg-[#16070b] border border-amber-500/25 px-2 py-1.5 text-xs text-white rounded-lg font-mono text-center" />
+                    <input type="number" value="${p.points !== undefined && p.points !== null ? p.points : ''}" placeholder="240" oninput="updateContestParticipantField(${idx}, 'points', this.value ? parseInt(this.value, 10) : null)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg font-mono text-center" />
                 </div>
             </div>
 
+            <!-- ВИДЕО-ОТКРЫТКА АРТИСТА (POSTCARD VIDEO) -->
+            <div class="bg-[#16070b] border border-amber-500/20 p-2.5 rounded-xl">
+                <div class="flex items-center justify-between mb-1.5">
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                        <span>🎬</span> Видео-открытка артиста (Postcard Video Player)
+                    </label>
+                    <div class="flex items-center gap-2">
+                        ${hasPostcardVid ? `<span class="text-[9px] font-bold text-green-400 bg-green-950/60 border border-green-500/30 px-2 py-0.5 rounded-full">● Видео подключено</span>` : `<span class="text-[9px] text-slate-500">Не загружено</span>`}
+                        ${hasPostcardVid ? `
+                            <button type="button" onclick="clearContestParticipantVideo(${idx}, 'postcardVideo')" class="text-[9px] text-rose-400 hover:text-rose-300 font-bold uppercase underline">
+                                Убрать видео
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+                <input type="text" value="${p.postcardVideo || ''}" placeholder="Ссылка на плеер открытки: https://rutube.ru/play/embed/... или YouTube / VK" oninput="updateContestParticipantField(${idx}, 'postcardVideo', this.value)" class="w-full bg-[#0a0305] border border-amber-500/25 px-3 py-1.5 text-xs text-white rounded-lg focus:outline-none focus:border-amber-400 font-mono" />
+            </div>
+
+            <!-- ВИДЕО ПОЛНОГО ВЫСТУПЛЕНИЯ (PERFORMANCE VIDEO) -->
+            <div class="bg-[#16070b] border border-amber-500/20 p-2.5 rounded-xl">
+                <div class="flex items-center justify-between mb-1.5">
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                        <span>🎤</span> Видео полного выступления (Full Performance Video Player)
+                    </label>
+                    <div class="flex items-center gap-2">
+                        ${hasPerfVid ? `<span class="text-[9px] font-bold text-green-400 bg-green-950/60 border border-green-500/30 px-2 py-0.5 rounded-full">● Запись подключена</span>` : `<span class="text-[9px] text-slate-500">Не загружено</span>`}
+                        ${hasPerfVid ? `
+                            <button type="button" onclick="clearContestParticipantVideo(${idx}, 'performanceVideo')" class="text-[9px] text-rose-400 hover:text-rose-300 font-bold uppercase underline">
+                                Убрать видео
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+                <input type="text" value="${p.performanceVideo || ''}" placeholder="Ссылка на плеер выступления: https://rutube.ru/play/embed/... или YouTube / VK" oninput="updateContestParticipantField(${idx}, 'performanceVideo', this.value)" class="w-full bg-[#0a0305] border border-amber-500/25 px-3 py-1.5 text-xs text-white rounded-lg focus:outline-none focus:border-amber-400 font-mono" />
+            </div>
+
             <div>
-                <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Презентация / Открытка (Postcard)</label>
-                <input type="text" value="${p.postcard || ''}" placeholder="Открытка: Гамбургский порт на рассвете" oninput="updateContestParticipantField(${idx}, 'postcard', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1 text-[11px] text-slate-300 rounded-lg" />
+                <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Описание открытки (текст, опционально)</label>
+                <input type="text" value="${p.postcard || ''}" placeholder="Тематика открытки: Дворец Шёнбрунн и симфония огней" oninput="updateContestParticipantField(${idx}, 'postcard', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1 text-[11px] text-slate-300 rounded-lg" />
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
+
+window.clearContestParticipantVideo = function(index, field) {
+    if (currentEditingContestParticipants[index]) {
+        currentEditingContestParticipants[index][field] = '';
+        renderContestModalParticipants();
+    }
+};
 
 window.updateContestParticipantField = function(index, field, value) {
     if (currentEditingContestParticipants[index]) {
@@ -1251,7 +1308,9 @@ window.addParticipantToCurrentContest = function() {
         song: '',
         rank: null,
         points: null,
-        postcard: ''
+        postcard: '',
+        postcardVideo: '',
+        performanceVideo: ''
     });
     renderContestModalParticipants();
 };
@@ -1289,7 +1348,9 @@ window.importActiveParticipantsToCurrentContest = function() {
         song: p.song || '',
         rank: null,
         points: null,
-        postcard: p.postcard || ''
+        postcard: p.postcard || '',
+        postcardVideo: p.postcardVideo || '',
+        performanceVideo: p.performanceVideo || p.videoUrl || ''
     }));
     renderContestModalParticipants();
     showToast(`Импортировано ${parts.length} участников`);
@@ -1374,7 +1435,11 @@ window.openContestEditorModal = function(contestId) {
             document.getElementById('contest-input-details').value = (c.knownDetails || []).join('\n');
 
             // Загружаем список участников сезона
-            currentEditingContestParticipants = JSON.parse(safeJsonStringify(c.countries || c.participants || [], '[]'));
+            currentEditingContestParticipants = JSON.parse(safeJsonStringify(c.countries || c.participants || [], '[]')).map(p => ({
+                ...p,
+                postcardVideo: p.postcardVideo || '',
+                performanceVideo: p.performanceVideo || ''
+            }));
         }
     } else {
         titleEl.innerText = "Создание нового сезона";
@@ -1431,9 +1496,11 @@ document.getElementById('contest-form').addEventListener('submit', async (e) => 
         flag: p.flag || '🏳️',
         artist: p.artist || '',
         song: p.song || '',
-        rank: p.rank !== undefined && p.rank !== null ? Number(p.rank) : null,
-        points: p.points !== undefined && p.points !== null ? Number(p.points) : null,
-        postcard: p.postcard || ''
+        rank: p.rank !== undefined && p.rank !== null && p.rank !== '' ? Number(p.rank) : null,
+        points: p.points !== undefined && p.points !== null && p.points !== '' ? Number(p.points) : null,
+        postcard: p.postcard || '',
+        postcardVideo: (p.postcardVideo || '').trim(),
+        performanceVideo: (p.performanceVideo || '').trim()
     }));
 
     const contestData = {

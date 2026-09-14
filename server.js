@@ -49,12 +49,45 @@ const INITIAL_CONTESTS = [
             points: 240
         },
         countries: [
-            { id: 'c1', country: 'Германия', flag: '🇩🇪', artist: 'Elena & The Echoes', song: 'Neon Heartbeat', rank: 1, points: 240, postcard: 'Открытка: Гамбургский порт на рассвете' },
-            { id: 'c2', country: 'Франция', flag: '🇫🇷', artist: 'Julian Vane', song: 'Lumière d\'Or', rank: 2, points: 190, postcard: 'Открытка: Ночной Париж и неоновые огни' },
-            { id: 'c3', country: 'Италия', flag: '🇮🇹', artist: 'Chiara Bellini', song: 'Sinfonia Solare', rank: 3, points: 175, postcard: 'Открытка: Тосканские холмы и побережье' },
-            { id: 'c4', country: 'Испания', flag: '🇪🇸', artist: 'Mateo Cruz', song: 'Fuego Eterno', rank: 4, points: 140, postcard: 'Открытка: Солнечная Севилья' },
-            { id: 'c5', country: 'Швеция', flag: '🇸🇪', artist: 'Astrid Lind', song: 'Nordic Glow', rank: 5, points: 120, postcard: 'Открытка: Стокгольмские архипелаги' },
-            { id: 'c6', country: 'Польша', flag: '🇵🇱', artist: 'Marek Kowal', song: 'Echoes of Dawn', rank: 6, points: 95, postcard: 'Открытка: Варшавский старый город' }
+            { 
+                id: 'c1', 
+                country: 'Германия', 
+                flag: '🇩🇪', 
+                artist: 'Elena & The Echoes', 
+                song: 'Neon Heartbeat', 
+                rank: 1, 
+                points: 240, 
+                postcard: 'Открытка: Гамбургский порт на рассвете',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { 
+                id: 'c2', 
+                country: 'Франция', 
+                flag: '🇫🇷', 
+                artist: 'Julian Vane', 
+                song: 'Lumière d\'Or', 
+                rank: 2, 
+                points: 190, 
+                postcard: 'Открытка: Ночной Париж и неоновые огни',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { 
+                id: 'c3', 
+                country: 'Италия', 
+                flag: '🇮🇹', 
+                artist: 'Chiara Bellini', 
+                song: 'Sinfonia Solare', 
+                rank: 3, 
+                points: 175, 
+                postcard: 'Открытка: Тосканские холмы и побережье',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { id: 'c4', country: 'Испания', flag: '🇪🇸', artist: 'Mateo Cruz', song: 'Fuego Eterno', rank: 4, points: 140, postcard: 'Открытка: Солнечная Севилья', postcardVideo: '', performanceVideo: '' },
+            { id: 'c5', country: 'Швеция', flag: '🇸🇪', artist: 'Astrid Lind', song: 'Nordic Glow', rank: 5, points: 120, postcard: 'Открытка: Стокгольмские архипелаги', postcardVideo: '', performanceVideo: '' },
+            { id: 'c6', country: 'Польша', flag: '🇵🇱', artist: 'Marek Kowal', song: 'Echoes of Dawn', rank: 6, points: 95, postcard: 'Открытка: Варшавский старый город', postcardVideo: '', performanceVideo: '' }
         ],
         knownDetails: []
     },
@@ -73,14 +106,36 @@ const INITIAL_CONTESTS = [
         recapUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
         winner: null,
         countries: [
-            { id: 'p1', country: 'Австрия', flag: '🇦🇹', artist: 'Participant 1', song: 'Golden Radiance', rank: null, points: null, postcard: 'Дворец Шёнбрунн и симфония огней' },
-            { id: 'p2', country: 'Нидерланды', flag: '🇳🇱', artist: 'Participant 2', song: 'Amsterdam Pulse', rank: null, points: null, postcard: 'Каналы Амстердама в лучах заката' },
-            { id: 'p3', country: 'Норвегия', flag: '🇳🇴', artist: 'Participant 3', song: 'Aurora Chords', rank: null, points: null, postcard: 'Северное сияние над фьордами' },
-            { id: 'p4', country: 'Великобритания', flag: '🇬🇧', artist: 'Participant 4', song: 'London Sky', rank: null, points: null, postcard: 'Вечерний берег Темзы' },
-            { id: 'p5', country: 'Швейцария', flag: '🇨🇭', artist: 'Participant 5', song: 'Alpine Whisper', rank: null, points: null, postcard: 'Вершины Альп и зеркальные озера' },
-            { id: 'p6', country: 'Финляндия', flag: '🇫🇮', artist: 'Participant 6', song: 'Midnight Sun', rank: null, points: null, postcard: 'Хельсинки и озерный край' },
-            { id: 'p7', country: 'Португалия', flag: '🇵🇹', artist: 'Participant 7', song: 'Oceano Dourado', rank: null, points: null, postcard: 'Атлантические утесы Лиссабона' },
-            { id: 'p8', country: 'Бельгия', flag: '🇧🇪', artist: 'Participant 8', song: 'Velvet Dreams', rank: null, points: null, postcard: 'Гранд-Плас в сиянии прожекторов' }
+            { 
+                id: 'p1', 
+                country: 'Австрия', 
+                flag: '🇦🇹', 
+                artist: 'Participant 1', 
+                song: 'Golden Radiance', 
+                rank: null, 
+                points: null, 
+                postcard: 'Дворец Шёнбрунн и симфония огней',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { 
+                id: 'p2', 
+                country: 'Нидерланды', 
+                flag: '🇳🇱', 
+                artist: 'Participant 2', 
+                song: 'Amsterdam Pulse', 
+                rank: null, 
+                points: null, 
+                postcard: 'Каналы Амстердама в лучах заката',
+                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
+                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
+            },
+            { id: 'p3', country: 'Норвегия', flag: '🇳🇴', artist: 'Participant 3', song: 'Aurora Chords', rank: null, points: null, postcard: 'Северное сияние над фьордами', postcardVideo: '', performanceVideo: '' },
+            { id: 'p4', country: 'Великобритания', flag: '🇬🇧', artist: 'Participant 4', song: 'London Sky', rank: null, points: null, postcard: 'Вечерний берег Темзы', postcardVideo: '', performanceVideo: '' },
+            { id: 'p5', country: 'Швейцария', flag: '🇨🇭', artist: 'Participant 5', song: 'Alpine Whisper', rank: null, points: null, postcard: 'Вершины Альп и зеркальные озера', postcardVideo: '', performanceVideo: '' },
+            { id: 'p6', country: 'Финляндия', flag: '🇫🇮', artist: 'Participant 6', song: 'Midnight Sun', rank: null, points: null, postcard: 'Хельсинки и озерный край', postcardVideo: '', performanceVideo: '' },
+            { id: 'p7', country: 'Португалия', flag: '🇵🇹', artist: 'Participant 7', song: 'Oceano Dourado', rank: null, points: null, postcard: 'Атлантические утесы Лиссабона', postcardVideo: '', performanceVideo: '' },
+            { id: 'p8', country: 'Бельгия', flag: '🇧🇪', artist: 'Participant 8', song: 'Velvet Dreams', rank: null, points: null, postcard: 'Гранд-Плас в сиянии прожекторов', postcardVideo: '', performanceVideo: '' }
         ],
         knownDetails: [
             'Все 8 финалистов утвердили сценические постановки и визуальные эффекты.',
@@ -128,6 +183,7 @@ const INITIAL_NEWS = [
         id: 'news-1',
         title: 'Грандиозный старт финала HariVision August 2026: открыто голосование зрителей',
         date: '24 августа 2026',
+        createdAt: 1787572800000,
         category: 'Конкурс',
         tag: 'Финал',
         summary: 'Официальный портал Haribo Broadcasting Union запустил систему Public Vote для финала августовского сезона.',
@@ -143,6 +199,7 @@ const INITIAL_NEWS = [
         id: 'news-2',
         title: 'Haribo Broadcasting Union раскрывает детали предстоящего сезона Autumn 2026',
         date: '22 августа 2026',
+        createdAt: 1787399999000,
         category: 'Анонс',
         tag: 'Autumn 2026',
         summary: 'Осенний сезон HariVision пройдет в Праге под слоганом «Amber Twilight» с рекордным составом стран-участниц.',
@@ -156,6 +213,7 @@ const INITIAL_NEWS = [
         id: 'news-3',
         title: 'Итоги HariVision July 2026: Германия завоевала хрустальное сердце конкурса',
         date: '19 июля 2026',
+        createdAt: 1784462400000,
         category: 'Архив',
         tag: 'Итоги',
         summary: 'Дуэт Elena & The Echoes одержал победу в драматической борьбе с композицией «Neon Heartbeat».',
@@ -166,6 +224,75 @@ const INITIAL_NEWS = [
 Полная запись финального шоу и все выступления доступны в архиве официального портала HariVision.`
     }
 ];
+
+function parseNewsDateToTimestamp(article) {
+    if (!article) return 0;
+    let baseTime = 0;
+    if (article.date && typeof article.date === 'string') {
+        const dStr = article.date.toLowerCase().trim();
+        const months = {
+            'янв': 0, 'января': 0,
+            'фев': 1, 'февраля': 1,
+            'мар': 2, 'марта': 2,
+            'апр': 3, 'апреля': 3,
+            'май': 4, 'мая': 4,
+            'июн': 5, 'июня': 5,
+            'июл': 6, 'июля': 6,
+            'авг': 7, 'августа': 7,
+            'сен': 8, 'сентября': 8,
+            'окт': 9, 'октября': 9,
+            'ноя': 10, 'ноября': 10,
+            'дек': 11, 'декабря': 11
+        };
+        const ruMatch = dStr.match(/(\d{1,2})\s+([а-яё]+)\s+(\d{4})/);
+        if (ruMatch) {
+            const day = parseInt(ruMatch[1], 10);
+            const mStr = ruMatch[2];
+            const year = parseInt(ruMatch[3], 10);
+            for (const [k, v] of Object.entries(months)) {
+                if (mStr.startsWith(k)) {
+                    baseTime = new Date(Date.UTC(year, v, day, 12, 0, 0)).getTime();
+                    break;
+                }
+            }
+        }
+        if (!baseTime) {
+            const std = new Date(article.date).getTime();
+            if (!isNaN(std)) baseTime = std;
+        }
+    }
+
+    let exactCreated = 0;
+    if (typeof article.createdAt === 'number' && !isNaN(article.createdAt)) {
+        exactCreated = article.createdAt;
+    } else if (article.createdAt) {
+        const p = new Date(article.createdAt).getTime();
+        if (!isNaN(p)) exactCreated = p;
+    } else if (typeof article.id === 'string') {
+        const m = article.id.match(/news-(\d{10,})/);
+        if (m) exactCreated = parseInt(m[1], 10);
+    }
+
+    if (baseTime > 0) {
+        if (exactCreated > 0) {
+            return baseTime + (exactCreated % 86400000);
+        }
+        return baseTime;
+    }
+    return exactCreated || 0;
+}
+
+function sortNewsDescending(list = []) {
+    if (!Array.isArray(list)) return [];
+    return [...list].sort((a, b) => {
+        const timeA = parseNewsDateToTimestamp(a);
+        const timeB = parseNewsDateToTimestamp(b);
+        if (timeA !== timeB) {
+            return timeB - timeA;
+        }
+        return String(b.id || '').localeCompare(String(a.id || ''));
+    });
+}
 
 function loadStore() {
     try {
@@ -193,6 +320,7 @@ function loadStore() {
                         n.reactions = {};
                     }
                 });
+                data.news = sortNewsDescending(data.news);
             }
             return data;
         }
@@ -201,10 +329,10 @@ function loadStore() {
     }
     const defaultData = {
         contests: INITIAL_CONTESTS,
-        news: INITIAL_NEWS.map(n => ({
+        news: sortNewsDescending(INITIAL_NEWS.map(n => ({
             ...n,
             reactions: n.reactions || {}
-        })),
+        }))),
         participants: DEFAULT_PARTICIPANTS,
         votingState: { status: 'closed', endsAt: null, sessionId: null },
         recapVideoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
@@ -230,7 +358,7 @@ function saveStore(data) {
 }
 
 let store = loadStore();
-if (!store.news || store.news.length === 0) store.news = INITIAL_NEWS;
+if (!store.news || store.news.length === 0) store.news = sortNewsDescending(INITIAL_NEWS);
 if (!store.contests || store.contests.length === 0) store.contests = INITIAL_CONTESTS;
 if (!store.participants || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
 saveStore(store);
@@ -288,12 +416,17 @@ app.post('/api/news', (req, res) => {
     if (!article.id) {
         article.id = 'news-' + Date.now();
     }
+    if (!article.createdAt) {
+        article.createdAt = Date.now();
+    }
+    article.updatedAt = Date.now();
     const idx = store.news.findIndex(n => n.id === article.id);
     if (idx >= 0) {
         store.news[idx] = { ...store.news[idx], ...article };
     } else {
-        store.news.unshift(article);
+        store.news.push(article);
     }
+    store.news = sortNewsDescending(store.news);
     saveStore(store);
     broadcastState('news_update');
     res.json({ success: true, article, news: store.news });
@@ -301,7 +434,7 @@ app.post('/api/news', (req, res) => {
 
 app.delete('/api/news/:id', (req, res) => {
     const { id } = req.params;
-    store.news = store.news.filter(n => n.id !== id);
+    store.news = sortNewsDescending(store.news.filter(n => n.id !== id));
     saveStore(store);
     broadcastState('news_update');
     res.json({ success: true, news: store.news });
