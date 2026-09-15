@@ -413,7 +413,11 @@
                             <span id="admin-push-subscribers-badge" class="text-base font-black text-amber-400 font-mono">0</span>
                             <span class="text-[10px] text-slate-400">устройств в базе</span>
                         </div>
-                        <button type="button" onclick="refreshAdminPushSubscribers()" class="text-[10px] text-amber-500/70 hover:text-amber-400 text-left mt-0.5">↻ Обновить счетчик</button>
+                        <div class="flex items-center gap-2 mt-1">
+                            <button type="button" onclick="refreshAdminPushSubscribers()" class="text-[10px] text-amber-500/70 hover:text-amber-400">↻ Обновить счетчик</button>
+                            <span class="text-slate-600">•</span>
+                            <button type="button" onclick="subscribeCurrentAdminDevice()" class="text-[10px] text-amber-400 hover:text-amber-300 font-semibold underline">📲 Подписать это устр.</button>
+                        </div>
                     </div>
                     <div class="bg-[#16070b] border border-amber-500/15 p-4 rounded-2xl flex flex-col gap-1">
                         <span class="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider">Статус голосования</span>

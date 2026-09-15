@@ -4,6 +4,7 @@
 // =============================================================
 
 const STORAGE_KEY = 'harivision_notifications_enabled';
+export const PERMANENT_VAPID_PUBLIC_KEY = 'BPZuY8-gjysoqNyqec1Rqdz2iPd1gNRiwiP0kSOnAxWaSuVGsRvKafnY75wGl5vSsExJGAnC3RPkmzjhMo42wRw';
 
 export function isNotificationSupported() {
     return typeof window !== 'undefined' && (
@@ -40,107 +41,149 @@ function urlBase64ToUint8Array(base64String) {
     return outputArray;
 }
 
+function arrayBufferToBase64Url(buffer) {
+    if (!buffer) return '';
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+}
+
 // Регистрация подписки Web Push на сервере для доставки в фоне и при закрытом сайте
 export async function syncPushSubscription() {
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
-        return { success: false, reason: 'Service worker not supported' };
+    if (typeof window === 'undefined') {
+        return { success: false, reason: 'Window is not defined' };
     }
-    if (!isNotificationsEnabled()) {
-        return { success: false, reason: 'Notifications not enabled' };
+    if (!('serviceWorker' in navigator)) {
+        return { success: false, reason: 'Service worker не поддерживается браузером' };
+    }
+    if (!('PushManager' in window)) {
+        return { success: false, reason: 'PushManager недоступен (на iPhone запустите сайт с домашнего экрана Домой)' };
+    }
+    if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+        return { success: false, reason: 'Разрешение на уведомления не предоставлено (' + Notification.permission + ')' };
     }
 
     try {
-        // Убедимся, что Service Worker зарегистрирован
-        let reg = await navigator.serviceWorker.getRegistration();
+        console.log('[WebPush] Starting registration...');
+
+        // 1. Получаем регистрацию Service Worker
+        let reg = await navigator.serviceWorker.getRegistration('/');
+        if (!reg) {
+            reg = await navigator.serviceWorker.getRegistration();
+        }
         if (!reg) {
             reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
         }
 
-        // Ждем готовности SW (с таймаутом 4с)
-        const readyPromise = navigator.serviceWorker.ready;
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('ServiceWorker ready timeout')), 4000)
-        );
-        reg = await Promise.race([readyPromise, timeoutPromise]);
-
-        if (!reg || !reg.pushManager) {
-            return { success: false, reason: 'PushManager not available (iOS: Add app to Home Screen first)' };
-        }
-
-        // Получаем актуальный публичный VAPID-ключ сервера
-        const keyRes = await fetch('/api/push/vapid-public-key');
-        if (!keyRes.ok) return { success: false, reason: 'Failed to fetch VAPID key' };
-        const data = await keyRes.json();
-        if (!data || !data.publicKey) return { success: false, reason: 'VAPID public key empty' };
-
-        const targetKeyBytes = urlBase64ToUint8Array(data.publicKey);
-
-        // Проверяем текущую подписку
-        let sub = await reg.pushManager.getSubscription();
-
-        let needNewSub = !sub;
-        if (sub && sub.options && sub.options.applicationServerKey) {
-            const currentKeyBytes = new Uint8Array(sub.options.applicationServerKey);
-            if (currentKeyBytes.length !== targetKeyBytes.length || 
-                !currentKeyBytes.every((val, idx) => val === targetKeyBytes[idx])) {
-                // Ключ устарел — сбрасываем старую подписку
-                try { await sub.unsubscribe(); } catch(e) {}
-                needNewSub = true;
+        // Если pushManager еще не доступен на reg, быстро проверяем ready
+        let pm = reg ? reg.pushManager : null;
+        if (!pm && navigator.serviceWorker.ready) {
+            try {
+                const readyReg = await Promise.race([
+                    navigator.serviceWorker.ready,
+                    new Promise((_, r) => setTimeout(() => r(null), 1500))
+                ]);
+                if (readyReg && readyReg.pushManager) {
+                    reg = readyReg;
+                    pm = readyReg.pushManager;
+                }
+            } catch (e) {
+                pm = reg ? reg.pushManager : null;
             }
         }
 
-        if (needNewSub) {
-            sub = await reg.pushManager.subscribe({
+        if (!pm) {
+            return { success: false, reason: 'PushManager недоступен в Service Worker' };
+        }
+
+        // 2. VAPID ключ: используем постоянный ключ без сетевых задержек (сохраняет контекст жеста пользователя на iOS)
+        const targetKeyBytes = urlBase64ToUint8Array(PERMANENT_VAPID_PUBLIC_KEY);
+
+        // 3. Проверяем текущую подписку
+        let sub = await pm.getSubscription();
+
+        if (sub) {
+            // Проверяем соответствие VAPID ключа
+            let keyMatches = false;
+            if (sub.options && sub.options.applicationServerKey) {
+                const cur = new Uint8Array(sub.options.applicationServerKey);
+                if (cur.length === targetKeyBytes.length && cur.every((v, i) => v === targetKeyBytes[i])) {
+                    keyMatches = true;
+                }
+            }
+            if (!keyMatches) {
+                console.log('[WebPush] Ключ подписки устарел, сбрасываем старую подписку...');
+                try {
+                    await sub.unsubscribe();
+                    sub = null;
+                } catch (e) {
+                    console.warn('[WebPush] Ошибка отписки от старого ключа:', e);
+                }
+            }
+        }
+
+        // 4. Если подписки нет — подписываемся через PushManager
+        if (!sub) {
+            console.log('[WebPush] Создание новой подписки pushManager.subscribe...');
+            sub = await pm.subscribe({
                 userVisibleOnly: true,
                 applicationServerKey: targetKeyBytes
             });
+            console.log('[WebPush] Подписка в браузере успешно создана!');
         }
 
-        if (sub) {
-            // Надежная сериализация ключей для Safari, iOS PWA, Firefox и Chrome
-            const jsonSub = (typeof sub.toJSON === 'function') ? sub.toJSON() : {};
-            let p256dh = jsonSub.keys?.p256dh;
-            let auth = jsonSub.keys?.auth;
+        // 5. Сериализуем данные подписки с поддержкой WebKit / Safari iOS
+        const jsonSub = (typeof sub.toJSON === 'function') ? sub.toJSON() : {};
+        let p256dh = jsonSub.keys?.p256dh || '';
+        let auth = jsonSub.keys?.auth || '';
 
-            if ((!p256dh || !auth) && typeof sub.getKey === 'function') {
-                try {
-                    const rawP256dh = sub.getKey('p256dh');
-                    if (rawP256dh) {
-                        p256dh = btoa(String.fromCharCode(...new Uint8Array(rawP256dh)))
-                            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-                    }
-                    const rawAuth = sub.getKey('auth');
-                    if (rawAuth) {
-                        auth = btoa(String.fromCharCode(...new Uint8Array(rawAuth)))
-                            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-                    }
-                } catch (keyErr) {
-                    console.warn('Fallback getKey error:', keyErr);
+        if ((!p256dh || !auth) && typeof sub.getKey === 'function') {
+            try {
+                if (!p256dh) {
+                    const rawP = sub.getKey('p256dh');
+                    if (rawP) p256dh = arrayBufferToBase64Url(rawP);
                 }
+                if (!auth) {
+                    const rawA = sub.getKey('auth');
+                    if (rawA) auth = arrayBufferToBase64Url(rawA);
+                }
+            } catch (kErr) {
+                console.warn('[WebPush] Fallback getKey error:', kErr);
             }
-
-            const subData = {
-                endpoint: sub.endpoint,
-                expirationTime: sub.expirationTime || null,
-                keys: {
-                    p256dh: p256dh || jsonSub.keys?.p256dh || '',
-                    auth: auth || jsonSub.keys?.auth || ''
-                }
-            };
-
-            const subRes = await fetch('/api/push/subscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ subscription: subData })
-            });
-            const subResult = await subRes.json();
-            return { success: true, subscribersCount: subResult.subscribersCount };
         }
 
-        return { success: false, reason: 'Could not obtain push subscription' };
+        if (!p256dh || !auth) {
+            throw new Error('Браузер не предоставил криптоключи p256dh / auth.');
+        }
+
+        const subData = {
+            endpoint: sub.endpoint,
+            expirationTime: sub.expirationTime || null,
+            keys: { p256dh, auth }
+        };
+
+        // 6. Сохраняем на сервере
+        const subRes = await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subscription: subData })
+        });
+        const subResult = await subRes.json();
+        if (!subRes.ok || !subResult.success) {
+            throw new Error(subResult.error || `Ошибка сервера HTTP ${subRes.status}`);
+        }
+
+        console.log('[WebPush] Устройство успешно зарегистрировано на сервере! Всего подписчиков:', subResult.subscribersCount);
+        return { success: true, subscribersCount: subResult.subscribersCount };
     } catch (e) {
-        console.warn('Web Push subscription error:', e);
-        return { success: false, error: e.message };
+        console.error('[WebPush Subscription Error]', e);
+        return { success: false, error: e.message || String(e) };
     }
 }
 
@@ -198,9 +241,9 @@ export async function requestNotificationPermission() {
             const pushResult = await syncPushSubscription();
             if (typeof window.showToast === 'function') {
                 if (pushResult && pushResult.success) {
-                    window.showToast('Уведомления успешно включены! 🔔 Устройство подписано на фоновый Web Push.');
+                    window.showToast(`✅ Уведомления включены! Устройство подписано на Web Push (${pushResult.subscribersCount} в сети) 🔔`, 6000);
                 } else {
-                    window.showToast('Уведомления включены! 🔔');
+                    window.showToast(`⚠️ Разрешение дано, но Web Push не зарегистрирован: ${pushResult.error || pushResult.reason}`, 7000);
                 }
             }
             // Отправляем приветственное тестовое уведомление
@@ -253,14 +296,18 @@ export async function toggleNotifications() {
         } else {
             localStorage.setItem(STORAGE_KEY, 'true');
             updateNotificationUI();
-            await syncPushSubscription();
+            const pushResult = await syncPushSubscription();
             if (typeof window.showToast === 'function') {
-                window.showToast('Уведомления возобновлены 🔔');
+                if (pushResult && pushResult.success) {
+                    window.showToast(`✅ Уведомления возобновлены! Web Push активен (${pushResult.subscribersCount} в сети) 🔔`, 6000);
+                } else {
+                    window.showToast(`⚠️ Ошибка подключения Web Push: ${pushResult.error || pushResult.reason}`, 7000);
+                }
             }
             sendSystemNotification(
                 'HariVision 2026 🔔',
                 'Уведомления снова активны. Вы не пропустите старт голосования!',
-                '/',
+                'index.html',
                 'resumed-notif'
             );
         }
@@ -370,7 +417,34 @@ export function updateNotificationUI() {
     }
 }
 
-// Экспорт обработчика в глобальную область видимости для кнопок в HTML
+// Экспорт обработчика и утилит в глобальную область видимости
 if (typeof window !== 'undefined') {
     window.handleNotificationToggle = toggleNotifications;
+    window.syncPushSubscription = syncPushSubscription;
+    window.debugWebPush = async function() {
+        const report = {
+            isSecureContext: window.isSecureContext,
+            serviceWorkerSupported: 'serviceWorker' in navigator,
+            pushManagerSupported: 'PushManager' in window,
+            notificationSupported: 'Notification' in window,
+            permission: typeof Notification !== 'undefined' ? Notification.permission : 'n/a',
+            localStoragePref: localStorage.getItem(STORAGE_KEY),
+            activeServiceWorker: null,
+            subscription: null
+        };
+        try {
+            if ('serviceWorker' in navigator) {
+                const reg = await navigator.serviceWorker.getRegistration('/');
+                report.activeServiceWorker = reg ? { scope: reg.scope, active: Boolean(reg.active) } : null;
+                if (reg && reg.pushManager) {
+                    const sub = await reg.pushManager.getSubscription();
+                    report.subscription = sub ? { endpoint: sub.endpoint.slice(0, 45) + '...' } : null;
+                }
+            }
+        } catch (e) {
+            report.error = e.message;
+        }
+        console.table(report);
+        return report;
+    };
 }

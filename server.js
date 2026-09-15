@@ -344,6 +344,12 @@ app.get('/api/push/vapid-public-key', (req, res) => {
 // Web Push API: регистрация подписки устройства
 app.post('/api/push/subscribe', (req, res) => {
     const { subscription } = req.body || {};
+    console.log('[WebPush Subscribe Attempt]', {
+        hasSub: Boolean(subscription),
+        endpoint: subscription?.endpoint ? subscription.endpoint.slice(0, 50) + '...' : null,
+        hasP256dh: Boolean(subscription?.keys?.p256dh),
+        hasAuth: Boolean(subscription?.keys?.auth)
+    });
     if (!subscription || !subscription.endpoint) {
         return res.status(400).json({ success: false, error: 'Subscription object required' });
     }

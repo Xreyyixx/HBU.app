@@ -1895,8 +1895,14 @@ if (isNational || currentPortalView === 'voting') {
 
 // Инициализация отображения статуса уведомлений и фоновой подписки Web Push
 updateNotificationUI();
-if (isNotificationsEnabled()) {
-    syncPushSubscription();
+if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    syncPushSubscription().then(res => {
+        if (res && res.success) {
+            console.log('[WebPush] Auto-synced push subscription on startup. Subscribers:', res.subscribersCount);
+        } else {
+            console.log('[WebPush] Startup sync status:', res);
+        }
+    });
 }
 if (typeof window !== 'undefined') {
     window.handleNotificationToggle = toggleNotifications;

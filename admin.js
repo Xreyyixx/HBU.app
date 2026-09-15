@@ -1755,6 +1755,85 @@ window.testAdminPushNotification = async function() {
     }
 };
 
+window.subscribeCurrentAdminDevice = async function() {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+        showAdminNotification('Уведомления не поддерживаются данным браузером', 'error');
+        return;
+    }
+    try {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+            showAdminNotification('Разрешение не предоставлено: ' + perm, 'error');
+            return;
+        }
+        showAdminNotification('Регистрация устройства в Web Push...', 'info');
+
+        let reg = await navigator.serviceWorker.getRegistration('/');
+        if (!reg) reg = await navigator.serviceWorker.getRegistration();
+        if (!reg) reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+
+        let pm = reg ? reg.pushManager : null;
+        if (!pm && navigator.serviceWorker.ready) {
+            const readyReg = await navigator.serviceWorker.ready;
+            pm = readyReg.pushManager;
+        }
+        if (!pm) throw new Error('PushManager недоступен в этом браузере');
+
+        const VAPID_KEY = 'BPZuY8-gjysoqNyqec1Rqdz2iPd1gNRiwiP0kSOnAxWaSuVGsRvKafnY75wGl5vSsExJGAnC3RPkmzjhMo42wRw';
+        const padding = '='.repeat((4 - VAPID_KEY.length % 4) % 4);
+        const base64 = (VAPID_KEY + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const targetKeyBytes = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) targetKeyBytes[i] = rawData.charCodeAt(i);
+
+        let sub = await pm.getSubscription();
+        if (!sub) {
+            sub = await pm.subscribe({ userVisibleOnly: true, applicationServerKey: targetKeyBytes });
+        }
+
+        const jsonSub = (typeof sub.toJSON === 'function') ? sub.toJSON() : {};
+        let p256dh = jsonSub.keys?.p256dh || '';
+        let auth = jsonSub.keys?.auth || '';
+
+        if (!p256dh && typeof sub.getKey === 'function') {
+            const rawP = sub.getKey('p256dh');
+            if (rawP) {
+                let bin = ''; const b = new Uint8Array(rawP);
+                for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]);
+                p256dh = window.btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            }
+        }
+        if (!auth && typeof sub.getKey === 'function') {
+            const rawA = sub.getKey('auth');
+            if (rawA) {
+                let bin = ''; const b = new Uint8Array(rawA);
+                for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]);
+                auth = window.btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            }
+        }
+
+        const res = await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                subscription: {
+                    endpoint: sub.endpoint,
+                    keys: { p256dh, auth }
+                }
+            })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showAdminNotification(`✅ Устройство успешно подписано! Всего подписчиков: ${data.subscribersCount}`, 'success');
+            window.refreshAdminPushSubscribers();
+        } else {
+            throw new Error(data.error || 'Ошибка сохранения на сервере');
+        }
+    } catch (e) {
+        showAdminNotification('Ошибка подписки: ' + e.message, 'error');
+    }
+};
+
 // Загружаем число подписчиков при инициализации
 setTimeout(() => {
     if (typeof window.refreshAdminPushSubscribers === 'function') {
