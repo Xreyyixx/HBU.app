@@ -3,31 +3,55 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-// Insert your real Firebase project configuration here
+// Fetch Firebase config from server or window fallback (no hardcoded production credentials)
+let remoteConfig = null;
+try {
+    const res = await fetch('/api/firebase-config');
+    if (res.ok) {
+        remoteConfig = await res.json();
+    }
+} catch (e) {
+    // Offline or server unavailable
+}
+
 const firebaseConfig = {
-    apiKey: "AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw",
-    authDomain: "voting-91412.firebaseapp.com",
-    projectId: "voting-91412",
-    storageBucket: "voting-91412.firebasestorage.app",
-    messagingSenderId: "420998212853",
-    appId: "1:420998212853:web:4d16f7a9825cb0b76229bc"
+    apiKey: remoteConfig?.apiKey || (typeof window !== 'undefined' && window.__FIREBASE_CONFIG__?.apiKey) || "",
+    authDomain: remoteConfig?.authDomain || "voting-91412.firebaseapp.com",
+    projectId: remoteConfig?.projectId || "voting-91412",
+    storageBucket: remoteConfig?.storageBucket || "voting-91412.firebasestorage.app",
+    messagingSenderId: remoteConfig?.messagingSenderId || "420998212853",
+    appId: remoteConfig?.appId || "1:420998212853:web:4d16f7a9825cb0b76229bc"
 };
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
-export const auth = getAuth(app);
+let app = null;
+let db = null;
+let auth = null;
+
+if (firebaseConfig.apiKey) {
+    try {
+        app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        auth = getAuth(app);
+    } catch (e) {
+        console.warn('Firebase initialization note:', e);
+    }
+}
+
+export { db, auth };
 
 // Анонимная авторизация для обычных зрителей и PWA ярлыков
 export async function ensureFirebaseAuth() {
     try {
-        if (!auth.currentUser) {
+        if (auth && !auth.currentUser) {
             await signInAnonymously(auth);
         }
     } catch (e) {
         console.warn('Anonymous auth note:', e);
     }
 }
-ensureFirebaseAuth();
+if (auth) {
+    ensureFirebaseAuth();
+}
 
 export const TOTAL_USER_VOTES = 10;
 export const MAX_VOTES_PER_PARTICIPANT = 5;

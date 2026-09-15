@@ -115,19 +115,21 @@ function setAdminAuthenticated(authenticated) {
     }
 
     // Отслеживание сессии Firebase Auth
-    onAuthStateChanged(auth, async (user) => {
-        if (user) {
-            setAdminAuthenticated(true);
-            try {
-                await fetchFirestoreStateDirectly();
-            } catch (e) {}
-        } else {
-            const token = localStorage.getItem('harivision_admin_token');
-            if (!token) {
-                setAdminAuthenticated(false);
+    if (auth) {
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                setAdminAuthenticated(true);
+                try {
+                    await fetchFirestoreStateDirectly();
+                } catch (e) {}
+            } else {
+                const token = localStorage.getItem('harivision_admin_token');
+                if (!token) {
+                    setAdminAuthenticated(false);
+                }
             }
-        }
-    });
+        });
+    }
 })();
 
 document.getElementById('login-form').addEventListener('submit', async (e) => {
@@ -165,7 +167,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     } catch (srvErr) {}
 
     // 2. Если серверный вход не сработал, пробуем Firebase Auth
-    if (!authSuccess) {
+    if (!authSuccess && auth) {
         try {
             const firebaseEmail = loginInput.includes('@') ? loginInput : `${loginInput}@harivision.org`;
             await signInWithEmailAndPassword(auth, firebaseEmail, password);
@@ -188,6 +190,11 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
                 errEl.classList.remove('hidden');
             }
         }
+    } else if (!authSuccess && !auth) {
+        if (errEl) {
+            errEl.innerText = "Неверный логин или пароль администратора (по умолчанию: admin / admin)";
+            errEl.classList.remove('hidden');
+        }
     }
 
     if (submitBtn) {
@@ -198,9 +205,11 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
     localStorage.removeItem('harivision_admin_token');
-    try {
-        await signOut(auth);
-    } catch (e) {}
+    if (auth) {
+        try {
+            await signOut(auth);
+        } catch (e) {}
+    }
     setAdminAuthenticated(false);
     showToast('Вы вышли из панели администратора');
 });
@@ -268,7 +277,7 @@ function showToast(message, isError = false) {
 // -------------------------------------------------------------
 window.switchAdminTab = function(tabName) {
     activeAdminTab = tabName;
-    const tabs = ['voting', 'news', 'contests'];
+    const tabs = ['voting', 'news', 'contests', 'notifications'];
 
     tabs.forEach(tab => {
         const btn = document.getElementById(`tab-btn-${tab}`);
@@ -276,10 +285,10 @@ window.switchAdminTab = function(tabName) {
 
         if (tab === tabName) {
             btn.className = "px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition flex items-center gap-2";
-            sec.classList.remove('hidden');
+            if (sec) sec.classList.remove('hidden');
         } else {
             btn.className = "px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2";
-            sec.classList.add('hidden');
+            if (sec) sec.classList.add('hidden');
         }
     });
 };
@@ -1644,3 +1653,111 @@ if (db) {
         console.warn("Votes listener init error:", e);
     }
 }
+
+// -------------------------------------------------------------
+// РАЗДЕЛ 4: NOTIFICATIONS & BROADCAST
+// -------------------------------------------------------------
+window.testAdminNotification = async function() {
+    if (!('Notification' in window)) {
+        showAdminNotification('Уведомления не поддерживаются вашим браузером', 'error');
+        return;
+    }
+
+    try {
+        let perm = Notification.permission;
+        if (perm === 'default') {
+            perm = await Notification.requestPermission();
+        }
+
+        if (perm === 'granted') {
+            if ('serviceWorker' in navigator) {
+                try {
+                    const reg = await navigator.serviceWorker.ready;
+                    await reg.showNotification('HariVision 2026 🔔 (Тест)', {
+                        body: 'Это тестовое уведомление из панели управления администратора!',
+                        icon: '/icons/HBU_icon.png',
+                        badge: '/icons/HBU_icon.png',
+                        vibrate: [200, 100, 200],
+                        data: { url: '/admin.html' }
+                    });
+                    showAdminNotification('Тестовое уведомление успешно отправлено!', 'success');
+                    return;
+                } catch (e) {}
+            }
+            new Notification('HariVision 2026 🔔 (Тест)', {
+                body: 'Это тестовое уведомление из панели управления администратора!',
+                icon: '/icons/HBU_icon.png'
+            });
+            showAdminNotification('Тестовое уведомление успешно отправлено!', 'success');
+        } else {
+            showAdminNotification('Уведомления заблокированы в настройках браузера', 'error');
+        }
+    } catch (e) {
+        showAdminNotification('Ошибка отправки уведомления: ' + e.message, 'error');
+    }
+};
+
+window.handleAdminBroadcastSubmit = async function(event) {
+    if (event) event.preventDefault();
+
+    const titleEl = document.getElementById('admin-broadcast-title');
+    const bodyEl = document.getElementById('admin-broadcast-body');
+    const urlEl = document.getElementById('admin-broadcast-url');
+    const submitBtn = document.getElementById('admin-broadcast-submit-btn');
+    const resultMsg = document.getElementById('broadcast-result-msg');
+
+    const title = titleEl ? titleEl.value.trim() : '';
+    const message = bodyEl ? bodyEl.value.trim() : '';
+    const url = urlEl ? urlEl.value.trim() : '/index.html';
+
+    if (!title || !message) {
+        showAdminNotification('Пожалуйста, заполните заголовок и текст', 'error');
+        return;
+    }
+
+    const token = localStorage.getItem('harivision_admin_token');
+    if (!token) {
+        showAdminNotification('Сессия администратора истекла. Войдите снова.', 'error');
+        return;
+    }
+
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Отправка...';
+    }
+
+    try {
+        const res = await fetch('/api/admin/broadcast-notification', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ title, message, url })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showAdminNotification(`Уведомление разослано! Получателей на связи: ${data.sentToClients}`, 'success');
+            if (resultMsg) {
+                resultMsg.className = 'text-xs font-bold text-green-400 block';
+                resultMsg.innerText = `✓ Уведомление успешно отправлено в реальном времени (${data.sentToClients} активных клиентов).`;
+                setTimeout(() => { resultMsg.className = 'hidden'; }, 5000);
+            }
+            if (bodyEl) bodyEl.value = '';
+        } else {
+            throw new Error(data.error || 'Ошибка отправки');
+        }
+    } catch (e) {
+        showAdminNotification('Ошибка отправки: ' + e.message, 'error');
+        if (resultMsg) {
+            resultMsg.className = 'text-xs font-bold text-rose-400 block';
+            resultMsg.innerText = `✕ ${e.message}`;
+        }
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span>🚀</span><span>Отправить всем пользователям</span>';
+        }
+    }
+};

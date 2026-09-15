@@ -1,5 +1,11 @@
-import { db, DEFAULT_PARTICIPANTS, TOTAL_USER_VOTES, MAX_VOTES_PER_PARTICIPANT } from './config.js';
+import { db, auth, DEFAULT_PARTICIPANTS, TOTAL_USER_VOTES, MAX_VOTES_PER_PARTICIPANT } from './config.js';
 import { doc, onSnapshot, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { 
+    isNotificationsEnabled,
+    updateNotificationUI,
+    sendSystemNotification,
+    toggleNotifications
+} from './notifications.js';
 import { 
     subscribeState, 
     submitVote as submitVoteToService, 
@@ -747,7 +753,7 @@ window.submitVote = async function() {
     try {
         const nowIso = new Date().toISOString();
         const voteId = 'vote_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-        const currentUid = (currentAuthUser && currentAuthUser.uid) || (auth.currentUser ? auth.currentUser.uid : null);
+        const currentUid = (currentAuthUser && currentAuthUser.uid) || (auth && auth.currentUser ? auth.currentUser.uid : null);
         const votePayload = {
             id: voteId,
             voterUid: currentUid,
@@ -1728,6 +1734,11 @@ function renderVotingCard() {
 // -------------------------------------------------------------
 let lastRenderedContentHash = '';
 
+// Переменные для отслеживания событий и отправки уведомлений
+let isInitialStateLoad = true;
+let prevNewsCount = null;
+let prevRevealMode = false;
+
 subscribeState((state) => {
     const prevStatus = systemState.status;
     const prevSession = systemState.sessionId;
@@ -1746,6 +1757,54 @@ subscribeState((state) => {
         userName = '';
         selectedRepresentative = null;
     }
+
+    // Системные уведомления при изменении статуса и публикации новостей
+    if (!isInitialStateLoad && isNotificationsEnabled()) {
+        // 1. Старт или закрытие голосования
+        if (prevStatus && prevStatus !== newVotingState.status) {
+            if (newVotingState.status === 'open') {
+                sendSystemNotification(
+                    'Голосование открыто! 🗳️',
+                    'Начался прием зрительских голосов HariVision 2026. Поддержите своих фаворитов!',
+                    '/index.html#voting',
+                    'voting-status-open'
+                );
+            } else if (newVotingState.status === 'closed') {
+                sendSystemNotification(
+                    'Голосование завершено 🏁',
+                    'Прием голосов остановлен. Ждем объявления официальных итогов!',
+                    '/index.html',
+                    'voting-status-closed'
+                );
+            }
+        }
+
+        // 2. Новая опубликованная новость
+        if (prevNewsCount !== null && newsData.length > prevNewsCount && newsData[0]) {
+            const latestArticle = newsData[0];
+            sendSystemNotification(
+                'Новая новость HBU 📰',
+                latestArticle.title || 'Опубликована свежая статья о конкурсе HariVision',
+                '/index.html#news',
+                'news-' + latestArticle.id
+            );
+        }
+
+        // 3. Объявление итогов (reveal mode)
+        const isRevealMode = Boolean(state.settings?.revealMode || state.revealMode);
+        if (isRevealMode && !prevRevealMode) {
+            sendSystemNotification(
+                'Итоги HariVision объявлены! 🏆',
+                'Результаты голосования и победитель уже доступны на портале!',
+                '/index.html',
+                'reveal-results'
+            );
+        }
+    }
+
+    isInitialStateLoad = false;
+    prevNewsCount = newsData.length;
+    prevRevealMode = Boolean(state.settings?.revealMode || state.revealMode);
 
     systemState = { ...newVotingState, recapVideoUrl: state.recapVideoUrl, featuredContestId: state.featuredContestId || 'auto' };
 
@@ -1804,4 +1863,15 @@ subscribeState((state) => {
 renderMainView();
 if (isNational || currentPortalView === 'voting') {
     renderVotingCard();
+}
+
+// Инициализация отображения статуса уведомлений
+updateNotificationUI();
+if (typeof window !== 'undefined') {
+    window.handleNotificationToggle = toggleNotifications;
+    window.addEventListener('harivision:notification', (e) => {
+        if (e.detail) {
+            sendSystemNotification(e.detail.title, e.detail.body, e.detail.url, e.detail.tag);
+        }
+    });
 }

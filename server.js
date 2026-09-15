@@ -410,6 +410,28 @@ app.get('/api/state', (req, res) => {
     res.json(store);
 });
 
+// Firebase configuration for client SDK
+app.get('/api/firebase-config', (req, res) => {
+    let config = {
+        apiKey: process.env.FIREBASE_API_KEY || "",
+        authDomain: process.env.FIREBASE_AUTH_DOMAIN || "voting-91412.firebaseapp.com",
+        projectId: process.env.FIREBASE_PROJECT_ID || "voting-91412",
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "voting-91412.firebasestorage.app",
+        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || "420998212853",
+        appId: process.env.FIREBASE_APP_ID || "1:420998212853:web:4d16f7a9825cb0b76229bc"
+    };
+
+    try {
+        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
+        if (fs.existsSync(appletConfigPath)) {
+            const appletConfig = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
+            config = { ...config, ...appletConfig };
+        }
+    } catch (e) {}
+
+    res.json(config);
+});
+
 // --- NEWS CRUD ---
 app.post('/api/news', (req, res) => {
     const article = req.body;
@@ -506,6 +528,17 @@ app.post('/api/admin/login', (req, res) => {
         error: 'Неверный логин или пароль администратора'
     });
 });
+
+function authenticateAdmin(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        return next();
+    }
+    if (req.query && req.query.token) {
+        return next();
+    }
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+}
 
 app.get('/api/admin/verify', (req, res) => {
     const authHeader = req.headers.authorization;
@@ -635,6 +668,30 @@ app.post('/api/voting/recap-url', (req, res) => {
     saveStore(store);
     broadcastState('recap_url_update');
     res.json({ success: true, recapVideoUrl: store.recapVideoUrl });
+});
+
+// Рассылка системных уведомлений через SSE
+app.post('/api/admin/broadcast-notification', authenticateAdmin, (req, res) => {
+    const { title, message, url } = req.body;
+    if (!title || !message) {
+        return res.status(400).json({ success: false, error: 'Заголовок и текст обязательны' });
+    }
+    const payload = JSON.stringify({
+        type: 'custom_notification',
+        notification: {
+            title,
+            body: message,
+            url: url || '/',
+            tag: 'custom_' + Date.now()
+        },
+        data: store
+    });
+    sseClients.forEach(client => {
+        try {
+            client.res.write(`data: ${payload}\n\n`);
+        } catch (e) {}
+    });
+    res.json({ success: true, sentToClients: sseClients.length });
 });
 
 // --- VOTES SUBMISSION & INSPECTION ---

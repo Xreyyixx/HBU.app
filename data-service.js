@@ -452,6 +452,11 @@ function initRealtimeSync() {
             sseSource.onmessage = (event) => {
                 try {
                     const parsed = JSON.parse(event.data);
+                    if (parsed && parsed.notification) {
+                        if (typeof window !== 'undefined') {
+                            window.dispatchEvent(new CustomEvent('harivision:notification', { detail: parsed.notification }));
+                        }
+                    }
                     if (parsed && parsed.data) {
                         const newData = parsed.data;
                         if (Array.isArray(newData.votes)) {
@@ -2055,6 +2060,7 @@ export async function loginUser(emailOrLogin, password) {
     let lastAuthError = null;
 
     for (const emailTry of emailCandidates) {
+        if (!auth) break;
         try {
             authUserCredential = await signInWithEmailAndPassword(auth, emailTry, pass);
             if (authUserCredential && authUserCredential.user) break;
@@ -2155,20 +2161,38 @@ export async function registerUser(emailOrLogin, password, displayName = '') {
     const finalEmail = isEmail ? raw : `${cleanLogin}@harivision.app`;
     const finalName = name || cleanLogin;
 
+    if (!auth) {
+        // Fallback when Firebase Auth is not configured: generate a local profile
+        const localUid = 'user_' + Date.now();
+        const userObj = {
+            uid: localUid,
+            email: finalEmail,
+            login: cleanLogin,
+            displayName: finalName,
+            role: 'user',
+            artistData: null,
+            blockedParticipantIds: []
+        };
+        notifyAuthChanged(userObj);
+        return userObj;
+    }
+
     try {
         const cred = await createUserWithEmailAndPassword(auth, finalEmail, pass);
         const fbUser = cred.user;
 
         // Сохраняем профиль в Firestore collection "users"
         try {
-            await setDoc(doc(db, "users", fbUser.uid), {
-                uid: fbUser.uid,
-                email: finalEmail,
-                login: cleanLogin,
-                displayName: finalName,
-                role: 'user',
-                createdAt: new Date().toISOString()
-            }, { merge: true });
+            if (db) {
+                await setDoc(doc(db, "users", fbUser.uid), {
+                    uid: fbUser.uid,
+                    email: finalEmail,
+                    login: cleanLogin,
+                    displayName: finalName,
+                    role: 'user',
+                    createdAt: new Date().toISOString()
+                }, { merge: true });
+            }
         } catch (e) {}
 
         const userObj = {
@@ -2199,61 +2223,65 @@ export async function registerUser(emailOrLogin, password, displayName = '') {
 // Выход из аккаунта
 export async function logoutUser() {
     try {
-        await signOut(auth);
-        await signInAnonymously(auth);
+        if (auth) {
+            await signOut(auth);
+            await signInAnonymously(auth);
+        }
     } catch (e) {}
     notifyAuthChanged(null);
 }
 
 // Автоматическая синхронизация сессии Firebase Auth
-onAuthStateChanged(auth, async (fbUser) => {
-    if (fbUser && !fbUser.isAnonymous) {
-        try {
-            const rawEmail = fbUser.email || '';
-            const cleanLogin = rawEmail.includes('@') ? rawEmail.split('@')[0].toLowerCase() : (fbUser.displayName || 'user').toLowerCase();
-            
-            // 1. Получаем профиль пользователя из Firestore
-            const userProfile = await getFullUserProfileFromFirestore(fbUser.uid, rawEmail, cleanLogin);
+if (auth) {
+    onAuthStateChanged(auth, async (fbUser) => {
+        if (fbUser && !fbUser.isAnonymous) {
+            try {
+                const rawEmail = fbUser.email || '';
+                const cleanLogin = rawEmail.includes('@') ? rawEmail.split('@')[0].toLowerCase() : (fbUser.displayName || 'user').toLowerCase();
+                
+                // 1. Получаем профиль пользователя из Firestore
+                const userProfile = await getFullUserProfileFromFirestore(fbUser.uid, rawEmail, cleanLogin);
 
-            // 2. Проверяем статус артиста
-            const allArtists = await fetchArtistsFromFirestore();
-            const resolved = resolveArtistInfo(rawEmail, currentState.participants, allArtists) ||
-                             resolveArtistInfo(cleanLogin, currentState.participants, allArtists);
+                // 2. Проверяем статус артиста
+                const allArtists = await fetchArtistsFromFirestore();
+                const resolved = resolveArtistInfo(rawEmail, currentState.participants, allArtists) ||
+                                 resolveArtistInfo(cleanLogin, currentState.participants, allArtists);
 
-            const isArtist = isUserArtist(userProfile) || Boolean(resolved);
+                const isArtist = isUserArtist(userProfile) || Boolean(resolved);
 
-            const mergedArtistData = isArtist ? {
-                id: fbUser.uid,
-                login: cleanLogin,
-                role: 'artist',
-                ...(resolved?.artistData || {}),
-                ...(userProfile || {})
-            } : null;
+                const mergedArtistData = isArtist ? {
+                    id: fbUser.uid,
+                    login: cleanLogin,
+                    role: 'artist',
+                    ...(resolved?.artistData || {}),
+                    ...(userProfile || {})
+                } : null;
 
-            const blockedIds = isArtist ? Array.from(new Set([
-                ...(resolved ? resolved.blockedParticipantIds : []),
-                ...calculateBlockedIdsForArtist(mergedArtistData, currentState.participants)
-            ])) : [];
+                const blockedIds = isArtist ? Array.from(new Set([
+                    ...(resolved ? resolved.blockedParticipantIds : []),
+                    ...calculateBlockedIdsForArtist(mergedArtistData, currentState.participants)
+                ])) : [];
 
-            const userObj = {
-                uid: fbUser.uid,
-                email: rawEmail,
-                login: cleanLogin,
-                displayName: cleanLogin,
-                role: isArtist ? 'artist' : 'user',
-                artistData: mergedArtistData,
-                blockedParticipantIds: blockedIds
-            };
-            notifyAuthChanged(userObj);
-        } catch (e) {
-            console.warn('Sync auth user error:', e);
+                const userObj = {
+                    uid: fbUser.uid,
+                    email: rawEmail,
+                    login: cleanLogin,
+                    displayName: cleanLogin,
+                    role: isArtist ? 'artist' : 'user',
+                    artistData: mergedArtistData,
+                    blockedParticipantIds: blockedIds
+                };
+                notifyAuthChanged(userObj);
+            } catch (e) {
+                console.warn('Sync auth user error:', e);
+            }
+        } else if (!fbUser) {
+            if (!currentAuthUser?.artistData) {
+                notifyAuthChanged(null);
+            }
         }
-    } else if (!fbUser) {
-        if (!currentAuthUser?.artistData) {
-            notifyAuthChanged(null);
-        }
-    }
-});
+    });
+}
 
 export async function loginAdminServer(emailOrUsername, password) {
     const res = await fetch('/api/admin/login', {
@@ -2291,7 +2319,7 @@ export async function verifyAdminSession() {
 // -------------------------------------------------------------
 export async function submitVote(voteData) {
     await ensureFirebaseAuth();
-    const currentUid = auth.currentUser ? auth.currentUser.uid : null;
+    const currentUid = (auth && auth.currentUser) ? auth.currentUser.uid : null;
     const voteId = voteData.id || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
     const votePayload = { 
         ...voteData, 

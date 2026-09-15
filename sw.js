@@ -46,3 +46,52 @@ self.addEventListener('fetch', (event) => {
     );
 });
 
+// Обработка клика по системному уведомлению
+self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+    const urlToOpen = event.notification.data?.url || '/';
+
+    event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+            for (const client of clientList) {
+                if ('focus' in client) {
+                    if (client.url && 'navigate' in client && urlToOpen !== '/') {
+                        client.navigate(urlToOpen);
+                    }
+                    return client.focus();
+                }
+            }
+            if (self.clients.openWindow) {
+                return self.clients.openWindow(urlToOpen);
+            }
+        })
+    );
+});
+
+// Обработка фоновых push-сообщений (Web Push)
+self.addEventListener('push', (event) => {
+    let payload = {
+        title: 'HariVision 2026',
+        body: 'Новое уведомление от Haribo Broadcasting Union!',
+        icon: '/icons/HBU_icon.png',
+        badge: '/icons/HBU_icon.png',
+        data: { url: '/' }
+    };
+    if (event.data) {
+        try {
+            payload = { ...payload, ...event.data.json() };
+        } catch (e) {
+            payload.body = event.data.text();
+        }
+    }
+    event.waitUntil(
+        self.registration.showNotification(payload.title, {
+            body: payload.body,
+            icon: payload.icon || '/icons/HBU_icon.png',
+            badge: payload.badge || '/icons/HBU_icon.png',
+            vibrate: [200, 100, 200],
+            data: payload.data || { url: '/' }
+        })
+    );
+});
+
