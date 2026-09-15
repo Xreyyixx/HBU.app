@@ -6,18 +6,25 @@
 const STORAGE_KEY = 'harivision_notifications_enabled';
 
 export function isNotificationSupported() {
-    return typeof window !== 'undefined' && 'Notification' in window;
+    return typeof window !== 'undefined' && (
+        'Notification' in window || 
+        ('serviceWorker' in navigator && 'PushManager' in window)
+    );
 }
 
 export function getNotificationPermission() {
     if (!isNotificationSupported()) return 'unsupported';
-    return Notification.permission;
+    if ('Notification' in window) {
+        return Notification.permission;
+    }
+    return 'default';
 }
 
 export function isNotificationsEnabled() {
     if (!isNotificationSupported()) return false;
     const pref = localStorage.getItem(STORAGE_KEY);
-    return Notification.permission === 'granted' && pref !== 'false';
+    const perm = getNotificationPermission();
+    return perm === 'granted' && pref !== 'false';
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -35,35 +42,105 @@ function urlBase64ToUint8Array(base64String) {
 
 // Регистрация подписки Web Push на сервере для доставки в фоне и при закрытом сайте
 export async function syncPushSubscription() {
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-        return;
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+        return { success: false, reason: 'Service worker not supported' };
     }
     if (!isNotificationsEnabled()) {
-        return;
+        return { success: false, reason: 'Notifications not enabled' };
     }
+
     try {
-        const reg = await navigator.serviceWorker.ready;
+        // Убедимся, что Service Worker зарегистрирован
+        let reg = await navigator.serviceWorker.getRegistration();
+        if (!reg) {
+            reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+        }
+
+        // Ждем готовности SW (с таймаутом 4с)
+        const readyPromise = navigator.serviceWorker.ready;
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('ServiceWorker ready timeout')), 4000)
+        );
+        reg = await Promise.race([readyPromise, timeoutPromise]);
+
+        if (!reg || !reg.pushManager) {
+            return { success: false, reason: 'PushManager not available (iOS: Add app to Home Screen first)' };
+        }
+
+        // Получаем актуальный публичный VAPID-ключ сервера
+        const keyRes = await fetch('/api/push/vapid-public-key');
+        if (!keyRes.ok) return { success: false, reason: 'Failed to fetch VAPID key' };
+        const data = await keyRes.json();
+        if (!data || !data.publicKey) return { success: false, reason: 'VAPID public key empty' };
+
+        const targetKeyBytes = urlBase64ToUint8Array(data.publicKey);
+
+        // Проверяем текущую подписку
         let sub = await reg.pushManager.getSubscription();
-        if (!sub) {
-            const keyRes = await fetch('/api/push/vapid-public-key');
-            if (!keyRes.ok) return;
-            const data = await keyRes.json();
-            if (!data || !data.publicKey) return;
-            const applicationServerKey = urlBase64ToUint8Array(data.publicKey);
+
+        let needNewSub = !sub;
+        if (sub && sub.options && sub.options.applicationServerKey) {
+            const currentKeyBytes = new Uint8Array(sub.options.applicationServerKey);
+            if (currentKeyBytes.length !== targetKeyBytes.length || 
+                !currentKeyBytes.every((val, idx) => val === targetKeyBytes[idx])) {
+                // Ключ устарел — сбрасываем старую подписку
+                try { await sub.unsubscribe(); } catch(e) {}
+                needNewSub = true;
+            }
+        }
+
+        if (needNewSub) {
             sub = await reg.pushManager.subscribe({
                 userVisibleOnly: true,
-                applicationServerKey
+                applicationServerKey: targetKeyBytes
             });
         }
+
         if (sub) {
-            await fetch('/api/push/subscribe', {
+            // Надежная сериализация ключей для Safari, iOS PWA, Firefox и Chrome
+            const jsonSub = (typeof sub.toJSON === 'function') ? sub.toJSON() : {};
+            let p256dh = jsonSub.keys?.p256dh;
+            let auth = jsonSub.keys?.auth;
+
+            if ((!p256dh || !auth) && typeof sub.getKey === 'function') {
+                try {
+                    const rawP256dh = sub.getKey('p256dh');
+                    if (rawP256dh) {
+                        p256dh = btoa(String.fromCharCode(...new Uint8Array(rawP256dh)))
+                            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                    }
+                    const rawAuth = sub.getKey('auth');
+                    if (rawAuth) {
+                        auth = btoa(String.fromCharCode(...new Uint8Array(rawAuth)))
+                            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                    }
+                } catch (keyErr) {
+                    console.warn('Fallback getKey error:', keyErr);
+                }
+            }
+
+            const subData = {
+                endpoint: sub.endpoint,
+                expirationTime: sub.expirationTime || null,
+                keys: {
+                    p256dh: p256dh || jsonSub.keys?.p256dh || '',
+                    auth: auth || jsonSub.keys?.auth || ''
+                }
+            };
+
+            const subRes = await fetch('/api/push/subscribe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ subscription: sub })
+                body: JSON.stringify({ subscription: subData })
             });
+            const subResult = await subRes.json();
+            return { success: true, subscribersCount: subResult.subscribersCount };
         }
+
+        return { success: false, reason: 'Could not obtain push subscription' };
     } catch (e) {
         console.warn('Web Push subscription error:', e);
+        return { success: false, error: e.message };
     }
 }
 
@@ -213,8 +290,9 @@ export async function sendSystemNotification(title, body, url = '/', tag = null)
         });
         notif.onclick = () => {
             window.focus();
-            if (url && url !== '/') {
-                window.location.hash = url.replace(/^\//, '');
+            if (url && url !== '/' && url !== 'index.html') {
+                const targetHash = url.replace(/^index\.html/, '').replace(/^\//, '');
+                if (targetHash) window.location.hash = targetHash;
             }
             notif.close();
         };

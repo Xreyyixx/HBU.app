@@ -28,14 +28,19 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    // КРИТИЧНО: Никогда не перехватывать и не кэшировать API запросы и стримы SSE!
+    if (url.pathname.startsWith('/api/')) {
+        return;
+    }
+
     event.respondWith(
         fetch(event.request, { cache: 'no-store' })
             .then((response) => {
-                if (response && response.status === 200) {
+                if (response && response.status === 200 && response.type === 'basic') {
                     const responseClone = response.clone();
                     caches.open(CACHE_NAME).then((cache) => {
                         cache.put(event.request, responseClone);
-                    });
+                    }).catch(() => {});
                 }
                 return response;
             })
@@ -49,13 +54,14 @@ self.addEventListener('fetch', (event) => {
 // Обработка клика по системному уведомлению
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-    const urlToOpen = event.notification.data?.url || '/';
+    let urlToOpen = event.notification.data?.url || 'index.html';
+    if (urlToOpen === '/') urlToOpen = 'index.html';
 
     event.waitUntil(
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
             for (const client of clientList) {
                 if ('focus' in client) {
-                    if (client.url && 'navigate' in client && urlToOpen !== '/') {
+                    if (client.url && 'navigate' in client && urlToOpen !== 'index.html') {
                         client.navigate(urlToOpen);
                     }
                     return client.focus();
@@ -73,10 +79,10 @@ self.addEventListener('push', (event) => {
     let payload = {
         title: 'HariVision 2026',
         body: 'Новое уведомление от Haribo Broadcasting Union!',
-        icon: '/icons/HBU_icon.png',
-        badge: '/icons/HBU_icon.png',
+        icon: './icons/HBU_icon.png',
+        badge: './icons/HBU_icon.png',
         tag: 'hbu_push_' + Date.now(),
-        data: { url: '/' }
+        data: { url: 'index.html' }
     };
     if (event.data) {
         try {
@@ -86,16 +92,22 @@ self.addEventListener('push', (event) => {
             payload.body = event.data.text();
         }
     }
+
+    const notifOptions = {
+        body: payload.body || '',
+        icon: new URL(payload.icon || '/icons/HBU_icon.png', self.location.origin).href,
+        badge: new URL(payload.badge || '/icons/HBU_icon.png', self.location.origin).href,
+        tag: payload.tag || ('hbu_push_' + Date.now()),
+        renotify: true,
+        data: payload.data || { url: '/' }
+    };
+
+    if (Array.isArray(payload.vibrate)) {
+        notifOptions.vibrate = payload.vibrate;
+    }
+
     event.waitUntil(
-        self.registration.showNotification(payload.title, {
-            body: payload.body,
-            icon: payload.icon || '/icons/HBU_icon.png',
-            badge: payload.badge || '/icons/HBU_icon.png',
-            tag: payload.tag || ('hbu_push_' + Date.now()),
-            renotify: true,
-            vibrate: [200, 100, 200],
-            data: payload.data || { url: '/' }
-        })
+        self.registration.showNotification(payload.title || 'HariVision 2026', notifOptions)
     );
 });
 

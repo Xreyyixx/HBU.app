@@ -1711,6 +1711,53 @@ window.testAdminNotification = async function() {
     }
 };
 
+window.refreshAdminPushSubscribers = async function() {
+    try {
+        const res = await fetch('/api/push/subscribers-count');
+        const data = await res.json();
+        const badge = document.getElementById('admin-push-subscribers-badge');
+        if (badge) {
+            badge.innerText = data.count !== undefined ? data.count : 0;
+        }
+    } catch (e) {
+        console.warn('Error refreshing subscribers count:', e);
+    }
+};
+
+window.testAdminPushNotification = async function() {
+    const token = localStorage.getItem('harivision_admin_token');
+    if (!token) {
+        showAdminNotification('Сессия администратора истекла', 'error');
+        return;
+    }
+    try {
+        showAdminNotification('Отправка тестового Web Push...', 'info');
+        const res = await fetch('/api/admin/push-test', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showAdminNotification(`Web Push отправлен на ${data.sent} из ${data.total} подписанных устройств!`, 'success');
+            window.refreshAdminPushSubscribers();
+        } else {
+            throw new Error(data.error || 'Ошибка отправки тестового Push');
+        }
+    } catch (e) {
+        showAdminNotification('Ошибка тестового Push: ' + e.message, 'error');
+    }
+};
+
+// Загружаем число подписчиков при инициализации
+setTimeout(() => {
+    if (typeof window.refreshAdminPushSubscribers === 'function') {
+        window.refreshAdminPushSubscribers();
+    }
+}, 1000);
+
 window.handleAdminBroadcastSubmit = async function(event) {
     if (event) event.preventDefault();
 

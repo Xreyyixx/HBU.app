@@ -1,3 +1,37 @@
+// Safe JSON patch to protect against circular structures (e.g. Firebase internal Q$1 <-> Sa)
+if (typeof JSON !== 'undefined' && typeof JSON.stringify === 'function' && !JSON.stringify.__isCircularSafe) {
+    const _origStringify = JSON.stringify;
+    const _safeStringify = function(value, replacer, space) {
+        try {
+            return _origStringify.call(JSON, value, replacer, space);
+        } catch (err) {
+            if (err instanceof TypeError && (err.message.includes('circular') || err.message.includes('cyclic'))) {
+                try {
+                    const seen = new WeakSet();
+                    const safeReplacer = function(k, v) {
+                        if (typeof v === 'object' && v !== null) {
+                            if (v.i && typeof v.i === 'object' && v.i.src === v) return undefined;
+                            if (v.src && typeof v.src === 'object' && v.src.i === v) return undefined;
+                            const cn = v.constructor?.name;
+                            if (cn && (cn === 'Q$1' || cn === 'Sa' || cn === 'B$1' || cn.startsWith('Q$') || cn.includes('$') || cn === 'FirebaseApp' || cn === 'Firestore' || cn === 'AuthImpl')) return undefined;
+                            if (seen.has(v)) return undefined;
+                            seen.add(v);
+                        }
+                        if (typeof replacer === 'function') return replacer.call(this, k, v);
+                        return v;
+                    };
+                    return _origStringify.call(JSON, value, safeReplacer, space) || '{}';
+                } catch (e2) {
+                    return '{}';
+                }
+            }
+            throw err;
+        }
+    };
+    _safeStringify.__isCircularSafe = true;
+    JSON.stringify = _safeStringify;
+}
+
 // Firebase Web SDK v10 (Modular)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";

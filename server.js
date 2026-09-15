@@ -101,6 +101,11 @@ function sortNewsDescending(list = []) {
     });
 }
 
+const PERMANENT_VAPID_KEYS = {
+    publicKey: process.env.VAPID_PUBLIC_KEY || 'BPZuY8-gjysoqNyqec1Rqdz2iPd1gNRiwiP0kSOnAxWaSuVGsRvKafnY75wGl5vSsExJGAnC3RPkmzjhMo42wRw',
+    privateKey: process.env.VAPID_PRIVATE_KEY || 'BKUXgpRE6_RibzMPaed4crervZfo1YuLEr12ahNIs8c'
+};
+
 function loadStore() {
     try {
         if (!fs.existsSync(DATA_DIR)) {
@@ -119,9 +124,7 @@ function loadStore() {
             if (!Array.isArray(data.votes)) data.votes = [];
             if (data.manualThreshold === undefined) data.manualThreshold = 0;
             if (data.revealMode === undefined) data.revealMode = false;
-            if (!data.vapidKeys || !data.vapidKeys.publicKey || !data.vapidKeys.privateKey) {
-                data.vapidKeys = webpush.generateVAPIDKeys();
-            }
+            data.vapidKeys = PERMANENT_VAPID_KEYS;
             if (!Array.isArray(data.pushSubscriptions)) {
                 data.pushSubscriptions = [];
             }
@@ -154,7 +157,7 @@ function loadStore() {
         votes: [],
         manualThreshold: 0,
         revealMode: false,
-        vapidKeys: webpush.generateVAPIDKeys(),
+        vapidKeys: PERMANENT_VAPID_KEYS,
         pushSubscriptions: []
     };
     saveStore(defaultData);
@@ -176,9 +179,7 @@ let store = loadStore();
 if (!Array.isArray(store.news)) store.news = [];
 if (!Array.isArray(store.contests)) store.contests = [];
 if (!Array.isArray(store.participants) || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
-if (!store.vapidKeys || !store.vapidKeys.publicKey || !store.vapidKeys.privateKey) {
-    store.vapidKeys = webpush.generateVAPIDKeys();
-}
+store.vapidKeys = PERMANENT_VAPID_KEYS;
 if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
 saveStore(store);
 
@@ -293,6 +294,7 @@ function broadcastState(type = 'update') {
 // Отправка Web Push уведомлений всем подписчикам (доставляется даже при закрытом сайте/приложении)
 async function sendPushNotificationToAll({ title, body, url = '/', tag = null }) {
     if (!Array.isArray(store.pushSubscriptions) || store.pushSubscriptions.length === 0) {
+        console.log('[WebPush] No subscribers registered in store');
         return { total: 0, sent: 0 };
     }
     const payload = JSON.stringify({
@@ -309,13 +311,18 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null })
 
     await Promise.allSettled(store.pushSubscriptions.map(async (sub) => {
         try {
-            await webpush.sendNotification(sub, payload);
+            await webpush.sendNotification(sub, payload, {
+                TTL: 86400, // 24 часа хранения на push-сервере
+                urgency: 'high' // высокий приоритет пробуждения устройства
+            });
             sentCount++;
         } catch (err) {
-            if (err.statusCode === 404 || err.statusCode === 410 || (err.message && err.message.includes('expired'))) {
+            const status = err.statusCode;
+            if (status === 404 || status === 410 || status === 400 || status === 401 || (err.message && err.message.includes('expired'))) {
                 deadEndpoints.push(sub.endpoint);
+                console.warn(`[WebPush] Pruning inactive subscriber (${status}):`, sub.endpoint);
             } else {
-                console.warn('Web Push send error:', err.message || err);
+                console.warn('[WebPush] Send notification error:', err.message || err);
             }
         }
     }));
@@ -325,12 +332,13 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null })
         saveStore(store);
     }
 
+    console.log(`[WebPush] Sent to ${sentCount}/${store.pushSubscriptions.length} devices`);
     return { total: store.pushSubscriptions.length, sent: sentCount };
 }
 
 // Web Push API: получение публичного VAPID ключа
 app.get('/api/push/vapid-public-key', (req, res) => {
-    res.json({ publicKey: store.vapidKeys ? store.vapidKeys.publicKey : null });
+    res.json({ publicKey: store.vapidKeys ? store.vapidKeys.publicKey : PERMANENT_VAPID_KEYS.publicKey });
 });
 
 // Web Push API: регистрация подписки устройства
@@ -338,6 +346,9 @@ app.post('/api/push/subscribe', (req, res) => {
     const { subscription } = req.body || {};
     if (!subscription || !subscription.endpoint) {
         return res.status(400).json({ success: false, error: 'Subscription object required' });
+    }
+    if (!subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
+        return res.status(400).json({ success: false, error: 'Subscription keys required (p256dh, auth)' });
     }
     if (!Array.isArray(store.pushSubscriptions)) {
         store.pushSubscriptions = [];
@@ -349,6 +360,7 @@ app.post('/api/push/subscribe', (req, res) => {
         store.pushSubscriptions.push(subscription);
     }
     saveStore(store);
+    console.log(`[WebPush] Device registered. Total subscribers: ${store.pushSubscriptions.length}`);
     res.json({ success: true, subscribersCount: store.pushSubscriptions.length });
 });
 
@@ -365,6 +377,17 @@ app.post('/api/push/unsubscribe', (req, res) => {
 // Web Push API: статус подписчиков
 app.get('/api/push/subscribers-count', (req, res) => {
     res.json({ count: Array.isArray(store.pushSubscriptions) ? store.pushSubscriptions.length : 0 });
+});
+
+// Web Push API: тестовый push администратора
+app.post('/api/admin/push-test', authenticateAdmin, async (req, res) => {
+    const result = await sendPushNotificationToAll({
+        title: '🧪 Тестовый Push HariVision 2026',
+        body: 'Проверка фонового канала Web Push! Если вы видите это при закрытом сайте — всё работает идеально!',
+        url: 'index.html',
+        tag: 'test_push_' + Date.now()
+    });
+    res.json({ success: true, ...result });
 });
 
 // Периодический heartbeat для SSE
@@ -448,7 +471,7 @@ app.post('/api/news', (req, res) => {
         sendPushNotificationToAll({
             title: 'Новая новость HBU 📰',
             body: article.title || 'Опубликована свежая статья о конкурсе HariVision',
-            url: '/#news',
+            url: 'index.html#news',
             tag: 'news-' + article.id
         }).catch(err => console.warn('Push error on news:', err));
     }
@@ -691,14 +714,14 @@ app.post('/api/voting/state', (req, res) => {
         sendPushNotificationToAll({
             title: 'Голосование открыто! 🗳️',
             body: 'Начался прием зрительских голосов HariVision 2026. Поддержите своих фаворитов!',
-            url: '/#voting',
+            url: 'index.html#voting',
             tag: 'voting-status-open'
         }).catch(err => console.warn('Push error on voting open:', err));
     } else if (status === 'closed' && previousStatus === 'open') {
         sendPushNotificationToAll({
             title: 'Голосование завершено 🏁',
             body: 'Прием голосов остановлен. Ждем объявления официальных итогов!',
-            url: '/',
+            url: 'index.html',
             tag: 'voting-status-closed'
         }).catch(err => console.warn('Push error on voting close:', err));
     }
@@ -718,7 +741,7 @@ app.post('/api/voting/threshold', (req, res) => {
         sendPushNotificationToAll({
             title: 'Итоги HariVision объявлены! 🏆',
             body: 'Результаты голосования и победитель уже доступны на портале!',
-            url: '/',
+            url: 'index.html',
             tag: 'reveal-results'
         }).catch(err => console.warn('Push error on reveal:', err));
     }
@@ -740,12 +763,13 @@ app.post('/api/admin/broadcast-notification', authenticateAdmin, async (req, res
     if (!title || !message) {
         return res.status(400).json({ success: false, error: 'Заголовок и текст обязательны' });
     }
+    const resolvedUrl = (url && url !== '/') ? url : 'index.html';
     const payload = JSON.stringify({
         type: 'custom_notification',
         notification: {
             title,
             body: message,
-            url: url || '/',
+            url: resolvedUrl,
             tag: 'custom_' + Date.now()
         },
         data: store
@@ -762,7 +786,7 @@ app.post('/api/admin/broadcast-notification', authenticateAdmin, async (req, res
         pushResult = await sendPushNotificationToAll({
             title,
             body: message,
-            url: url || '/',
+            url: resolvedUrl,
             tag: 'admin_broadcast_' + Date.now()
         });
     } catch (err) {

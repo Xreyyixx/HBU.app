@@ -9,8 +9,49 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 // -------------------------------------------------------------
-// SAFE JSON UTILS & FIRESTORE DATA SANITIZATION
+// SAFE JSON UTILS & GLOBAL CIRCULAR STRUCTURE IMMUNITY
 // -------------------------------------------------------------
+export function installCircularSafeJson() {
+    if (typeof JSON === 'undefined' || typeof JSON.stringify !== 'function') return;
+    if (JSON.stringify.__isCircularSafe) return;
+
+    const originalStringify = JSON.stringify;
+    const patchedStringify = function(value, replacer, space) {
+        try {
+            return originalStringify.call(JSON, value, replacer, space);
+        } catch (err) {
+            if (err instanceof TypeError && (err.message.includes('circular') || err.message.includes('cyclic'))) {
+                try {
+                    const seen = new WeakSet();
+                    const safeReplacer = function(k, v) {
+                        if (typeof v === 'object' && v !== null) {
+                            if (v.i && typeof v.i === 'object' && v.i.src === v) return undefined;
+                            if (v.src && typeof v.src === 'object' && v.src.i === v) return undefined;
+                            const cn = v.constructor?.name;
+                            if (cn && (cn.startsWith('Q$') || cn === 'Sa' || cn === 'B$1' || cn.includes('$') || cn === 'FirebaseApp' || cn === 'Firestore' || cn === 'AuthImpl')) {
+                                return undefined;
+                            }
+                            if (seen.has(v)) return undefined;
+                            seen.add(v);
+                        }
+                        if (typeof replacer === 'function') {
+                            return replacer.call(this, k, v);
+                        }
+                        return v;
+                    };
+                    return originalStringify.call(JSON, value, safeReplacer, space) || '{}';
+                } catch (fallbackErr) {
+                    return '{}';
+                }
+            }
+            throw err;
+        }
+    };
+    patchedStringify.__isCircularSafe = true;
+    JSON.stringify = patchedStringify;
+}
+installCircularSafeJson();
+
 export function sanitizeFirestoreData(val, seen = new WeakSet()) {
     if (val === null || val === undefined) return val;
     if (typeof val !== 'object') {
@@ -29,6 +70,24 @@ export function sanitizeFirestoreData(val, seen = new WeakSet()) {
         return undefined;
     }
     seen.add(val);
+
+    // Direct detection of Firebase internal WebChannel circular structure (Q$1 <-> Sa)
+    try {
+        if (val.i && typeof val.i === 'object' && val.i.src === val) {
+            return undefined;
+        }
+        if (val.src && typeof val.src === 'object' && val.src.i === val) {
+            return undefined;
+        }
+    } catch (e) {
+        return undefined;
+    }
+
+    // Filter out internal SDK classes or obfuscated circular classes
+    const cName = val.constructor?.name;
+    if (cName && (cName === 'Q$1' || cName === 'Sa' || cName === 'B$1' || cName.startsWith('Q$') || cName.includes('$') || cName === 'FirebaseApp' || cName === 'Firestore' || cName === 'AuthImpl')) {
+        return undefined;
+    }
 
     // Firebase Auth User object
     if (typeof val.getIdToken === 'function' && val.uid) {
@@ -60,14 +119,20 @@ export function sanitizeFirestoreData(val, seen = new WeakSet()) {
         return String(val.id);
     }
 
-    // Filter out internal SDK classes or circular classes
-    const cName = val.constructor?.name;
-    if (cName === 'Q$1' || cName === 'Sa' || cName === 'FirebaseApp' || cName === 'Firestore' || cName === 'AuthImpl') {
-        return undefined;
+    // Standard JavaScript Date
+    if (val instanceof Date) {
+        return val.toISOString();
     }
 
+    // Arrays
     if (Array.isArray(val)) {
         return val.map(item => sanitizeFirestoreData(item, seen)).filter(item => item !== undefined);
+    }
+
+    // If an object has a custom non-Object constructor (internal SDK classes, WebChannel transports, etc.)
+    // never traverse its internal hidden fields!
+    if (val.constructor && val.constructor !== Object) {
+        return undefined;
     }
 
     const res = {};
@@ -98,6 +163,11 @@ export function safeJsonStringify(obj, fallback = '') {
                     if (typeof Element !== 'undefined' && value instanceof Element) return undefined;
                     if (typeof Event !== 'undefined' && value instanceof Event) return undefined;
                     if (typeof Window !== 'undefined' && value instanceof Window) return undefined;
+                    if (value.i && typeof value.i === 'object' && value.i.src === value) return undefined;
+                    if (value.src && typeof value.src === 'object' && value.src.i === value) return undefined;
+                    const cn = value.constructor?.name;
+                    if (cn && (cn === 'Q$1' || cn === 'Sa' || cn === 'B$1' || cn.startsWith('Q$') || cn.includes('$') || cn === 'FirebaseApp' || cn === 'Firestore' || cn === 'AuthImpl')) return undefined;
+                    if (value.constructor && value.constructor !== Object && !Array.isArray(value) && !(value instanceof Date)) return undefined;
                     if (typeof value.toDate === 'function') return value.toDate().toISOString();
                     if (typeof value.toMillis === 'function') return value.toMillis();
                     if (value.id && (value.path || value.firestore)) return String(value.id);

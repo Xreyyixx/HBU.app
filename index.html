@@ -8,6 +8,41 @@
     <meta property="og:title" content="HariVision Voting">
     <meta property="og:description" content="Public and national voting platform for HariVision Performance Contest 2026">
     
+    <script>
+        // Global safety patch preventing circular JSON errors (e.g. internal Firebase SDK WebChannel Q$1 <-> Sa)
+        (function() {
+            if (typeof JSON !== 'undefined' && typeof JSON.stringify === 'function') {
+                var _orig = JSON.stringify;
+                JSON.stringify = function(val, replacer, space) {
+                    try {
+                        return _orig.call(JSON, val, replacer, space);
+                    } catch(err) {
+                        if (err instanceof TypeError && (err.message.indexOf('circular') !== -1 || err.message.indexOf('cyclic') !== -1)) {
+                            try {
+                                var seen = new WeakSet();
+                                var safeReplacer = function(k, v) {
+                                    if (typeof v === 'object' && v !== null) {
+                                        if (v.i && typeof v.i === 'object' && v.i.src === v) return undefined;
+                                        if (v.src && typeof v.src === 'object' && v.src.i === v) return undefined;
+                                        var cn = v.constructor && v.constructor.name;
+                                        if (cn && (cn === 'Q$1' || cn === 'Sa' || cn === 'B$1' || cn.indexOf('$') !== -1 || cn === 'FirebaseApp' || cn === 'Firestore')) return undefined;
+                                        if (seen.has(v)) return undefined;
+                                        seen.add(v);
+                                    }
+                                    if (typeof replacer === 'function') return replacer.call(this, k, v);
+                                    return v;
+                                };
+                                return _orig.call(JSON, val, safeReplacer, space) || '{}';
+                            } catch(e) { return '{}'; }
+                        }
+                        throw err;
+                    }
+                };
+                JSON.stringify.__isCircularSafe = true;
+            }
+        })();
+    </script>
+    
     <!-- PWA & iOS Support -->
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#060204">
@@ -304,11 +339,9 @@
     <!-- Service Worker for PWA -->
     <script>
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js').then(reg => {
-                    reg.update();
-                }).catch(err => console.log('SW registration error:', err));
-            });
+            navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(reg => {
+                reg.update();
+            }).catch(err => console.warn('SW registration error:', err));
         }
     </script>
     <script type="module" src="app.js"></script>
