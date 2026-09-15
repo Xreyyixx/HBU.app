@@ -834,6 +834,10 @@ function renderMainView() {
 function updateSideMenuContests() {
     const listEl = document.getElementById('side-menu-contests-list');
     if (!listEl) return;
+    if (contestsData.length === 0) {
+        listEl.innerHTML = '<div class="text-[11px] text-slate-500 py-2 px-3">Сезоны ещё не добавлены</div>';
+        return;
+    }
     listEl.innerHTML = contestsData.map(c => `
         <button onclick="navigateToView('contest-detail', '${c.id}'); toggleSideMenu(false);" class="w-full text-left text-xs text-slate-300 hover:text-amber-300 py-1.5 px-3 rounded-lg hover:bg-amber-500/10 transition flex items-center justify-between">
             <span class="truncate">${c.title}</span>
@@ -864,28 +868,30 @@ function getHomeHTML() {
     const isLive = featuredContest.status === 'live';
     const isCompleted = featuredContest.status === 'completed';
 
+    const hasContest = Boolean(featuredContest && featuredContest.id);
+
     return `
         <div class="flex flex-col gap-10 page-fade">
-            <!-- Главный интерактивный баннер выбранного сезона (по умолчанию: последний завершенный) -->
+            <!-- Главный интерактивный баннер выбранного сезона -->
             <div class="relative rounded-3xl overflow-hidden border border-amber-500/30 bg-gradient-to-br from-[#1c080f] via-[#100307] to-[#060204] p-8 md:p-12 shadow-[0_10px_40px_rgba(245,158,11,0.15)] flex flex-col md:flex-row items-center justify-between gap-8">
                 <div class="flex-1 flex flex-col items-start gap-4 z-10">
                     <div class="flex items-center gap-2">
                         <span class="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold uppercase rounded-full tracking-widest flex items-center gap-1.5">
-                            ${isLive ? `<span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span><span>Прямой эфир</span>` : 
-                              (isCompleted ? `<span>🏆</span><span>${fId === 'auto' ? 'Последний завершённый конкурс' : 'Официальный сезон'}</span>` : `<span>⏳</span><span>Предстоящий выпуск</span>`)}
+                            ${hasContest ? (isLive ? `<span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span><span>Прямой эфир</span>` : 
+                              (isCompleted ? `<span>🏆</span><span>${fId === 'auto' ? 'Последний завершённый конкурс' : 'Официальный сезон'}</span>` : `<span>⏳</span><span>Предстоящий выпуск</span>`)) : `<span>✨</span><span>HariVision Portal</span>`}
                         </span>
-                        <span class="text-xs text-slate-400 font-mono">${featuredContest.date || '2026'}</span>
+                        ${hasContest && featuredContest.date ? `<span class="text-xs text-slate-400 font-mono">${featuredContest.date}</span>` : ''}
                     </div>
 
                     <h1 class="text-3xl md:text-5xl font-black text-white uppercase tracking-tight leading-tight">
-                        ${featuredContest.title || 'HariVision Performance Contest'}
+                        ${hasContest ? (featuredContest.title || 'HariVision Contest') : 'HariVision Public Vote'}
                     </h1>
 
                     <p class="text-amber-200/90 text-sm md:text-base font-medium max-w-xl leading-relaxed">
-                        «${featuredContest.slogan || 'United in Harmony'}» — официальный музыкальный смотр Haribo Broadcasting Union.
+                        ${hasContest ? (featuredContest.slogan ? `«${featuredContest.slogan}» — официальный музыкальный смотр Haribo Broadcasting Union.` : (featuredContest.description || 'Официальный музыкальный конкурс Haribo Broadcasting Union.')) : 'Официальная платформа интерактивного зрительского голосования и прямых трансляций Haribo Broadcasting Union.'}
                     </p>
 
-                    ${featuredContest.winner ? `
+                    ${hasContest && featuredContest.winner ? `
                         <div class="flex items-center gap-3 bg-amber-500/10 border border-amber-500/25 px-4 py-2.5 rounded-2xl">
                             <span class="text-lg">🥇</span>
                             <div class="text-xs">
@@ -897,15 +903,15 @@ function getHomeHTML() {
                     ` : ''}
 
                     <div class="flex flex-wrap items-center gap-3 pt-2">
-                        ${isLive ? `
-                            <button onclick="navigateToView('voting')" class="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-widest shadow-xl hover:scale-105 transition flex items-center gap-2">
-                                <span>🗳️</span>
-                                <span>Перейти к голосованию</span>
+                        <button onclick="navigateToView('voting')" class="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-widest shadow-xl hover:scale-105 transition flex items-center gap-2">
+                            <span>🗳️</span>
+                            <span>Перейти к голосованию</span>
+                        </button>
+                        ${hasContest ? `
+                            <button onclick="navigateToView('contest-detail', '${featuredContest.id}')" class="px-6 py-3.5 rounded-2xl ${isLive ? 'bg-[#16070b] hover:bg-amber-500/10 border border-amber-500/30 text-white font-bold' : 'bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black shadow-xl hover:scale-105'} text-xs uppercase tracking-widest transition">
+                                Подробнее о сезоне
                             </button>
                         ` : ''}
-                        <button onclick="navigateToView('contest-detail', '${featuredContest.id}')" class="px-6 py-3.5 rounded-2xl ${isLive ? 'bg-[#16070b] hover:bg-amber-500/10 border border-amber-500/30 text-white font-bold' : 'bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black shadow-xl hover:scale-105'} text-xs uppercase tracking-widest transition">
-                            Подробнее о сезоне
-                        </button>
                         <button onclick="navigateToView('contests')" class="px-6 py-3.5 rounded-2xl bg-[#16070b] hover:bg-amber-500/10 border border-amber-500/30 text-white font-bold text-xs uppercase tracking-wider transition">
                             Все сезоны &rarr;
                         </button>
@@ -914,11 +920,11 @@ function getHomeHTML() {
 
                 <div class="w-full md:w-80 flex flex-col items-center justify-center p-6 bg-[#0a0305]/80 border border-amber-500/20 rounded-2xl backdrop-blur-md text-center">
                     <div class="mb-4">${getHeartSVG("w-16 h-16")}</div>
-                    <div class="text-xs font-bold text-amber-400 uppercase tracking-widest mb-1">Город проведения</div>
-                    <div class="text-base font-black text-white uppercase mb-2">${featuredContest.hostCity || 'Гамбург, Германия'}</div>
-                    <div class="text-[11px] text-slate-300 mb-3">Арена: ${featuredContest.venue || 'Haribo Grand Arena'}</div>
-                    <span class="text-[10px] font-bold ${isLive ? 'text-green-400 bg-green-950/60 border-green-500/40' : 'text-amber-400/90 bg-amber-500/10 border-amber-500/20'} px-3 py-1 rounded-full border uppercase tracking-wider">
-                        ${isLive ? '● Прямой эфир' : (isCompleted ? 'Сезон завершён' : 'Скоро в эфире')}
+                    <div class="text-xs font-bold text-amber-400 uppercase tracking-widest mb-1">${hasContest ? 'Город проведения' : 'Статус платформы'}</div>
+                    <div class="text-base font-black text-white uppercase mb-2">${hasContest ? (featuredContest.hostCity || 'TBD') : 'HBU Live Hub'}</div>
+                    <div class="text-[11px] text-slate-300 mb-3">${hasContest ? ('Арена: ' + (featuredContest.venue || 'TBD')) : 'Система готова к приёму голосов'}</div>
+                    <span class="text-[10px] font-bold ${hasContest && isLive ? 'text-green-400 bg-green-950/60 border-green-500/40' : 'text-amber-400/90 bg-amber-500/10 border-amber-500/20'} px-3 py-1 rounded-full border uppercase tracking-wider">
+                        ${hasContest ? (isLive ? '● Прямой эфир' : (isCompleted ? 'Сезон завершён' : 'Скоро в эфире')) : '● Онлайн'}
                     </span>
                 </div>
             </div>
@@ -936,51 +942,60 @@ function getHomeHTML() {
                     </button>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    ${latestNews.map(n => `
-                        <div onclick="openNewsModal('${n.id}')" class="bg-[#0d0408]/90 hover:bg-[#16070b] border border-amber-500/20 hover:border-amber-500/40 rounded-3xl overflow-hidden backdrop-blur-xl transition shadow-xl cursor-pointer flex flex-col justify-between group">
-                            ${n.coverImage ? `
-                                <div class="w-full h-44 overflow-hidden relative">
-                                    <img src="${n.coverImage}" alt="${n.title}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
-                                    <div class="absolute top-3 left-3 bg-[#0d0408]/80 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-500/30 text-[10px] font-bold text-amber-400 uppercase">
-                                        ${n.category || n.tag || 'Новость'}
-                                    </div>
-                                    ${n.videoUrl ? `
-                                        <div class="absolute bottom-3 right-3 bg-red-600/90 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/30 text-[10px] font-black text-white uppercase flex items-center gap-1 shadow-lg">
-                                            <span>▶ Плеер</span>
+                ${latestNews.length === 0 ? `
+                    <div class="text-center py-12 bg-[#0d0408]/60 border border-amber-500/15 rounded-3xl p-6">
+                        <span class="text-3xl block mb-2">📰</span>
+                        <div class="text-sm font-bold text-slate-300 uppercase tracking-wider">Новости пока не опубликованы</div>
+                        <div class="text-xs text-slate-500 mt-1">Официальные статьи и пресс-релизы появятся здесь после публикации администратором.</div>
+                    </div>
+                ` : `
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        ${latestNews.map(n => `
+                            <div onclick="openNewsModal('${n.id}')" class="bg-[#0d0408]/90 hover:bg-[#16070b] border border-amber-500/20 hover:border-amber-500/40 rounded-3xl overflow-hidden backdrop-blur-xl transition shadow-xl cursor-pointer flex flex-col justify-between group">
+                                ${n.coverImage ? `
+                                    <div class="w-full h-44 overflow-hidden relative">
+                                        <img src="${n.coverImage}" alt="${n.title}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                                        <div class="absolute top-3 left-3 bg-[#0d0408]/80 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-500/30 text-[10px] font-bold text-amber-400 uppercase">
+                                            ${n.category || n.tag || 'Новость'}
                                         </div>
-                                    ` : ''}
-                                </div>
-                            ` : (n.videoUrl ? `
-                                <div class="w-full h-44 overflow-hidden relative bg-[#16070b] flex items-center justify-center border-b border-amber-500/15 group-hover:bg-[#1f0910] transition">
-                                    <div class="text-center flex flex-col items-center gap-1.5">
-                                        <div class="w-10 h-10 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-400 text-sm">▶</div>
-                                        <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Смотреть видео / плеер</span>
+                                        ${n.videoUrl ? `
+                                            <div class="absolute bottom-3 right-3 bg-red-600/90 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/30 text-[10px] font-black text-white uppercase flex items-center gap-1 shadow-lg">
+                                                <span>▶ Плеер</span>
+                                            </div>
+                                        ` : ''}
                                     </div>
-                                    <div class="absolute top-3 left-3 bg-[#0d0408]/80 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-500/30 text-[10px] font-bold text-amber-400 uppercase">
-                                        ${n.category || n.tag || 'Новость'}
+                                ` : (n.videoUrl ? `
+                                    <div class="w-full h-44 overflow-hidden relative bg-[#16070b] flex items-center justify-center border-b border-amber-500/15 group-hover:bg-[#1f0910] transition">
+                                        <div class="text-center flex flex-col items-center gap-1.5">
+                                            <div class="w-10 h-10 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-400 text-sm">▶</div>
+                                            <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Смотреть видео / плеер</span>
+                                        </div>
+                                        <div class="absolute top-3 left-3 bg-[#0d0408]/80 backdrop-blur-md px-2.5 py-1 rounded-full border border-amber-500/30 text-[10px] font-bold text-amber-400 uppercase">
+                                            ${n.category || n.tag || 'Новость'}
+                                        </div>
                                     </div>
-                                </div>
-                            ` : '')}
+                                ` : '')}
 
-                            <div class="p-6 flex flex-col justify-between flex-grow">
-                                <div>
-                                    <div class="text-[10px] font-mono text-amber-400/80 mb-2">${n.date}</div>
-                                    <h3 class="text-base font-bold text-white group-hover:text-amber-300 transition uppercase tracking-wide line-clamp-2 mb-2">${n.title}</h3>
-                                    <p class="text-xs text-slate-300 font-normal leading-relaxed line-clamp-3">${n.summary}</p>
-                                </div>
+                                <div class="p-6 flex flex-col justify-between flex-grow">
+                                    <div>
+                                        <div class="text-[10px] font-mono text-amber-400/80 mb-2">${n.date}</div>
+                                        <h3 class="text-base font-bold text-white group-hover:text-amber-300 transition uppercase tracking-wide line-clamp-2 mb-2">${n.title}</h3>
+                                        <p class="text-xs text-slate-300 font-normal leading-relaxed line-clamp-3">${n.summary}</p>
+                                    </div>
 
-                                <div>
-                                    ${renderNewsCardReactionsHTML(n)}
-                                    <div class="pt-3 mt-3 border-t border-amber-500/15 flex items-center justify-between text-[10px] font-bold uppercase text-amber-400">
-                                        <span>Читать</span>
-                                        <span>&rarr;</span>
+                                    <div>
+                                        ${renderNewsCardReactionsHTML(n)}
+                                        <div class="pt-3 mt-3 border-t border-amber-500/15 flex items-center justify-between text-[10px] font-bold uppercase text-amber-400">
+                                            <span>Читать</span>
+                                            <span>&rarr;</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    `).join('')}
-                </div>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
             </div>
 
             <!-- Раздел: Зал славы и победители прошлых сезонов -->
@@ -1041,7 +1056,13 @@ function getContestsListHTML() {
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                ${contestsData.map(c => `
+                ${contestsData.length === 0 ? `
+                    <div class="col-span-1 md:col-span-2 text-center py-16 bg-[#0d0408]/60 border border-amber-500/15 rounded-3xl p-8">
+                        <span class="text-4xl block mb-3">🏆</span>
+                        <div class="text-base font-bold text-white uppercase tracking-wider">Сезоны ещё не добавлены</div>
+                        <p class="text-xs text-slate-400 mt-2 max-w-md mx-auto">Список конкурсов пуст. Администратор может создать новые сезоны через панель управления.</p>
+                    </div>
+                ` : contestsData.map(c => `
                     <div onclick="navigateToView('contest-detail', '${c.id}')" class="bg-[#0d0408]/90 hover:bg-[#16070b] border border-amber-500/20 hover:border-amber-500/40 p-6 md:p-8 rounded-3xl backdrop-blur-xl transition shadow-xl cursor-pointer flex flex-col justify-between group">
                         <div>
                             <div class="flex items-center justify-between mb-3">
@@ -1355,7 +1376,13 @@ function getNewsHTML() {
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                ${filteredNews.map(n => `
+                ${filteredNews.length === 0 ? `
+                    <div class="col-span-1 md:col-span-2 lg:col-span-3 text-center py-16 bg-[#0d0408]/60 border border-amber-500/15 rounded-3xl p-8">
+                        <span class="text-4xl block mb-3">📰</span>
+                        <div class="text-base font-bold text-white uppercase tracking-wider">Публикаций пока нет</div>
+                        <p class="text-xs text-slate-400 mt-2 max-w-md mx-auto">В этой категории пока нет новостей. Созданные публикации появятся здесь автоматически.</p>
+                    </div>
+                ` : filteredNews.map(n => `
                     <div onclick="openNewsModal('${n.id}')" class="bg-[#0d0408]/90 hover:bg-[#16070b] border border-amber-500/20 hover:border-amber-500/40 rounded-3xl overflow-hidden backdrop-blur-xl transition shadow-xl cursor-pointer flex flex-col justify-between group">
                         ${n.coverImage ? `
                             <div class="w-full h-48 overflow-hidden relative">

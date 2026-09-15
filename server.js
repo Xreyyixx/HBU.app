@@ -18,212 +18,18 @@ const DATA_DIR = path.join(__dirname, 'data');
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
 
 const DEFAULT_PARTICIPANTS = [
-    { id: 'p1', number: 1, name: 'Number 1', country: 'Австрия', flag: '🇦🇹', artist: 'Participant 1', song: 'Golden Radiance', videoUrl: 'videos/thank_you_p1.mp4' },
-    { id: 'p2', number: 2, name: 'Number 2', country: 'Нидерланды', flag: '🇳🇱', artist: 'Participant 2', song: 'Amsterdam Pulse', videoUrl: 'videos/thank_you_p2.mp4' },
-    { id: 'p3', number: 3, name: 'Number 3', country: 'Норвегия', flag: '🇳🇴', artist: 'Participant 3', song: 'Aurora Chords', videoUrl: 'videos/thank_you_p3.mp4' },
-    { id: 'p4', number: 4, name: 'Number 4', country: 'Великобритания', flag: '🇬🇧', artist: 'Participant 4', song: 'London Sky', videoUrl: 'videos/thank_you_p4.mp4' },
-    { id: 'p5', number: 5, name: 'Number 5', country: 'Швейцария', flag: '🇨🇭', artist: 'Participant 5', song: 'Alpine Whisper', videoUrl: 'videos/thank_you_p5.mp4' },
-    { id: 'p6', number: 6, name: 'Number 6', country: 'Финляндия', flag: '🇫🇮', artist: 'Participant 6', song: 'Midnight Sun', videoUrl: 'videos/thank_you_p6.mp4' },
-    { id: 'p7', number: 7, name: 'Number 7', country: 'Португалия', flag: '🇵🇹', artist: 'Participant 7', song: 'Oceano Dourado', videoUrl: 'videos/thank_you_p7.mp4' },
-    { id: 'p8', number: 8, name: 'Number 8', country: 'Бельгия', flag: '🇧🇪', artist: 'Participant 8', song: 'Velvet Dreams', videoUrl: 'videos/thank_you_p8.mp4' }
+    { id: 'p1', number: 1, name: 'Number 1', country: 'THE KUR', flag: '', artist: 'Participant 1', song: '', videoUrl: 'videos/thank_you_p1.mp4' },
+    { id: 'p2', number: 2, name: 'Number 2', country: '', flag: '', artist: 'Participant 2', song: '', videoUrl: 'videos/thank_you_p2.mp4' },
+    { id: 'p3', number: 3, name: 'Number 3', country: '', flag: '', artist: 'Participant 3', song: '', videoUrl: 'videos/thank_you_p3.mp4' },
+    { id: 'p4', number: 4, name: 'Number 4', country: '', flag: '', artist: 'Participant 4', song: '', videoUrl: 'videos/thank_you_p4.mp4' },
+    { id: 'p5', number: 5, name: 'Number 5', country: '', flag: '', artist: 'Participant 5', song: '', videoUrl: 'videos/thank_you_p5.mp4' },
+    { id: 'p6', number: 6, name: 'Number 6', country: '', flag: '', artist: 'Participant 6', song: '', videoUrl: 'videos/thank_you_p6.mp4' },
+    { id: 'p7', number: 7, name: 'Number 7', country: '', flag: '', artist: 'Participant 7', song: '', videoUrl: 'videos/thank_you_p7.mp4' },
+    { id: 'p8', number: 8, name: 'Number 8', country: '', flag: '', artist: 'Participant 8', song: '', videoUrl: 'videos/thank_you_p8.mp4' }
 ];
 
-const INITIAL_CONTESTS = [
-    {
-        id: 'july-2026',
-        title: 'HariVision July 2026',
-        edition: 'July 2026',
-        status: 'completed',
-        slogan: 'United in Harmony',
-        date: '18 июля 2026',
-        hostCity: 'Гамбург, Германия',
-        venue: 'Haribo Grand Arena',
-        hosts: ['Родион В.', 'Орнелла С.'],
-        description: 'Первый летний выпуск HariVision 2026 года, объединивший ярчайшие выступления и инновационную сцену. Конкурс открыл новую эру в истории Haribo Broadcasting Union с рекордным количеством зрительских голосов.',
-        videoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-        recapUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-        winner: {
-            country: 'Германия',
-            artist: 'Elena & The Echoes',
-            song: 'Neon Heartbeat',
-            points: 240
-        },
-        countries: [
-            { 
-                id: 'c1', 
-                country: 'Германия', 
-                flag: '🇩🇪', 
-                artist: 'Elena & The Echoes', 
-                song: 'Neon Heartbeat', 
-                rank: 1, 
-                points: 240, 
-                postcard: 'Открытка: Гамбургский порт на рассвете',
-                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
-            },
-            { 
-                id: 'c2', 
-                country: 'Франция', 
-                flag: '🇫🇷', 
-                artist: 'Julian Vane', 
-                song: 'Lumière d\'Or', 
-                rank: 2, 
-                points: 190, 
-                postcard: 'Открытка: Ночной Париж и неоновые огни',
-                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
-            },
-            { 
-                id: 'c3', 
-                country: 'Италия', 
-                flag: '🇮🇹', 
-                artist: 'Chiara Bellini', 
-                song: 'Sinfonia Solare', 
-                rank: 3, 
-                points: 175, 
-                postcard: 'Открытка: Тосканские холмы и побережье',
-                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
-            },
-            { id: 'c4', country: 'Испания', flag: '🇪🇸', artist: 'Mateo Cruz', song: 'Fuego Eterno', rank: 4, points: 140, postcard: 'Открытка: Солнечная Севилья', postcardVideo: '', performanceVideo: '' },
-            { id: 'c5', country: 'Швеция', flag: '🇸🇪', artist: 'Astrid Lind', song: 'Nordic Glow', rank: 5, points: 120, postcard: 'Открытка: Стокгольмские архипелаги', postcardVideo: '', performanceVideo: '' },
-            { id: 'c6', country: 'Польша', flag: '🇵🇱', artist: 'Marek Kowal', song: 'Echoes of Dawn', rank: 6, points: 95, postcard: 'Открытка: Варшавский старый город', postcardVideo: '', performanceVideo: '' }
-        ],
-        knownDetails: []
-    },
-    {
-        id: 'august-2026',
-        title: 'HariVision August 2026',
-        edition: 'August 2026',
-        status: 'live',
-        slogan: 'Heart of Performance',
-        date: '24 августа 2026',
-        hostCity: 'Вена, Австрия',
-        venue: 'Starlight Symphony Dome',
-        hosts: ['Виктория К.', 'Анна М.'],
-        description: 'Главное событие августа 2026 года! 8 финалистов борются за хрустальное полигональное сердце HariVision. Активное общественное и национальное голосование с системой перевода голосов в Public Points.',
-        videoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-        recapUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-        winner: null,
-        countries: [
-            { 
-                id: 'p1', 
-                country: 'Австрия', 
-                flag: '🇦🇹', 
-                artist: 'Participant 1', 
-                song: 'Golden Radiance', 
-                rank: null, 
-                points: null, 
-                postcard: 'Дворец Шёнбрунн и симфония огней',
-                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
-            },
-            { 
-                id: 'p2', 
-                country: 'Нидерланды', 
-                flag: '🇳🇱', 
-                artist: 'Participant 2', 
-                song: 'Amsterdam Pulse', 
-                rank: null, 
-                points: null, 
-                postcard: 'Каналы Амстердама в лучах заката',
-                postcardVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-                performanceVideo: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA'
-            },
-            { id: 'p3', country: 'Норвегия', flag: '🇳🇴', artist: 'Participant 3', song: 'Aurora Chords', rank: null, points: null, postcard: 'Северное сияние над фьордами', postcardVideo: '', performanceVideo: '' },
-            { id: 'p4', country: 'Великобритания', flag: '🇬🇧', artist: 'Participant 4', song: 'London Sky', rank: null, points: null, postcard: 'Вечерний берег Темзы', postcardVideo: '', performanceVideo: '' },
-            { id: 'p5', country: 'Швейцария', flag: '🇨🇭', artist: 'Participant 5', song: 'Alpine Whisper', rank: null, points: null, postcard: 'Вершины Альп и зеркальные озера', postcardVideo: '', performanceVideo: '' },
-            { id: 'p6', country: 'Финляндия', flag: '🇫🇮', artist: 'Participant 6', song: 'Midnight Sun', rank: null, points: null, postcard: 'Хельсинки и озерный край', postcardVideo: '', performanceVideo: '' },
-            { id: 'p7', country: 'Португалия', flag: '🇵🇹', artist: 'Participant 7', song: 'Oceano Dourado', rank: null, points: null, postcard: 'Атлантические утесы Лиссабона', postcardVideo: '', performanceVideo: '' },
-            { id: 'p8', country: 'Бельгия', flag: '🇧🇪', artist: 'Participant 8', song: 'Velvet Dreams', rank: null, points: null, postcard: 'Гранд-Плас в сиянии прожекторов', postcardVideo: '', performanceVideo: '' }
-        ],
-        knownDetails: [
-            'Все 8 финалистов утвердили сценические постановки и визуальные эффекты.',
-            'Система Public Vote открыта для всех зрителей с лимитом 10 голосов.',
-            'Шкала распределения: 100, 90, 80, 70, 60, 50, 40, 30, 20, 10 очков.',
-            'Прямой эфир доступен на официальном портале HBU.'
-        ]
-    },
-    {
-        id: 'autumn-2026',
-        title: 'HariVision Autumn 2026',
-        edition: 'Autumn 2026',
-        status: 'upcoming',
-        slogan: 'Amber Twilight',
-        date: 'Октябрь / Ноябрь 2026',
-        hostCity: 'Прага, Чехия',
-        venue: 'Amber Palace Arena',
-        hosts: ['Объявление в сентябре 2026'],
-        description: 'Осенний сезон HariVision откроет новую главу с расширенным составом участников, обновленной технологией голографической сцены и масштабным шоу Haribo Broadcasting Union.',
-        videoUrl: '',
-        recapUrl: '',
-        winner: null,
-        countries: [
-            { id: 'a1', country: 'Чехия (Хозяева)', flag: '🇨🇿', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Пражский град и Карлов мост' },
-            { id: 'a2', country: 'Германия', flag: '🇩🇪', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Берлинский модерн' },
-            { id: 'a3', country: 'Франция', flag: '🇫🇷', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Лазурный берег' },
-            { id: 'a4', country: 'Италия', flag: '🇮🇹', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Венецианская лагуна' },
-            { id: 'a5', country: 'Швеция', flag: '🇸🇪', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Северные леса' },
-            { id: 'a6', country: 'Испания', flag: '🇪🇸', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Мадридские площади' },
-            { id: 'a7', country: 'Япония (Специальный гость)', flag: '🇯🇵', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Токио Неон' },
-            { id: 'a8', country: 'Австралия (Ассоциированный член)', flag: '🇦🇺', artist: 'TBD', song: 'TBD', rank: null, points: null, postcard: 'Сиднейская гавань' }
-        ],
-        knownDetails: [
-            'Подтверждено участие 12 стран-вещателей Haribo Broadcasting Union.',
-            'Прием заявок на национальные отборы открыт до 15 сентября 2026 года.',
-            'Место проведения: Прага, многофункциональная арена Amber Palace.',
-            'Концепция сцены: 360-градусный купол с динамическим янтарным освещением.',
-            'Главные ведущие шоу будут объявлены на специальной пресс-конференции HBU.'
-        ]
-    }
-];
-
-const INITIAL_NEWS = [
-    {
-        id: 'news-1',
-        title: 'Грандиозный старт финала HariVision August 2026: открыто голосование зрителей',
-        date: '24 августа 2026',
-        createdAt: 1787572800000,
-        category: 'Конкурс',
-        tag: 'Финал',
-        summary: 'Официальный портал Haribo Broadcasting Union запустил систему Public Vote для финала августовского сезона.',
-        coverImage: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=1200&auto=format&fit=crop',
-        videoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-        content: `Сегодня Haribo Broadcasting Union дал старт главному музыкальному событию августа — HariVision August 2026 под слоганом «Heart of Performance». 
-        
-Восемь сильнейших участников представили свои уникальные номера. Зрители со всего мира могут принять участие в формировании итогового результата через систему Public Vote. Каждый зритель получает 10 голосов, которые можно распределить между полюбившимися выступлениями (до 5 голосов за один номер).
-
-Итоги голосования будут переведены в официальные Public Points по шкале HBU: 100, 90, 80, 70, 60, 50, 40, 30, 20, 10 очков.`
-    },
-    {
-        id: 'news-2',
-        title: 'Haribo Broadcasting Union раскрывает детали предстоящего сезона Autumn 2026',
-        date: '22 августа 2026',
-        createdAt: 1787399999000,
-        category: 'Анонс',
-        tag: 'Autumn 2026',
-        summary: 'Осенний сезон HariVision пройдет в Праге под слоганом «Amber Twilight» с рекордным составом стран-участниц.',
-        coverImage: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=1200&auto=format&fit=crop',
-        videoUrl: '',
-        content: `Исполнительный комитет HBU утвердил город-хозяин следующего сезона — им станет Прага, столица Чехии. Сцена разместится на великолепной арене Amber Palace, которая предложит революционную визуальную концепцию с 360-градусным янтарным светом.
-
-В осеннем сезоне подтвердили участие не менее 12 стран, а также специальный гость из Азии. Отборы национальных представителей продлятся до середины сентября.`
-    },
-    {
-        id: 'news-3',
-        title: 'Итоги HariVision July 2026: Германия завоевала хрустальное сердце конкурса',
-        date: '19 июля 2026',
-        createdAt: 1784462400000,
-        category: 'Архив',
-        tag: 'Итоги',
-        summary: 'Дуэт Elena & The Echoes одержал победу в драматической борьбе с композицией «Neon Heartbeat».',
-        coverImage: 'https://images.unsplash.com/photo-1465847899084-d164df4dedc6?q=80&w=1200&auto=format&fit=crop',
-        videoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
-        content: `Июльский выпуск HariVision 2026 вошел в историю как один из самых напряженных конкурсов HBU. Представители Германии набрали 240 баллов, опередив Францию всего на 50 очков в зрительском голосовании.
-
-Полная запись финального шоу и все выступления доступны в архиве официального портала HariVision.`
-    }
-];
+const INITIAL_CONTESTS = [];
+const INITIAL_NEWS = [];
 
 function parseNewsDateToTimestamp(article) {
     if (!article) return 0;
@@ -302,11 +108,11 @@ function loadStore() {
         if (fs.existsSync(STORE_FILE)) {
             const raw = fs.readFileSync(STORE_FILE, 'utf-8');
             const data = JSON.parse(raw);
-            if (!data.participants || data.participants.length === 0) data.participants = DEFAULT_PARTICIPANTS;
-            if (!data.contests || data.contests.length === 0) data.contests = INITIAL_CONTESTS;
-            if (!data.news || data.news.length === 0) data.news = INITIAL_NEWS;
+            if (!Array.isArray(data.participants) || data.participants.length === 0) data.participants = DEFAULT_PARTICIPANTS;
+            if (!Array.isArray(data.contests)) data.contests = [];
+            if (!Array.isArray(data.news)) data.news = [];
             if (!data.votingState) data.votingState = { status: 'closed', endsAt: null, sessionId: null };
-            if (!data.recapVideoUrl) data.recapVideoUrl = 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA';
+            if (!data.recapVideoUrl) data.recapVideoUrl = '';
             if (data.featuredContestId === undefined) data.featuredContestId = 'auto';
             if (!data.adminPassword) data.adminPassword = 'admin';
             if (!Array.isArray(data.votes)) data.votes = [];
@@ -358,9 +164,9 @@ function saveStore(data) {
 }
 
 let store = loadStore();
-if (!store.news || store.news.length === 0) store.news = sortNewsDescending(INITIAL_NEWS);
-if (!store.contests || store.contests.length === 0) store.contests = INITIAL_CONTESTS;
-if (!store.participants || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
+if (!Array.isArray(store.news)) store.news = [];
+if (!Array.isArray(store.contests)) store.contests = [];
+if (!Array.isArray(store.participants) || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
 saveStore(store);
 
 // SSE Подписчики
@@ -501,17 +307,17 @@ app.post('/api/settings/featured-contest', (req, res) => {
 });
 
 // --- ADMIN AUTHENTICATION ---
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', async (req, res) => {
     const { email, username, password } = req.body;
-    const identifier = (email || username || '').trim().toLowerCase();
+    const identifier = (email || username || '').trim();
     const inputPassword = (password || '').trim();
 
     const expectedPassword = (process.env.ADMIN_PASSWORD || store.adminPassword || 'admin').trim();
 
-    // Accept if password matches (and username/email is provided or standard)
-    const isPasswordCorrect = inputPassword === expectedPassword || inputPassword === 'admin' || inputPassword === 'harivision2026' || inputPassword === 'admin123';
+    // 1. Проверка локального пароля администратора
+    const isLocalPasswordCorrect = inputPassword === expectedPassword || inputPassword === 'admin' || inputPassword === 'harivision2026' || inputPassword === 'admin123';
 
-    if (isPasswordCorrect) {
+    if (isLocalPasswordCorrect) {
         const token = 'hv_admin_' + Buffer.from(`${identifier}:${Date.now()}:${Math.random()}`).toString('base64');
         return res.json({
             success: true,
@@ -523,18 +329,50 @@ app.post('/api/admin/login', (req, res) => {
         });
     }
 
+    // 2. Если указан FIREBASE_API_KEY, пробуем аутентифицировать через REST API Google Identity Platform
+    const fbApiKey = process.env.FIREBASE_API_KEY;
+    if (fbApiKey && identifier && inputPassword) {
+        try {
+            const firebaseEmail = identifier.includes('@') ? identifier : `${identifier}@harivision.org`;
+            const fbRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${fbApiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: firebaseEmail,
+                    password: inputPassword,
+                    returnSecureToken: true
+                })
+            });
+            const fbData = await fbRes.json();
+            if (fbRes.ok && fbData.idToken) {
+                const token = 'hv_firebase_' + Buffer.from(`${fbData.email || fbData.localId}:${Date.now()}`).toString('base64');
+                return res.json({
+                    success: true,
+                    token,
+                    user: {
+                        email: fbData.email || identifier,
+                        uid: fbData.localId,
+                        role: 'admin'
+                    }
+                });
+            }
+        } catch (fbErr) {
+            console.warn('[Admin Login] Firebase verification attempt error:', fbErr.message);
+        }
+    }
+
     return res.status(401).json({
         success: false,
-        error: 'Неверный логин или пароль администратора'
+        error: fbApiKey ? 'Неверный логин или пароль администратора' : 'Неверный пароль. Для проверки учетной записи Firebase необходима переменная FIREBASE_API_KEY. Либо войдите с мастер-паролем (по умолчанию: admin).'
     });
 });
 
 function authenticateAdmin(req, res, next) {
     const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
+    if (authHeader && (authHeader.startsWith('Bearer hv_admin_') || authHeader.startsWith('Bearer hv_firebase_') || authHeader.startsWith('Bearer '))) {
         return next();
     }
-    if (req.query && req.query.token) {
+    if (req.query && (req.query.token || req.query.adminToken)) {
         return next();
     }
     return res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -542,11 +380,11 @@ function authenticateAdmin(req, res, next) {
 
 app.get('/api/admin/verify', (req, res) => {
     const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer hv_admin_')) {
+    if (authHeader && (authHeader.startsWith('Bearer hv_admin_') || authHeader.startsWith('Bearer hv_firebase_'))) {
         return res.json({ success: true, valid: true });
     }
     // Also support token query parameter
-    if (req.query.token && req.query.token.startsWith('hv_admin_')) {
+    if (req.query.token && (req.query.token.startsWith('hv_admin_') || req.query.token.startsWith('hv_firebase_'))) {
         return res.json({ success: true, valid: true });
     }
     return res.status(401).json({ success: false, valid: false });

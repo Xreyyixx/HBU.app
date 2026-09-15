@@ -154,8 +154,9 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     }
 
     let authSuccess = false;
+    let srvErrorMessage = '';
 
-    // 1. Попытка входа через серверный API
+    // 1. Попытка входа через серверный API (проверяет локальный пароль и Firebase REST API)
     try {
         const srvRes = await loginAdminServer(loginInput, password);
         if (srvRes && srvRes.token) {
@@ -164,20 +165,25 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
             showToast('Вход в панель администратора выполнен');
             authSuccess = true;
         }
-    } catch (srvErr) {}
+    } catch (srvErr) {
+        srvErrorMessage = srvErr.message || '';
+    }
 
-    // 2. Если серверный вход не сработал, пробуем Firebase Auth
+    // 2. Если серверный вход не сработал, пробуем клиентский Firebase Auth SDK
     if (!authSuccess && auth) {
         try {
             const firebaseEmail = loginInput.includes('@') ? loginInput : `${loginInput}@harivision.org`;
-            await signInWithEmailAndPassword(auth, firebaseEmail, password);
+            const userCred = await signInWithEmailAndPassword(auth, firebaseEmail, password);
+            const token = 'hv_firebase_' + btoa((userCred?.user?.email || loginInput) + ':' + Date.now());
+            localStorage.setItem('harivision_admin_token', token);
+            setAdminAuthenticated(true);
             showToast('Вход через Firebase Auth выполнен');
             authSuccess = true;
         } catch (firebaseErr) {
             console.error('Firebase Auth Error:', firebaseErr);
             let msg = "Неверный логин или пароль администратора";
             if (firebaseErr.code === 'auth/invalid-credential' || firebaseErr.code === 'auth/wrong-password' || firebaseErr.code === 'auth/user-not-found') {
-                msg = "Неверный логин или пароль (по умолчанию: admin / admin)";
+                msg = "Неверный email или пароль в Firebase. Проверьте правильность введенных данных.";
             } else if (firebaseErr.code === 'auth/invalid-email') {
                 msg = "Некорректный формат email";
             } else if (firebaseErr.code === 'auth/too-many-requests') {
@@ -186,13 +192,21 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
                 msg = firebaseErr.message;
             }
             if (errEl) {
-                errEl.innerText = msg;
+                errEl.innerHTML = `<div class="font-bold text-rose-300">${msg}</div><div class="text-[11px] text-amber-200/80 mt-1.5 leading-relaxed">Мастер-вход: логин <b>admin</b>, пароль <b>admin</b></div>`;
                 errEl.classList.remove('hidden');
             }
         }
     } else if (!authSuccess && !auth) {
         if (errEl) {
-            errEl.innerText = "Неверный логин или пароль администратора (по умолчанию: admin / admin)";
+            const msg = srvErrorMessage || 'Неверный логин или пароль администратора.';
+            errEl.innerHTML = `
+                <div class="font-bold text-rose-300">${msg}</div>
+                <div class="text-[11px] text-amber-200/80 mt-2 leading-relaxed text-left border-t border-amber-500/15 pt-2">
+                    💡 <b>Почему не срабатывает аккаунт Firebase?</b><br/>
+                    Для проверки паролей через Firebase проекту необходим Web API ключ (переменная <code>FIREBASE_API_KEY</code> в настройках переменных окружения).<br/>
+                    Сейчас вы можете войти, используя мастер-логин: <b>admin</b>, пароль: <b>admin</b> (или ваш email с паролем <b>admin</b>).
+                </div>
+            `;
             errEl.classList.remove('hidden');
         }
     }
@@ -1227,7 +1241,7 @@ function renderContestModalParticipants() {
                 </div>
                 <div class="sm:col-span-2">
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Страна</label>
-                    <input type="text" value="${p.country || ''}" placeholder="Германия" oninput="updateContestParticipantField(${idx}, 'country', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
+                    <input type="text" value="${p.country || ''}" placeholder="Страна" oninput="updateContestParticipantField(${idx}, 'country', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
                 </div>
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Место / Ранг</label>
@@ -1238,15 +1252,15 @@ function renderContestModalParticipants() {
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Исполнитель</label>
-                    <input type="text" value="${p.artist || ''}" placeholder="Elena & The Echoes" oninput="updateContestParticipantField(${idx}, 'artist', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
+                    <input type="text" value="${p.artist || ''}" placeholder="Имя исполнителя" oninput="updateContestParticipantField(${idx}, 'artist', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
                 </div>
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Песня</label>
-                    <input type="text" value="${p.song || ''}" placeholder="Neon Heartbeat" oninput="updateContestParticipantField(${idx}, 'song', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
+                    <input type="text" value="${p.song || ''}" placeholder="Название песни" oninput="updateContestParticipantField(${idx}, 'song', this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg" />
                 </div>
                 <div>
                     <label class="text-[9px] text-slate-400 uppercase font-bold block mb-0.5">Баллы (Public Pts)</label>
-                    <input type="number" value="${p.points !== undefined && p.points !== null ? p.points : ''}" placeholder="240" oninput="updateContestParticipantField(${idx}, 'points', this.value ? parseInt(this.value, 10) : null)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg font-mono text-center" />
+                    <input type="number" value="${p.points !== undefined && p.points !== null ? p.points : ''}" placeholder="0" oninput="updateContestParticipantField(${idx}, 'points', this.value ? parseInt(this.value, 10) : null)" class="w-full bg-[#16070b] border border-amber-500/25 px-2.5 py-1.5 text-xs text-white rounded-lg font-mono text-center" />
                 </div>
             </div>
 
