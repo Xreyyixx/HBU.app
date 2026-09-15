@@ -3,8 +3,9 @@
   "short_name": "HBU",
   "description": "Официальный портал Haribo Broadcasting Union: архив конкурсов, новости, информация о предстоящих сезонах и система Public Vote.",
 
-  "start_url": "/HBU.app/",
-  "scope": "/HBU.app/",
+  "start_url": "./index.html",
+  "scope": "./",
+  "gcm_sender_id": "103953800507",
 
   "display": "standalone",
   "background_color": "#060204",

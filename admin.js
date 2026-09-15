@@ -1741,7 +1741,11 @@ window.testAdminPushNotification = async function() {
         });
         const data = await res.json();
         if (res.ok && data.success) {
-            showAdminNotification(`Web Push отправлен на ${data.sent} из ${data.total} подписанных устройств!`, 'success');
+            if (data.total === 0) {
+                showAdminNotification(`Внимание: 0 подписанных устройств в базе. Откройте сайт в отдельной вкладке и нажмите колокольчик 🔔 («Разрешить»), чтобы подписать устройство!`, 'info');
+            } else {
+                showAdminNotification(`Web Push успешно отправлен на ${data.sent} из ${data.total} подписанных устройств!`, 'success');
+            }
             window.refreshAdminPushSubscribers();
         } else {
             throw new Error(data.error || 'Ошибка отправки тестового Push');

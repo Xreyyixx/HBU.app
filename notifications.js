@@ -168,6 +168,21 @@ export async function unsubscribePush() {
 
 // Запрос разрешения на показ системных уведомлений
 export async function requestNotificationPermission() {
+    const isInIframe = window.self !== window.top;
+    if (isInIframe) {
+        if (typeof window.showToast === 'function') {
+            window.showToast('⚠️ Браузер блокирует push-уведомления внутри фрейма! Откройте сайт в отдельной вкладке (иконка ↗).', 6000);
+        }
+    }
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+    if (isIOS && !isStandalone) {
+        if (typeof window.showToast === 'function') {
+            window.showToast('📱 На iPhone для фоновых Push добавьте сайт на домашний экран: Поделиться → «На экран Домой»', 7000);
+        }
+    }
+
     if (!isNotificationSupported()) {
         if (typeof window.showToast === 'function') {
             window.showToast('Уведомления не поддерживаются вашим браузером');
@@ -180,15 +195,19 @@ export async function requestNotificationPermission() {
         if (permission === 'granted') {
             localStorage.setItem(STORAGE_KEY, 'true');
             updateNotificationUI();
-            await syncPushSubscription();
+            const pushResult = await syncPushSubscription();
             if (typeof window.showToast === 'function') {
-                window.showToast('Уведомления успешно включены! 🔔');
+                if (pushResult && pushResult.success) {
+                    window.showToast('Уведомления успешно включены! 🔔 Устройство подписано на фоновый Web Push.');
+                } else {
+                    window.showToast('Уведомления включены! 🔔');
+                }
             }
             // Отправляем приветственное тестовое уведомление
             sendSystemNotification(
                 'HariVision 2026 🔔',
                 'Уведомления включены! Теперь вы будете первыми узнавать о старте голосования и новостях конкурса.',
-                '/',
+                'index.html',
                 'welcome-notif'
             );
             return true;
@@ -197,7 +216,7 @@ export async function requestNotificationPermission() {
             updateNotificationUI();
             await unsubscribePush();
             if (typeof window.showToast === 'function') {
-                window.showToast('Уведомления заблокированы в настройках браузера');
+                window.showToast('Уведомления заблокированы в настройках браузера. Разрешите их в настройках сайта.');
             }
             return false;
         } else {
