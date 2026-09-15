@@ -169,6 +169,89 @@ if (!Array.isArray(store.contests)) store.contests = [];
 if (!Array.isArray(store.participants) || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
 saveStore(store);
 
+// Function to sync Firestore collection data into server store
+async function syncWithFirestore() {
+    try {
+        let apiKey = process.env.FIREBASE_API_KEY;
+        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
+        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
+        if (fs.existsSync(appletConfigPath)) {
+            try {
+                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
+                if (cfg.apiKey) apiKey = cfg.apiKey;
+                if (cfg.projectId) projectId = cfg.projectId;
+            } catch (e) {}
+        }
+        if (!apiKey) return;
+
+        const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+
+        function parseFirestoreFields(fields) {
+            if (!fields) return {};
+            const res = {};
+            for (const [k, v] of Object.entries(fields)) {
+                res[k] = parseFirestoreValue(v);
+            }
+            return res;
+        }
+
+        function parseFirestoreValue(val) {
+            if (!val || typeof val !== 'object') return null;
+            if ('stringValue' in val) return val.stringValue;
+            if ('integerValue' in val) return parseInt(val.integerValue, 10);
+            if ('doubleValue' in val) return parseFloat(val.doubleValue);
+            if ('booleanValue' in val) return val.booleanValue;
+            if ('nullValue' in val) return null;
+            if ('timestampValue' in val) return val.timestampValue;
+            if ('arrayValue' in val) return (val.arrayValue?.values || []).map(parseFirestoreValue);
+            if ('mapValue' in val) return parseFirestoreFields(val.mapValue?.fields);
+            return null;
+        }
+
+        let updated = false;
+
+        // Sync contests directly from Firestore collection "contests"
+        try {
+            const res = await fetch(`${base}/contests?key=${apiKey}`);
+            if (res.ok) {
+                const data = await res.json();
+                const items = (data.documents || []).map(d => ({
+                    id: d.name.split('/').pop(),
+                    ...parseFirestoreFields(d.fields)
+                }));
+                store.contests = items;
+                updated = true;
+            }
+        } catch (e) {}
+
+        // Sync news directly from Firestore collection "news"
+        try {
+            const res = await fetch(`${base}/news?key=${apiKey}`);
+            if (res.ok) {
+                const data = await res.json();
+                const items = (data.documents || []).map(d => ({
+                    id: d.name.split('/').pop(),
+                    ...parseFirestoreFields(d.fields)
+                }));
+                items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                store.news = items;
+                updated = true;
+            }
+        } catch (e) {}
+
+        if (updated) {
+            saveStore(store);
+            broadcastState('firestore_sync');
+        }
+    } catch (e) {
+        console.warn('Firestore server sync error:', e);
+    }
+}
+
+// Initial sync on startup and recurring sync
+syncWithFirestore();
+setInterval(syncWithFirestore, 30000);
+
 // SSE Подписчики
 let sseClients = [];
 

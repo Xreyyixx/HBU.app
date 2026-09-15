@@ -336,7 +336,7 @@ export async function fetchFirestoreStateDirectly() {
             }
         } catch (e) {}
 
-        // 4. News Collection
+        // 4. News Collection (Single source of truth in Firestore collection "news")
         try {
             const newsSnap = await getDocs(collection(db, "news"));
             const newsItems = [];
@@ -344,57 +344,24 @@ export async function fetchFirestoreStateDirectly() {
                 const cleaned = sanitizeFirestoreData(d.data());
                 newsItems.push({ id: d.id, ...(cleaned || {}) });
             });
-            if (newsItems.length > 0) {
-                const sortedNews = sortNewsDescending(newsItems);
-                if (safeJsonStringify(currentState.news) !== safeJsonStringify(sortedNews)) {
-                    currentState.news = sortedNews;
-                    stateChanged = true;
-                }
-            } else if (newsSnap.empty && currentState.news && currentState.news.length > 0) {
-                for (const item of currentState.news) {
-                    setDoc(doc(db, "news", item.id), item, { merge: true }).catch(() => {});
-                }
-            }
-        } catch (e) {}
-
-        // 5. Contests (Single source of truth in Firestore: collection "contests" & doc "system/contests")
-        try {
-            let contestItems = [];
-            
-            // 5.1 Check system/contests document
-            try {
-                const sysContestSnap = await getDoc(doc(db, "system", "contests"));
-                if (sysContestSnap.exists()) {
-                    const sysCData = sanitizeFirestoreData(sysContestSnap.data());
-                    if (sysCData && Array.isArray(sysCData.list) && sysCData.list.length > 0) {
-                        contestItems = sysCData.list;
-                    }
-                }
-            } catch (e) {}
-
-            // 5.2 Check collection "contests"
-            if (contestItems.length === 0) {
-                const contestSnap = await getDocs(collection(db, "contests"));
-                contestSnap.forEach(d => {
-                    const cleaned = sanitizeFirestoreData(d.data());
-                    contestItems.push({ id: d.id, ...(cleaned || {}) });
-                });
-            }
-
-            if (contestItems.length > 0) {
-                if (safeJsonStringify(currentState.contests) !== safeJsonStringify(contestItems)) {
-                    currentState.contests = contestItems;
-                    stateChanged = true;
-                }
-            } else if (currentState.contests && currentState.contests.length > 0) {
-                // Seed to Firestore if empty
-                setDoc(doc(db, "system", "contests"), { list: currentState.contests, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
-                for (const c of currentState.contests) {
-                    setDoc(doc(db, "contests", c.id), c, { merge: true }).catch(() => {});
-                }
-            }
+            currentState.news = sortNewsDescending(newsItems);
+            stateChanged = true;
         } catch (e) {
-            console.warn('Contests fetch error:', e);
+            console.warn('News Firestore load error:', e);
+        }
+
+        // 5. Contests (Single source of truth in Firestore collection "contests")
+        try {
+            const contestSnap = await getDocs(collection(db, "contests"));
+            const contestItems = [];
+            contestSnap.forEach(d => {
+                const cleaned = sanitizeFirestoreData(d.data());
+                contestItems.push({ id: d.id, ...(cleaned || {}) });
+            });
+            currentState.contests = contestItems;
+            stateChanged = true;
+        } catch (e) {
+            console.warn('Contests Firestore load error:', e);
         }
 
         // 6. Votes Collection
@@ -565,7 +532,7 @@ function initFirestoreListeners() {
         }, (err) => console.warn('Firestore participants error:', err));
     } catch (e) {}
 
-    // D. News Real-time Listener (Cross-device news sync)
+    // D. News Real-time Listener (Cross-device news sync directly from collection "news")
     try {
         onSnapshot(collection(db, "news"), (snap) => {
             const newsItems = [];
@@ -573,28 +540,12 @@ function initFirestoreListeners() {
                 const cleaned = sanitizeFirestoreData(d.data());
                 newsItems.push({ id: d.id, ...(cleaned || {}) });
             });
-            if (newsItems.length > 0) {
-                currentState.news = sortNewsDescending(newsItems);
-                notifyStateChanged(false);
-            }
+            currentState.news = sortNewsDescending(newsItems);
+            notifyStateChanged(false);
         }, (err) => console.warn('Firestore news error:', err));
     } catch (e) {}
 
-    // E1. Contests Real-time Listener (System document "system/contests")
-    try {
-        onSnapshot(doc(db, "system", "contests"), (snap) => {
-            if (snap.exists()) {
-                const sysCData = sanitizeFirestoreData(snap.data());
-                if (sysCData && Array.isArray(sysCData.list) && sysCData.list.length > 0) {
-                    currentState.contests = sysCData.list;
-                    notifyStateChanged(false);
-                    syncCurrentUserArtistStatus();
-                }
-            }
-        }, (err) => console.warn('Firestore system/contests error:', err));
-    } catch (e) {}
-
-    // E2. Contests Collection Real-time Listener
+    // E. Contests Real-time Listener (Cross-device sync directly from collection "contests")
     try {
         onSnapshot(collection(db, "contests"), (snap) => {
             const contestItems = [];
@@ -602,11 +553,9 @@ function initFirestoreListeners() {
                 const cleaned = sanitizeFirestoreData(d.data());
                 contestItems.push({ id: d.id, ...(cleaned || {}) });
             });
-            if (contestItems.length > 0) {
-                currentState.contests = contestItems;
-                notifyStateChanged(false);
-                syncCurrentUserArtistStatus();
-            }
+            currentState.contests = contestItems;
+            notifyStateChanged(false);
+            syncCurrentUserArtistStatus();
         }, (err) => console.warn('Firestore contests collection error:', err));
     } catch (e) {}
 
@@ -1011,12 +960,11 @@ export async function saveContest(contest) {
     }
     notifyStateChanged(true);
 
-    // Save to Firestore (Single collection "contests" + system/contests document for instant multi-device sync)
+    // Save to Firestore directly in collection "contests"
     try {
-        await Promise.all([
-            setDoc(doc(db, "contests", contest.id), contest, { merge: true }),
-            setDoc(doc(db, "system", "contests"), { list: currentState.contests, updatedAt: new Date().toISOString() }, { merge: true })
-        ]);
+        if (db) {
+            await setDoc(doc(db, "contests", contest.id), contest, { merge: true });
+        }
     } catch (e) {
         console.warn('Firestore save contest error:', e);
     }
@@ -1044,12 +992,11 @@ export async function deleteContest(contestId) {
     currentState.contests = (currentState.contests || []).filter(c => c.id !== contestId);
     notifyStateChanged(true);
 
-    // Delete from Firestore & update system/contests
+    // Delete directly from Firestore collection "contests"
     try {
-        await Promise.all([
-            deleteDoc(doc(db, "contests", contestId)),
-            setDoc(doc(db, "system", "contests"), { list: currentState.contests, updatedAt: new Date().toISOString() }, { merge: true })
-        ]);
+        if (db) {
+            await deleteDoc(doc(db, "contests", contestId));
+        }
     } catch (e) {
         console.warn('Firestore delete contest error:', e);
     }

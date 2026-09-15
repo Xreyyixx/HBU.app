@@ -1793,14 +1793,14 @@ subscribeState((state) => {
                 sendSystemNotification(
                     'Голосование открыто! 🗳️',
                     'Начался прием зрительских голосов HariVision 2026. Поддержите своих фаворитов!',
-                    '/index.html#voting',
+                    '/#voting',
                     'voting-status-open'
                 );
             } else if (newVotingState.status === 'closed') {
                 sendSystemNotification(
                     'Голосование завершено 🏁',
                     'Прием голосов остановлен. Ждем объявления официальных итогов!',
-                    '/index.html',
+                    '/',
                     'voting-status-closed'
                 );
             }
@@ -1812,7 +1812,7 @@ subscribeState((state) => {
             sendSystemNotification(
                 'Новая новость HBU 📰',
                 latestArticle.title || 'Опубликована свежая статья о конкурсе HariVision',
-                '/index.html#news',
+                '/#news',
                 'news-' + latestArticle.id
             );
         }
@@ -1823,7 +1823,7 @@ subscribeState((state) => {
             sendSystemNotification(
                 'Итоги HariVision объявлены! 🏆',
                 'Результаты голосования и победитель уже доступны на портале!',
-                '/index.html',
+                '/',
                 'reveal-results'
             );
         }

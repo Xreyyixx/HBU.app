@@ -1722,7 +1722,7 @@ window.handleAdminBroadcastSubmit = async function(event) {
 
     const title = titleEl ? titleEl.value.trim() : '';
     const message = bodyEl ? bodyEl.value.trim() : '';
-    const url = urlEl ? urlEl.value.trim() : '/index.html';
+    const url = urlEl ? urlEl.value.trim() : '/';
 
     if (!title || !message) {
         showAdminNotification('Пожалуйста, заполните заголовок и текст', 'error');
