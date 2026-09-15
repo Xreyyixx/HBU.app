@@ -4,7 +4,8 @@ import {
     isNotificationsEnabled,
     updateNotificationUI,
     sendSystemNotification,
-    toggleNotifications
+    toggleNotifications,
+    syncPushSubscription
 } from './notifications.js';
 import { 
     subscribeState, 
@@ -1892,8 +1893,11 @@ if (isNational || currentPortalView === 'voting') {
     renderVotingCard();
 }
 
-// Инициализация отображения статуса уведомлений
+// Инициализация отображения статуса уведомлений и фоновой подписки Web Push
 updateNotificationUI();
+if (isNotificationsEnabled()) {
+    syncPushSubscription();
+}
 if (typeof window !== 'undefined') {
     window.handleNotificationToggle = toggleNotifications;
     window.addEventListener('harivision:notification', (e) => {

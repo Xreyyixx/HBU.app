@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import webpush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -118,6 +119,12 @@ function loadStore() {
             if (!Array.isArray(data.votes)) data.votes = [];
             if (data.manualThreshold === undefined) data.manualThreshold = 0;
             if (data.revealMode === undefined) data.revealMode = false;
+            if (!data.vapidKeys || !data.vapidKeys.publicKey || !data.vapidKeys.privateKey) {
+                data.vapidKeys = webpush.generateVAPIDKeys();
+            }
+            if (!Array.isArray(data.pushSubscriptions)) {
+                data.pushSubscriptions = [];
+            }
             
             // Реальные счетчики реакций: пустые объекты по умолчанию, без фейковых чисел
             if (Array.isArray(data.news)) {
@@ -146,7 +153,9 @@ function loadStore() {
         adminPassword: 'admin',
         votes: [],
         manualThreshold: 0,
-        revealMode: false
+        revealMode: false,
+        vapidKeys: webpush.generateVAPIDKeys(),
+        pushSubscriptions: []
     };
     saveStore(defaultData);
     return defaultData;
@@ -167,7 +176,22 @@ let store = loadStore();
 if (!Array.isArray(store.news)) store.news = [];
 if (!Array.isArray(store.contests)) store.contests = [];
 if (!Array.isArray(store.participants) || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
+if (!store.vapidKeys || !store.vapidKeys.publicKey || !store.vapidKeys.privateKey) {
+    store.vapidKeys = webpush.generateVAPIDKeys();
+}
+if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
 saveStore(store);
+
+// Настройка Web Push VAPID
+try {
+    webpush.setVapidDetails(
+        'mailto:support@harivision.org',
+        store.vapidKeys.publicKey,
+        store.vapidKeys.privateKey
+    );
+} catch (e) {
+    console.error('Error setting VAPID details:', e);
+}
 
 // Function to sync Firestore collection data into server store
 async function syncWithFirestore() {
@@ -266,6 +290,83 @@ function broadcastState(type = 'update') {
     });
 }
 
+// Отправка Web Push уведомлений всем подписчикам (доставляется даже при закрытом сайте/приложении)
+async function sendPushNotificationToAll({ title, body, url = '/', tag = null }) {
+    if (!Array.isArray(store.pushSubscriptions) || store.pushSubscriptions.length === 0) {
+        return { total: 0, sent: 0 };
+    }
+    const payload = JSON.stringify({
+        title,
+        body,
+        icon: '/icons/HBU_icon.png',
+        badge: '/icons/HBU_icon.png',
+        tag: tag || ('hbu_push_' + Date.now()),
+        data: { url: url || '/' }
+    });
+
+    const deadEndpoints = [];
+    let sentCount = 0;
+
+    await Promise.allSettled(store.pushSubscriptions.map(async (sub) => {
+        try {
+            await webpush.sendNotification(sub, payload);
+            sentCount++;
+        } catch (err) {
+            if (err.statusCode === 404 || err.statusCode === 410 || (err.message && err.message.includes('expired'))) {
+                deadEndpoints.push(sub.endpoint);
+            } else {
+                console.warn('Web Push send error:', err.message || err);
+            }
+        }
+    }));
+
+    if (deadEndpoints.length > 0) {
+        store.pushSubscriptions = store.pushSubscriptions.filter(s => !deadEndpoints.includes(s.endpoint));
+        saveStore(store);
+    }
+
+    return { total: store.pushSubscriptions.length, sent: sentCount };
+}
+
+// Web Push API: получение публичного VAPID ключа
+app.get('/api/push/vapid-public-key', (req, res) => {
+    res.json({ publicKey: store.vapidKeys ? store.vapidKeys.publicKey : null });
+});
+
+// Web Push API: регистрация подписки устройства
+app.post('/api/push/subscribe', (req, res) => {
+    const { subscription } = req.body || {};
+    if (!subscription || !subscription.endpoint) {
+        return res.status(400).json({ success: false, error: 'Subscription object required' });
+    }
+    if (!Array.isArray(store.pushSubscriptions)) {
+        store.pushSubscriptions = [];
+    }
+    const idx = store.pushSubscriptions.findIndex(s => s.endpoint === subscription.endpoint);
+    if (idx >= 0) {
+        store.pushSubscriptions[idx] = subscription;
+    } else {
+        store.pushSubscriptions.push(subscription);
+    }
+    saveStore(store);
+    res.json({ success: true, subscribersCount: store.pushSubscriptions.length });
+});
+
+// Web Push API: отписка устройства
+app.post('/api/push/unsubscribe', (req, res) => {
+    const { endpoint } = req.body || {};
+    if (endpoint && Array.isArray(store.pushSubscriptions)) {
+        store.pushSubscriptions = store.pushSubscriptions.filter(s => s.endpoint !== endpoint);
+        saveStore(store);
+    }
+    res.json({ success: true, subscribersCount: store.pushSubscriptions ? store.pushSubscriptions.length : 0 });
+});
+
+// Web Push API: статус подписчиков
+app.get('/api/push/subscribers-count', (req, res) => {
+    res.json({ count: Array.isArray(store.pushSubscriptions) ? store.pushSubscriptions.length : 0 });
+});
+
 // Периодический heartbeat для SSE
 setInterval(() => {
     sseClients.forEach(client => {
@@ -332,6 +433,7 @@ app.post('/api/news', (req, res) => {
     }
     article.updatedAt = Date.now();
     const idx = store.news.findIndex(n => n.id === article.id);
+    const isNew = idx < 0;
     if (idx >= 0) {
         store.news[idx] = { ...store.news[idx], ...article };
     } else {
@@ -340,6 +442,17 @@ app.post('/api/news', (req, res) => {
     store.news = sortNewsDescending(store.news);
     saveStore(store);
     broadcastState('news_update');
+
+    // Если создана новая новость, отправляем push всем устройствам
+    if (isNew) {
+        sendPushNotificationToAll({
+            title: 'Новая новость HBU 📰',
+            body: article.title || 'Опубликована свежая статья о конкурсе HariVision',
+            url: '/#news',
+            tag: 'news-' + article.id
+        }).catch(err => console.warn('Push error on news:', err));
+    }
+
     res.json({ success: true, article, news: store.news });
 });
 
@@ -554,6 +667,7 @@ app.post('/api/participants/reset', (req, res) => {
 // --- VOTING STATE & CONTROLS ---
 app.post('/api/voting/state', (req, res) => {
     const { status, endsAt, sessionId, openedAt, updatedAt } = req.body || {};
+    const previousStatus = store.votingState ? store.votingState.status : 'closed';
     const isNewSession = sessionId && sessionId !== store.votingState.sessionId;
     
     store.votingState = {
@@ -571,15 +685,44 @@ app.post('/api/voting/state', (req, res) => {
 
     saveStore(store);
     broadcastState('voting_state_update');
+
+    // Фоновые push-уведомления на все устройства подписчиков
+    if (status === 'open' && previousStatus !== 'open') {
+        sendPushNotificationToAll({
+            title: 'Голосование открыто! 🗳️',
+            body: 'Начался прием зрительских голосов HariVision 2026. Поддержите своих фаворитов!',
+            url: '/#voting',
+            tag: 'voting-status-open'
+        }).catch(err => console.warn('Push error on voting open:', err));
+    } else if (status === 'closed' && previousStatus === 'open') {
+        sendPushNotificationToAll({
+            title: 'Голосование завершено 🏁',
+            body: 'Прием голосов остановлен. Ждем объявления официальных итогов!',
+            url: '/',
+            tag: 'voting-status-closed'
+        }).catch(err => console.warn('Push error on voting close:', err));
+    }
+
     res.json({ success: true, votingState: store.votingState });
 });
 
 app.post('/api/voting/threshold', (req, res) => {
     const { manualThreshold, revealMode } = req.body;
+    const previousReveal = Boolean(store.revealMode);
     if (manualThreshold !== undefined) store.manualThreshold = Number(manualThreshold) || 0;
     if (revealMode !== undefined) store.revealMode = Boolean(revealMode);
     saveStore(store);
     broadcastState('threshold_update');
+
+    if (store.revealMode && !previousReveal) {
+        sendPushNotificationToAll({
+            title: 'Итоги HariVision объявлены! 🏆',
+            body: 'Результаты голосования и победитель уже доступны на портале!',
+            url: '/',
+            tag: 'reveal-results'
+        }).catch(err => console.warn('Push error on reveal:', err));
+    }
+
     res.json({ success: true, manualThreshold: store.manualThreshold, revealMode: store.revealMode });
 });
 
@@ -591,8 +734,8 @@ app.post('/api/voting/recap-url', (req, res) => {
     res.json({ success: true, recapVideoUrl: store.recapVideoUrl });
 });
 
-// Рассылка системных уведомлений через SSE
-app.post('/api/admin/broadcast-notification', authenticateAdmin, (req, res) => {
+// Рассылка системных уведомлений через SSE и фоновые Web Push
+app.post('/api/admin/broadcast-notification', authenticateAdmin, async (req, res) => {
     const { title, message, url } = req.body;
     if (!title || !message) {
         return res.status(400).json({ success: false, error: 'Заголовок и текст обязательны' });
@@ -612,7 +755,26 @@ app.post('/api/admin/broadcast-notification', authenticateAdmin, (req, res) => {
             client.res.write(`data: ${payload}\n\n`);
         } catch (e) {}
     });
-    res.json({ success: true, sentToClients: sseClients.length });
+
+    // Отправка Web Push на мобильные устройства и десктоп в фоне
+    let pushResult = { total: 0, sent: 0 };
+    try {
+        pushResult = await sendPushNotificationToAll({
+            title,
+            body: message,
+            url: url || '/',
+            tag: 'admin_broadcast_' + Date.now()
+        });
+    } catch (err) {
+        console.warn('Broadcast push error:', err);
+    }
+
+    res.json({
+        success: true,
+        sentToClients: sseClients.length,
+        pushSubscribers: pushResult.total,
+        pushSent: pushResult.sent
+    });
 });
 
 // --- VOTES SUBMISSION & INSPECTION ---

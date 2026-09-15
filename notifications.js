@@ -20,6 +20,75 @@ export function isNotificationsEnabled() {
     return Notification.permission === 'granted' && pref !== 'false';
 }
 
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
+// Регистрация подписки Web Push на сервере для доставки в фоне и при закрытом сайте
+export async function syncPushSubscription() {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        return;
+    }
+    if (!isNotificationsEnabled()) {
+        return;
+    }
+    try {
+        const reg = await navigator.serviceWorker.ready;
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+            const keyRes = await fetch('/api/push/vapid-public-key');
+            if (!keyRes.ok) return;
+            const data = await keyRes.json();
+            if (!data || !data.publicKey) return;
+            const applicationServerKey = urlBase64ToUint8Array(data.publicKey);
+            sub = await reg.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey
+            });
+        }
+        if (sub) {
+            await fetch('/api/push/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subscription: sub })
+            });
+        }
+    } catch (e) {
+        console.warn('Web Push subscription error:', e);
+    }
+}
+
+// Отписка от Web Push
+export async function unsubscribePush() {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        return;
+    }
+    try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+            const endpoint = sub.endpoint;
+            await sub.unsubscribe();
+            await fetch('/api/push/unsubscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint })
+            });
+        }
+    } catch (e) {
+        console.warn('Web Push unsubscribe error:', e);
+    }
+}
+
 // Запрос разрешения на показ системных уведомлений
 export async function requestNotificationPermission() {
     if (!isNotificationSupported()) {
@@ -34,6 +103,7 @@ export async function requestNotificationPermission() {
         if (permission === 'granted') {
             localStorage.setItem(STORAGE_KEY, 'true');
             updateNotificationUI();
+            await syncPushSubscription();
             if (typeof window.showToast === 'function') {
                 window.showToast('Уведомления успешно включены! 🔔');
             }
@@ -48,6 +118,7 @@ export async function requestNotificationPermission() {
         } else if (permission === 'denied') {
             localStorage.setItem(STORAGE_KEY, 'false');
             updateNotificationUI();
+            await unsubscribePush();
             if (typeof window.showToast === 'function') {
                 window.showToast('Уведомления заблокированы в настройках браузера');
             }
@@ -79,12 +150,14 @@ export async function toggleNotifications() {
         if (currentlyEnabled) {
             localStorage.setItem(STORAGE_KEY, 'false');
             updateNotificationUI();
+            await unsubscribePush();
             if (typeof window.showToast === 'function') {
                 window.showToast('Уведомления приостановлены 🔕');
             }
         } else {
             localStorage.setItem(STORAGE_KEY, 'true');
             updateNotificationUI();
+            await syncPushSubscription();
             if (typeof window.showToast === 'function') {
                 window.showToast('Уведомления возобновлены 🔔');
             }

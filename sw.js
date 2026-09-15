@@ -68,18 +68,20 @@ self.addEventListener('notificationclick', (event) => {
     );
 });
 
-// Обработка фоновых push-сообщений (Web Push)
+// Обработка фоновых push-сообщений (Web Push даже при закрытом приложении)
 self.addEventListener('push', (event) => {
     let payload = {
         title: 'HariVision 2026',
         body: 'Новое уведомление от Haribo Broadcasting Union!',
         icon: '/icons/HBU_icon.png',
         badge: '/icons/HBU_icon.png',
+        tag: 'hbu_push_' + Date.now(),
         data: { url: '/' }
     };
     if (event.data) {
         try {
-            payload = { ...payload, ...event.data.json() };
+            const parsed = event.data.json();
+            payload = { ...payload, ...parsed };
         } catch (e) {
             payload.body = event.data.text();
         }
@@ -89,6 +91,8 @@ self.addEventListener('push', (event) => {
             body: payload.body,
             icon: payload.icon || '/icons/HBU_icon.png',
             badge: payload.badge || '/icons/HBU_icon.png',
+            tag: payload.tag || ('hbu_push_' + Date.now()),
+            renotify: true,
             vibrate: [200, 100, 200],
             data: payload.data || { url: '/' }
         })

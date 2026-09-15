@@ -9,6 +9,7 @@
     "lint": "node -e \"console.log('Lint ok')\""
   },
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "web-push": "^3.6.7"
   }
 }

@@ -1752,10 +1752,11 @@ window.handleAdminBroadcastSubmit = async function(event) {
 
         const data = await res.json();
         if (res.ok && data.success) {
-            showAdminNotification(`Уведомление разослано! Получателей на связи: ${data.sentToClients}`, 'success');
+            const pushInfo = data.pushSubscribers ? ` и на ${data.pushSent || 0} устр. (Push)` : '';
+            showAdminNotification(`Уведомление разослано! Онлайн: ${data.sentToClients}${pushInfo}`, 'success');
             if (resultMsg) {
                 resultMsg.className = 'text-xs font-bold text-green-400 block';
-                resultMsg.innerText = `✓ Уведомление успешно отправлено в реальном времени (${data.sentToClients} активных клиентов).`;
+                resultMsg.innerText = `✓ Уведомление успешно отправлено (${data.sentToClients} онлайн-вкладок, ${data.pushSent || 0} из ${data.pushSubscribers || 0} push-устройств).`;
                 setTimeout(() => { resultMsg.className = 'hidden'; }, 5000);
             }
             if (bodyEl) bodyEl.value = '';
