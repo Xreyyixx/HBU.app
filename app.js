@@ -31,8 +31,22 @@ let pendingAuthAction = null; // 'voting' or null
 
 // Состояние приложения
 const isNational = window.location.href.toLowerCase().includes('national');
-let currentPortalView = isNational ? 'voting' : 'home'; // 'home' | 'contests' | 'contest-detail' | 'news' | 'voting'
+
+function getInitialViewFromHash() {
+    if (isNational) return 'voting';
+    const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+    if (hash === 'voting' || hash === 'vote') return 'voting';
+    if (hash === 'news') return 'news';
+    if (hash === 'contests') return 'contests';
+    if (hash.startsWith('contest/')) return 'contest-detail';
+    return 'home';
+}
+
+let currentPortalView = getInitialViewFromHash(); // 'home' | 'contests' | 'contest-detail' | 'news' | 'voting'
 let selectedContestId = null;
+if (window.location.hash.startsWith('#contest/')) {
+    selectedContestId = window.location.hash.replace(/^#contest\//, '');
+}
 let currentNewsFilter = 'all';
 let activeModalNewsId = null;
 
@@ -502,12 +516,34 @@ window.toggleSideMenu = function(force) {
     }
 };
 
-window.navigateToView = function(viewName, param) {
+window.navigateToView = function(viewName, param, skipHashUpdate = false) {
     currentPortalView = viewName;
     if (viewName === 'contest-detail' && param) {
         selectedContestId = param;
     }
     
+    // Синхронизация с hash для чистых ссылок и закладок
+    if (!skipHashUpdate && !isNational && typeof window !== 'undefined') {
+        let newHash = '';
+        if (viewName === 'voting') newHash = '#voting';
+        else if (viewName === 'news') newHash = '#news';
+        else if (viewName === 'contests') newHash = '#contests';
+        else if (viewName === 'contest-detail' && selectedContestId) newHash = `#contest/${selectedContestId}`;
+        else if (viewName === 'home') newHash = '';
+
+        if (window.location.hash !== newHash) {
+            try {
+                if (newHash) {
+                    history.replaceState(null, '', newHash);
+                } else {
+                    history.replaceState(null, '', window.location.pathname + window.location.search);
+                }
+            } catch (e) {
+                window.location.hash = newHash;
+            }
+        }
+    }
+
     // Обновление кнопок шапки
     const navButtons = ['home', 'contests', 'news', 'voting'];
     navButtons.forEach(btn => {
@@ -1911,4 +1947,27 @@ if (typeof window !== 'undefined') {
             sendSystemNotification(e.detail.title, e.detail.body, e.detail.url, e.detail.tag);
         }
     });
+
+    // Обработка перехода по хэшу браузера (клик по ссылке из уведомления или закладка)
+    window.addEventListener('hashchange', () => {
+        if (isNational) return;
+        const view = getInitialViewFromHash();
+        let param = null;
+        if (window.location.hash.startsWith('#contest/')) {
+            param = window.location.hash.replace(/^#contest\//, '');
+        }
+        window.navigateToView(view, param, true);
+    });
+
+    // Прием сообщений от Service Worker (при клике на фоновое push-уведомление)
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'NOTIFICATION_CLICK') {
+                const targetHash = event.data.hash;
+                if (targetHash) {
+                    window.location.hash = targetHash;
+                }
+            }
+        });
+    }
 }

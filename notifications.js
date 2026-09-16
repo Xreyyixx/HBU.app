@@ -81,13 +81,13 @@ export async function syncPushSubscription() {
             reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
         }
 
-        // Если pushManager еще не доступен на reg, быстро проверяем ready
+        // Если pushManager еще не доступен на reg, проверяем ready с надежным таймаутом
         let pm = reg ? reg.pushManager : null;
-        if (!pm && navigator.serviceWorker.ready) {
+        if (!pm && 'ready' in navigator.serviceWorker) {
             try {
                 const readyReg = await Promise.race([
                     navigator.serviceWorker.ready,
-                    new Promise((_, r) => setTimeout(() => r(null), 1500))
+                    new Promise((_, r) => setTimeout(() => r(null), 4000))
                 ]);
                 if (readyReg && readyReg.pushManager) {
                     reg = readyReg;
@@ -105,30 +105,44 @@ export async function syncPushSubscription() {
         // 2. VAPID ключ: используем постоянный ключ без сетевых задержек (сохраняет контекст жеста пользователя на iOS)
         const targetKeyBytes = urlBase64ToUint8Array(PERMANENT_VAPID_PUBLIC_KEY);
 
-        // 3. Проверяем текущую подписку
+        // 3. Проверяем текущую подписку PushManager
         let sub = await pm.getSubscription();
 
         if (sub) {
             // Проверяем соответствие VAPID ключа
-            let keyMatches = false;
+            let keyMatches = true;
             if (sub.options && sub.options.applicationServerKey) {
-                const cur = new Uint8Array(sub.options.applicationServerKey);
-                if (cur.length === targetKeyBytes.length && cur.every((v, i) => v === targetKeyBytes[i])) {
+                try {
+                    const rawKey = sub.options.applicationServerKey;
+                    const cur = rawKey instanceof ArrayBuffer ? new Uint8Array(rawKey) : new Uint8Array(rawKey.buffer || rawKey);
+                    if (cur.length > 0 && cur.length === targetKeyBytes.length) {
+                        for (let i = 0; i < cur.length; i++) {
+                            if (cur[i] !== targetKeyBytes[i]) {
+                                keyMatches = false;
+                                break;
+                            }
+                        }
+                    }
+                } catch (cmpErr) {
+                    console.warn('[WebPush] Error comparing VAPID keys, keeping current subscription:', cmpErr);
                     keyMatches = true;
                 }
             }
+
             if (!keyMatches) {
-                console.log('[WebPush] Ключ подписки устарел, сбрасываем старую подписку...');
+                console.log('[WebPush] VAPID ключ подписки изменился, обновляем подписку...');
                 try {
                     await sub.unsubscribe();
                     sub = null;
                 } catch (e) {
                     console.warn('[WebPush] Ошибка отписки от старого ключа:', e);
                 }
+            } else {
+                console.log('[WebPush] Найдена существующая валидная подписка браузера');
             }
         }
 
-        // 4. Если подписки нет — подписываемся через PushManager
+        // 4. Если подписки нет — создаем новую через PushManager
         if (!sub) {
             console.log('[WebPush] Создание новой подписки pushManager.subscribe...');
             sub = await pm.subscribe({
@@ -211,18 +225,11 @@ export async function unsubscribePush() {
 
 // Запрос разрешения на показ системных уведомлений
 export async function requestNotificationPermission() {
-    const isInIframe = window.self !== window.top;
-    if (isInIframe) {
-        if (typeof window.showToast === 'function') {
-            window.showToast('⚠️ Браузер блокирует push-уведомления внутри фрейма! Откройте сайт в отдельной вкладке (иконка ↗).', 6000);
-        }
-    }
-
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
     if (isIOS && !isStandalone) {
         if (typeof window.showToast === 'function') {
-            window.showToast('📱 На iPhone для фоновых Push добавьте сайт на домашний экран: Поделиться → «На экран Домой»', 7000);
+            window.showToast('📱 На iPhone для фоновых Push добавьте сайт на экран «Домой»: Поделиться → «На экран Домой»', 7000);
         }
     }
 
@@ -233,8 +240,28 @@ export async function requestNotificationPermission() {
         return false;
     }
 
+    const isInIframe = window.self !== window.top;
+    if (isInIframe && Notification.permission !== 'granted') {
+        try {
+            const win = window.open(window.location.origin + '/?autoSubscribe=1', '_blank');
+            if (win) {
+                if (typeof window.showToast === 'function') {
+                    window.showToast('Открываем сайт в отдельной вкладке для подтверждения разрешения браузера...', 5000);
+                }
+                return false;
+            }
+        } catch (e) {}
+        if (typeof window.showToast === 'function') {
+            window.showToast('⚠️ Браузер блокирует запрос разрешений во фрейме. Откройте сайт в отдельной вкладке (кнопка ↗ вверху).', 7000);
+        }
+        return false;
+    }
+
     try {
-        const permission = await Notification.requestPermission();
+        let permission = Notification.permission;
+        if (permission === 'default') {
+            permission = await Notification.requestPermission();
+        }
         if (permission === 'granted') {
             localStorage.setItem(STORAGE_KEY, 'true');
             updateNotificationUI();
@@ -250,7 +277,7 @@ export async function requestNotificationPermission() {
             sendSystemNotification(
                 'HariVision 2026 🔔',
                 'Уведомления включены! Теперь вы будете первыми узнавать о старте голосования и новостях конкурса.',
-                'index.html',
+                '#voting',
                 'welcome-notif'
             );
             return true;
@@ -307,7 +334,7 @@ export async function toggleNotifications() {
             sendSystemNotification(
                 'HariVision 2026 🔔',
                 'Уведомления снова активны. Вы не пропустите старт голосования!',
-                'index.html',
+                '#voting',
                 'resumed-notif'
             );
         }
@@ -324,6 +351,12 @@ export async function sendSystemNotification(title, body, url = '/', tag = null)
         return;
     }
 
+    // Очищаем URL от index.html для чистой навигации
+    let cleanUrl = url || '/';
+    if (cleanUrl.startsWith('index.html')) {
+        cleanUrl = cleanUrl.replace(/^index\.html/, '') || '/';
+    }
+
     const options = {
         body,
         icon: '/icons/HBU_icon.png',
@@ -331,7 +364,7 @@ export async function sendSystemNotification(title, body, url = '/', tag = null)
         tag: tag || ('hbu_' + Date.now()),
         renotify: true,
         vibrate: [200, 100, 200],
-        data: { url }
+        data: { url: cleanUrl }
     };
 
     // 1. Пытаемся отправить через Service Worker (работает в фоновых вкладках)
@@ -356,9 +389,15 @@ export async function sendSystemNotification(title, body, url = '/', tag = null)
         });
         notif.onclick = () => {
             window.focus();
-            if (url && url !== '/' && url !== 'index.html') {
-                const targetHash = url.replace(/^index\.html/, '').replace(/^\//, '');
-                if (targetHash) window.location.hash = targetHash;
+            if (cleanUrl) {
+                if (cleanUrl.startsWith('#')) {
+                    window.location.hash = cleanUrl;
+                } else if (cleanUrl.includes('#')) {
+                    const hashPart = cleanUrl.split('#')[1];
+                    if (hashPart) window.location.hash = hashPart;
+                } else if (cleanUrl !== '/' && cleanUrl !== '') {
+                    window.location.href = cleanUrl;
+                }
             }
             notif.close();
         };
@@ -447,4 +486,13 @@ if (typeof window !== 'undefined') {
         console.table(report);
         return report;
     };
+
+    // Авто-активация уведомлений при переходе по ссылке из iframe
+    if (window.location.search.includes('autoSubscribe=1') && window.self === window.top) {
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                requestNotificationPermission();
+            }, 600);
+        });
+    }
 }

@@ -1671,6 +1671,16 @@ if (db) {
 // -------------------------------------------------------------
 // РАЗДЕЛ 4: NOTIFICATIONS & BROADCAST
 // -------------------------------------------------------------
+function showAdminNotification(message, type = 'info') {
+    const isError = type === 'error';
+    if (typeof showToast === 'function') {
+        showToast(message, isError);
+    } else {
+        console.log(`[Admin Notification] [${type}]`, message);
+    }
+}
+window.showAdminNotification = showAdminNotification;
+
 window.testAdminNotification = async function() {
     if (!('Notification' in window)) {
         showAdminNotification('Уведомления не поддерживаются вашим браузером', 'error');
@@ -1756,28 +1766,67 @@ window.testAdminPushNotification = async function() {
 };
 
 window.subscribeCurrentAdminDevice = async function() {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
+    if (typeof window === 'undefined') return;
+
+    if (!('Notification' in window)) {
         showAdminNotification('Уведомления не поддерживаются данным браузером', 'error');
         return;
     }
+
+    if (!('serviceWorker' in navigator)) {
+        showAdminNotification('Service Worker не поддерживается данным браузером', 'error');
+        return;
+    }
+
     try {
-        const perm = await Notification.requestPermission();
+        let perm = Notification.permission;
+        if (perm === 'default') {
+            if (window.self !== window.top) {
+                // Внутри iframe браузер блокирует модальное окно разрешения уведомлений
+                showAdminNotification('Открываем панель в отдельной вкладке для подтверждения разрешения браузера...', 'info');
+                try {
+                    const win = window.open(window.location.origin + '/admin.html?autoSubscribe=1', '_blank');
+                    if (win) return;
+                } catch (e) {}
+                showAdminNotification('⚠️ Откройте сайт в отдельной вкладке (кнопка ↗ вверху), где браузер разрешает Push-уведомления.', 'error');
+                return;
+            }
+            try {
+                perm = await Notification.requestPermission();
+            } catch (pErr) {
+                showAdminNotification('Ошибка вызова разрешения: ' + pErr.message, 'error');
+                return;
+            }
+        }
+
         if (perm !== 'granted') {
-            showAdminNotification('Разрешение не предоставлено: ' + perm, 'error');
+            showAdminNotification('Разрешение не предоставлено: ' + perm + '. Включите уведомления в настройках сайта в браузере.', 'error');
             return;
         }
+
         showAdminNotification('Регистрация устройства в Web Push...', 'info');
 
-        let reg = await navigator.serviceWorker.getRegistration('/');
-        if (!reg) reg = await navigator.serviceWorker.getRegistration();
-        if (!reg) reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-
-        let pm = reg ? reg.pushManager : null;
-        if (!pm && navigator.serviceWorker.ready) {
-            const readyReg = await navigator.serviceWorker.ready;
-            pm = readyReg.pushManager;
+        let reg = await navigator.serviceWorker.getRegistration();
+        if (!reg) {
+            reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
         }
-        if (!pm) throw new Error('PushManager недоступен в этом браузере');
+
+        let activeReg = reg;
+        if ('ready' in navigator.serviceWorker) {
+            try {
+                activeReg = await Promise.race([
+                    navigator.serviceWorker.ready,
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+                ]);
+            } catch (e) {
+                activeReg = reg;
+            }
+        }
+
+        const pm = (activeReg && activeReg.pushManager) || (reg && reg.pushManager);
+        if (!pm) {
+            throw new Error('PushManager недоступен в Service Worker');
+        }
 
         const VAPID_KEY = 'BPZuY8-gjysoqNyqec1Rqdz2iPd1gNRiwiP0kSOnAxWaSuVGsRvKafnY75wGl5vSsExJGAnC3RPkmzjhMo42wRw';
         const padding = '='.repeat((4 - VAPID_KEY.length % 4) % 4);
@@ -1787,6 +1836,35 @@ window.subscribeCurrentAdminDevice = async function() {
         for (let i = 0; i < rawData.length; ++i) targetKeyBytes[i] = rawData.charCodeAt(i);
 
         let sub = await pm.getSubscription();
+        if (sub) {
+            let keyMatches = true;
+            if (sub.options && sub.options.applicationServerKey) {
+                try {
+                    const rawKey = sub.options.applicationServerKey;
+                    const cur = rawKey instanceof ArrayBuffer ? new Uint8Array(rawKey) : new Uint8Array(rawKey.buffer || rawKey);
+                    if (cur.length > 0 && cur.length === targetKeyBytes.length) {
+                        for (let i = 0; i < cur.length; i++) {
+                            if (cur[i] !== targetKeyBytes[i]) {
+                                keyMatches = false;
+                                break;
+                            }
+                        }
+                    }
+                } catch (cmpErr) {
+                    keyMatches = true;
+                }
+            }
+            if (!keyMatches) {
+                console.log('[Admin] Сброс устаревшей подписки...');
+                try {
+                    await sub.unsubscribe();
+                    sub = null;
+                } catch (e) {
+                    console.warn('Unsubscribe error:', e);
+                }
+            }
+        }
+
         if (!sub) {
             sub = await pm.subscribe({ userVisibleOnly: true, applicationServerKey: targetKeyBytes });
         }
@@ -1812,12 +1890,17 @@ window.subscribeCurrentAdminDevice = async function() {
             }
         }
 
+        if (!p256dh || !auth) {
+            throw new Error('Ключи p256dh / auth не получены от браузера');
+        }
+
         const res = await fetch('/api/push/subscribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 subscription: {
                     endpoint: sub.endpoint,
+                    expirationTime: sub.expirationTime || null,
                     keys: { p256dh, auth }
                 }
             })
@@ -1825,7 +1908,9 @@ window.subscribeCurrentAdminDevice = async function() {
         const data = await res.json();
         if (res.ok && data.success) {
             showAdminNotification(`✅ Устройство успешно подписано! Всего подписчиков: ${data.subscribersCount}`, 'success');
-            window.refreshAdminPushSubscribers();
+            if (typeof window.refreshAdminPushSubscribers === 'function') {
+                window.refreshAdminPushSubscribers();
+            }
         } else {
             throw new Error(data.error || 'Ошибка сохранения на сервере');
         }
@@ -1833,6 +1918,17 @@ window.subscribeCurrentAdminDevice = async function() {
         showAdminNotification('Ошибка подписки: ' + e.message, 'error');
     }
 };
+
+// Авто-подписка при переходе по ссылке из iframe
+if (typeof window !== 'undefined' && window.location.search.includes('autoSubscribe=1') && window.self === window.top) {
+    window.addEventListener('load', () => {
+        setTimeout(() => {
+            if (typeof window.subscribeCurrentAdminDevice === 'function') {
+                window.subscribeCurrentAdminDevice();
+            }
+        }, 600);
+    });
+}
 
 // Загружаем число подписчиков при инициализации
 setTimeout(() => {

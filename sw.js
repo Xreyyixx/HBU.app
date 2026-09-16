@@ -54,21 +54,42 @@ self.addEventListener('fetch', (event) => {
 // Обработка клика по системному уведомлению
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-    let urlToOpen = event.notification.data?.url || 'index.html';
-    if (urlToOpen === '/') urlToOpen = 'index.html';
+
+    let rawUrl = event.notification.data?.url || '/';
+    // Очищаем от index.html: "index.html#voting" -> "/#voting", "index.html" -> "/"
+    let cleanPath = rawUrl;
+    if (cleanPath.startsWith('index.html')) {
+        cleanPath = cleanPath.replace(/^index\.html/, '');
+    }
+    if (!cleanPath.startsWith('/') && !cleanPath.startsWith('#') && !cleanPath.startsWith('http')) {
+        cleanPath = '/' + cleanPath;
+    }
+    if (cleanPath === '') cleanPath = '/';
+
+    const targetUrl = new URL(cleanPath, self.location.origin).href;
 
     event.waitUntil(
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+            // Если уже есть открытая вкладка нашего приложения
             for (const client of clientList) {
                 if ('focus' in client) {
-                    if (client.url && 'navigate' in client && urlToOpen !== 'index.html') {
-                        client.navigate(urlToOpen);
+                    client.focus();
+                    if ('navigate' in client) {
+                        client.navigate(targetUrl);
                     }
-                    return client.focus();
+                    if (client.postMessage) {
+                        client.postMessage({
+                            type: 'NOTIFICATION_CLICK',
+                            url: targetUrl,
+                            hash: cleanPath.startsWith('#') ? cleanPath : (targetUrl.includes('#') ? '#' + targetUrl.split('#')[1] : '')
+                        });
+                    }
+                    return;
                 }
             }
+            // Если вкладок нет — открываем новую чистую ссылку
             if (self.clients.openWindow) {
-                return self.clients.openWindow(urlToOpen);
+                return self.clients.openWindow(targetUrl);
             }
         })
     );
@@ -79,27 +100,36 @@ self.addEventListener('push', (event) => {
     let payload = {
         title: 'HariVision 2026',
         body: 'Новое уведомление от Haribo Broadcasting Union!',
-        icon: './icons/HBU_icon.png',
-        badge: './icons/HBU_icon.png',
+        icon: '/icons/HBU_icon.png',
+        badge: '/icons/HBU_icon.png',
         tag: 'hbu_push_' + Date.now(),
-        data: { url: 'index.html' }
+        data: { url: '/#voting' }
     };
     if (event.data) {
         try {
             const parsed = event.data.json();
             payload = { ...payload, ...parsed };
         } catch (e) {
-            payload.body = event.data.text();
+            try {
+                payload.body = event.data.text();
+            } catch (e2) {}
         }
     }
 
+    let iconUrl = '/icons/HBU_icon.png';
+    let badgeUrl = '/icons/HBU_icon.png';
+    try {
+        iconUrl = new URL(payload.icon || '/icons/HBU_icon.png', self.location.origin).href;
+        badgeUrl = new URL(payload.badge || '/icons/HBU_icon.png', self.location.origin).href;
+    } catch (e) {}
+
     const notifOptions = {
         body: payload.body || '',
-        icon: new URL(payload.icon || '/icons/HBU_icon.png', self.location.origin).href,
-        badge: new URL(payload.badge || '/icons/HBU_icon.png', self.location.origin).href,
+        icon: iconUrl,
+        badge: badgeUrl,
         tag: payload.tag || ('hbu_push_' + Date.now()),
         renotify: true,
-        data: payload.data || { url: '/' }
+        data: payload.data || { url: '/#voting' }
     };
 
     if (Array.isArray(payload.vibrate)) {
@@ -108,6 +138,13 @@ self.addEventListener('push', (event) => {
 
     event.waitUntil(
         self.registration.showNotification(payload.title || 'HariVision 2026', notifOptions)
+            .catch((err) => {
+                console.warn('[SW Push] Fallback minimal notification:', err);
+                return self.registration.showNotification(payload.title || 'HariVision 2026', {
+                    body: payload.body || '',
+                    data: payload.data || { url: '/#voting' }
+                });
+            })
     );
 });
 

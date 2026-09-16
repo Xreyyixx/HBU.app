@@ -39,6 +39,11 @@ service cloud.firestore {
     match /artistAccounts/{document=**} {
       allow read, write: if true;
     }
+
+    // Web Push Subscriptions for background alerts
+    match /pushSubscriptions/{document=**} {
+      allow read, write: if true;
+    }
   }
 }
 

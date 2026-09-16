@@ -34,7 +34,7 @@ if (typeof JSON !== 'undefined' && typeof JSON.stringify === 'function' && !JSON
 
 // Firebase Web SDK v10 (Modular)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, initializeFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 // Fetch Firebase config from server or window fallback (no hardcoded production credentials)
@@ -64,7 +64,13 @@ let auth = null;
 if (firebaseConfig.apiKey) {
     try {
         app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
+        try {
+            db = initializeFirestore(app, {
+                experimentalForceLongPolling: true
+            });
+        } catch (initErr) {
+            db = getFirestore(app);
+        }
         auth = getAuth(app);
     } catch (e) {
         console.warn('Firebase initialization note:', e);

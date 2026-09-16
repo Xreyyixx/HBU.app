@@ -264,12 +264,75 @@ async function syncWithFirestore() {
             }
         } catch (e) {}
 
+        // Sync push subscriptions from Firestore collection "pushSubscriptions"
+        try {
+            const res = await fetch(`${base}/pushSubscriptions?key=${apiKey}`);
+            if (res.ok) {
+                const data = await res.json();
+                const items = (data.documents || []).map(d => parseFirestoreFields(d.fields)).filter(s => s && s.endpoint && s.keys);
+                if (items.length > 0) {
+                    if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
+                    let anyAdded = false;
+                    items.forEach(fsSub => {
+                        const exists = store.pushSubscriptions.some(s => s.endpoint === fsSub.endpoint);
+                        if (!exists) {
+                            store.pushSubscriptions.push(fsSub);
+                            anyAdded = true;
+                        }
+                    });
+                    if (anyAdded) {
+                        saveStore(store);
+                        console.log(`[WebPush] Loaded ${items.length} subscribers from Firestore. Total: ${store.pushSubscriptions.length}`);
+                    }
+                }
+            }
+        } catch (e) {}
+
         if (updated) {
             saveStore(store);
             broadcastState('firestore_sync');
         }
     } catch (e) {
         console.warn('Firestore server sync error:', e);
+    }
+}
+
+async function savePushSubscriptionToFirestore(subscription) {
+    try {
+        let apiKey = process.env.FIREBASE_API_KEY;
+        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
+        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
+        if (fs.existsSync(appletConfigPath)) {
+            try {
+                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
+                if (cfg.apiKey) apiKey = cfg.apiKey;
+                if (cfg.projectId) projectId = cfg.projectId;
+            } catch (e) {}
+        }
+        if (!apiKey || !subscription || !subscription.endpoint) return;
+        const hash = Buffer.from(subscription.endpoint.slice(-60)).toString('hex');
+        const docId = 'sub_' + hash.slice(0, 40);
+        const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/pushSubscriptions/${docId}?key=${apiKey}`;
+        await fetch(url, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fields: {
+                    endpoint: { stringValue: subscription.endpoint },
+                    keys: {
+                        mapValue: {
+                            fields: {
+                                p256dh: { stringValue: subscription.keys.p256dh },
+                                auth: { stringValue: subscription.keys.auth }
+                            }
+                        }
+                    },
+                    updatedAt: { integerValue: String(Date.now()) }
+                }
+            })
+        });
+    } catch (e) {
+        console.warn('[Firestore] pushSub save note:', e.message);
     }
 }
 
@@ -318,11 +381,11 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null })
             sentCount++;
         } catch (err) {
             const status = err.statusCode;
-            if (status === 404 || status === 410 || status === 400 || status === 401 || (err.message && err.message.includes('expired'))) {
+            if (status === 404 || status === 410 || (err.message && (err.message.includes('expired') || err.message.includes('unsubscribed')))) {
                 deadEndpoints.push(sub.endpoint);
                 console.warn(`[WebPush] Pruning inactive subscriber (${status}):`, sub.endpoint);
             } else {
-                console.warn('[WebPush] Send notification error:', err.message || err);
+                console.warn('[WebPush] Send notification note:', err.message || err, 'status:', status);
             }
         }
     }));
@@ -366,6 +429,7 @@ app.post('/api/push/subscribe', (req, res) => {
         store.pushSubscriptions.push(subscription);
     }
     saveStore(store);
+    savePushSubscriptionToFirestore(subscription);
     console.log(`[WebPush] Device registered. Total subscribers: ${store.pushSubscriptions.length}`);
     res.json({ success: true, subscribersCount: store.pushSubscriptions.length });
 });
@@ -390,7 +454,7 @@ app.post('/api/admin/push-test', authenticateAdmin, async (req, res) => {
     const result = await sendPushNotificationToAll({
         title: '🧪 Тестовый Push HariVision 2026',
         body: 'Проверка фонового канала Web Push! Если вы видите это при закрытом сайте — всё работает идеально!',
-        url: 'index.html',
+        url: '/#voting',
         tag: 'test_push_' + Date.now()
     });
     res.json({ success: true, ...result });
@@ -477,7 +541,7 @@ app.post('/api/news', (req, res) => {
         sendPushNotificationToAll({
             title: 'Новая новость HBU 📰',
             body: article.title || 'Опубликована свежая статья о конкурсе HariVision',
-            url: 'index.html#news',
+            url: '/#news',
             tag: 'news-' + article.id
         }).catch(err => console.warn('Push error on news:', err));
     }
@@ -720,14 +784,14 @@ app.post('/api/voting/state', (req, res) => {
         sendPushNotificationToAll({
             title: 'Голосование открыто! 🗳️',
             body: 'Начался прием зрительских голосов HariVision 2026. Поддержите своих фаворитов!',
-            url: 'index.html#voting',
+            url: '/#voting',
             tag: 'voting-status-open'
         }).catch(err => console.warn('Push error on voting open:', err));
     } else if (status === 'closed' && previousStatus === 'open') {
         sendPushNotificationToAll({
             title: 'Голосование завершено 🏁',
             body: 'Прием голосов остановлен. Ждем объявления официальных итогов!',
-            url: 'index.html',
+            url: '/#voting',
             tag: 'voting-status-closed'
         }).catch(err => console.warn('Push error on voting close:', err));
     }
@@ -747,7 +811,7 @@ app.post('/api/voting/threshold', (req, res) => {
         sendPushNotificationToAll({
             title: 'Итоги HariVision объявлены! 🏆',
             body: 'Результаты голосования и победитель уже доступны на портале!',
-            url: 'index.html',
+            url: '/#voting',
             tag: 'reveal-results'
         }).catch(err => console.warn('Push error on reveal:', err));
     }
@@ -769,7 +833,13 @@ app.post('/api/admin/broadcast-notification', authenticateAdmin, async (req, res
     if (!title || !message) {
         return res.status(400).json({ success: false, error: 'Заголовок и текст обязательны' });
     }
-    const resolvedUrl = (url && url !== '/') ? url : 'index.html';
+    let resolvedUrl = (url && url.trim()) ? url.trim() : '/';
+    if (resolvedUrl.startsWith('index.html')) {
+        resolvedUrl = resolvedUrl.replace(/^index\.html/, '') || '/';
+    }
+    if (!resolvedUrl.startsWith('/') && !resolvedUrl.startsWith('#') && !resolvedUrl.startsWith('http')) {
+        resolvedUrl = '/' + resolvedUrl;
+    }
     const payload = JSON.stringify({
         type: 'custom_notification',
         notification: {
