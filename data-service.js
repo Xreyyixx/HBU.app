@@ -666,6 +666,40 @@ function initFirestoreListeners() {
             });
         }, (err) => console.warn('Firestore users listener error:', err));
     } catch (e) {}
+
+    // I. Real-Time Broadcast Notifications Listener (cross-device instant delivery)
+    try {
+        const seenBroadcastKeys = new Set();
+        onSnapshot(doc(db, "artistAccounts", "broadcast_queue"), (docSnap) => {
+            if (docSnap.exists()) {
+                const item = docSnap.data();
+                if (item && item.title) {
+                    const tag = item.tag || ('bcast_' + item.createdAt);
+                    const age = Date.now() - (Number(item.createdAt) || 0);
+                    // Deliver if generated within 10 minutes and not seen yet in this window session
+                    if (age < 10 * 60 * 1000 && !seenBroadcastKeys.has(tag)) {
+                        seenBroadcastKeys.add(tag);
+                        try {
+                            const stored = sessionStorage.getItem('hv_seen_bcast_' + tag);
+                            if (stored) return;
+                            sessionStorage.setItem('hv_seen_bcast_' + tag, '1');
+                        } catch (e) {}
+
+                        if (typeof window !== 'undefined') {
+                            window.dispatchEvent(new CustomEvent('harivision:notification', {
+                                detail: {
+                                    title: item.title,
+                                    body: item.body || item.message || '',
+                                    url: item.url || '/',
+                                    tag: tag
+                                }
+                            }));
+                        }
+                    }
+                }
+            }
+        }, (err) => console.warn('Firestore broadcast listener error:', err));
+    } catch (e) {}
 }
 
 async function fetchState(isInitial = false) {
@@ -976,7 +1010,7 @@ export async function saveNewsArticle(article, notifySubscribers = false) {
     // Оповещение подписчиков через облачную очередь Firestore (только если чекбокс включен)
     if (notifySubscribers) {
         try {
-            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/system/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
+            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/artistAccounts/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
             fetch(fsUrl, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
@@ -1065,7 +1099,7 @@ export async function saveContest(contest, notifySubscribers = false) {
     // Оповещение подписчиков через облачную очередь Firestore (только если чекбокс включен)
     if (notifySubscribers) {
         try {
-            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/system/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
+            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/artistAccounts/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
             fetch(fsUrl, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },

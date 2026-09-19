@@ -347,16 +347,16 @@ async function syncWithFirestore(isSubSyncOnly = false) {
             }
         } catch (e) {}
 
-        // 4. Check broadcast queue in Firestore "system/broadcast_queue"
+        // 4. Check broadcast queue in Firestore "artistAccounts/broadcast_queue"
         try {
-            const res = await fetch(`${base}/system/broadcast_queue?key=${apiKey}`);
+            const res = await fetch(`${base}/artistAccounts/broadcast_queue?key=${apiKey}`);
             if (res.ok) {
                 const doc = await res.json();
                 const item = parseFirestoreFields(doc.fields);
                 if (item && item.title && !item.processed && (Date.now() - (item.createdAt || 0) < 600000)) {
                     console.log('[Firestore Sync] Found pending broadcast in queue:', item.title);
-                    // Mark as processed
-                    await fetch(`${base}/system/broadcast_queue?key=${apiKey}`, {
+                    // Mark as processed in artistAccounts/broadcast_queue
+                    await fetch(`${base}/artistAccounts/broadcast_queue?key=${apiKey}`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -488,9 +488,9 @@ async function removePushSubscriptionFromFirestore(endpoint) {
     } catch (e) {}
 }
 
-// Initial sync on startup and recurring sync every 5 seconds
+// Initial sync on startup and recurring sync every 3 seconds
 syncWithFirestore();
-setInterval(syncWithFirestore, 5000);
+setInterval(syncWithFirestore, 3000);
 
 // SSE Подписчики
 let sseClients = [];

@@ -1802,7 +1802,8 @@ window.testAdminPushNotification = async function() {
         } catch (e) {}
 
         if (!pushed) {
-            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/system/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
+            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/artistAccounts/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
+            const testTag = 'test-push-' + Date.now();
             await fetch(fsUrl, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
@@ -1811,6 +1812,7 @@ window.testAdminPushNotification = async function() {
                         title: { stringValue: '🧪 Тестовый Push HariVision 2026' },
                         body: { stringValue: 'Проверка фонового канала Web Push! Доставка при закрытом сайте работает!' },
                         url: { stringValue: '/#voting' },
+                        tag: { stringValue: testTag },
                         createdAt: { integerValue: String(Date.now()) },
                         processed: { booleanValue: false }
                     }
@@ -1952,19 +1954,21 @@ window.handleAdminBroadcastSubmit = async function(event) {
 
         // Резервное сохранение в облачную очередь Firestore (для надежной доставки, в т.ч. на GitHub Pages)
         try {
-            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/system/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
+            const bcastTag = 'bcast_' + Date.now();
+            const payloadFields = {
+                title: { stringValue: title },
+                body: { stringValue: message },
+                url: { stringValue: url },
+                tag: { stringValue: bcastTag },
+                createdAt: { integerValue: String(Date.now()) },
+                processed: { booleanValue: sentDirectly }
+            };
+
+            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/artistAccounts/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
             await fetch(fsUrl, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    fields: {
-                        title: { stringValue: title },
-                        body: { stringValue: message },
-                        url: { stringValue: url },
-                        createdAt: { integerValue: String(Date.now()) },
-                        processed: { booleanValue: sentDirectly }
-                    }
-                })
+                body: JSON.stringify({ fields: payloadFields })
             });
         } catch (fsErr) {
             console.warn('Firestore broadcast queue note:', fsErr);

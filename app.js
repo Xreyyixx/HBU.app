@@ -1940,11 +1940,67 @@ if (typeof Notification !== 'undefined' && Notification.permission === 'granted'
         }
     });
 }
+export function showToast(title, body = '', url = '') {
+    if (typeof document === 'undefined') return;
+    let container = document.getElementById('global-toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'global-toast-container';
+        container.className = 'fixed bottom-5 right-5 z-[9999] flex flex-col gap-2.5 max-w-sm w-full pointer-events-none px-4';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'bg-[#16070b]/95 border border-amber-500/40 text-white p-3.5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-start gap-3 transition-all duration-300 transform translate-y-3 opacity-0 pointer-events-auto cursor-pointer hover:border-amber-400';
+    toast.innerHTML = `
+        <span class="text-amber-400 text-lg flex-shrink-0 mt-0.5 animate-bounce">🔔</span>
+        <div class="flex-1 min-w-0">
+            <div class="text-xs font-bold text-amber-300 leading-tight">${title}</div>
+            ${body ? `<div class="text-[11px] text-slate-300 mt-1 leading-snug break-words">${body}</div>` : ''}
+            ${url ? `<div class="text-[10px] text-amber-400/80 underline mt-1 font-semibold">Нажмите для перехода &rarr;</div>` : ''}
+        </div>
+        <button class="text-slate-400 hover:text-white text-xs p-1 -mr-1 -mt-1 flex-shrink-0" title="Закрыть">✕</button>
+    `;
+    const closeBtn = toast.querySelector('button');
+    closeBtn.onclick = (e) => {
+        e.stopPropagation();
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(3px)';
+        setTimeout(() => toast.remove(), 300);
+    };
+    if (url) {
+        toast.onclick = () => {
+            if (url.startsWith('#')) {
+                window.location.hash = url;
+            } else if (url.includes('#')) {
+                window.location.hash = '#' + url.split('#')[1];
+            } else {
+                window.location.href = url;
+            }
+            toast.remove();
+        };
+    }
+    container.appendChild(toast);
+    requestAnimationFrame(() => {
+        toast.style.transform = 'translateY(0)';
+        toast.style.opacity = '1';
+    });
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.style.transform = 'translateY(3px)';
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 300);
+        }
+    }, 6000);
+}
+
 if (typeof window !== 'undefined') {
+    window.showToast = showToast;
     window.handleNotificationToggle = toggleNotifications;
     window.addEventListener('harivision:notification', (e) => {
         if (e.detail) {
-            sendSystemNotification(e.detail.title, e.detail.body, e.detail.url, e.detail.tag);
+            const { title, body, url, tag } = e.detail;
+            sendSystemNotification(title, body, url, tag);
+            showToast(title, body, url);
         }
     });
 
