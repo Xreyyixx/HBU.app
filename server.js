@@ -728,13 +728,14 @@ app.post('/api/news', (req, res) => {
     saveStore(store);
     broadcastState('news_update');
 
-    // Если создана новая новость, отправляем push всем устройствам
-    if (isNew) {
+    // Если включен чекбокс оповещения или создана новая новость, отправляем push всем устройствам
+    const shouldNotifyNews = Boolean(article.notifySubscribers) || isNew;
+    if (shouldNotifyNews) {
         sendPushNotificationToAll({
-            title: 'Новая новость HBU 📰',
-            body: article.title || 'Опубликована свежая статья о конкурсе HariVision',
+            title: (isNew ? 'Новая новость HBU 📰: ' : 'Обновление новости 📰: ') + (article.title || ''),
+            body: article.summary || article.title || 'Опубликована свежая статья о конкурсе HariVision',
             url: '/#news',
-            tag: 'news-' + article.id
+            tag: 'news-' + article.id + (isNew ? '' : '-' + Date.now())
         }).catch(err => console.warn('[WebPush] Push error on news:', err));
     }
 
@@ -898,12 +899,14 @@ app.post('/api/contests', (req, res) => {
     saveStore(store);
     broadcastState('contests_update');
 
-    if (isNew) {
+    // Если включен чекбокс оповещения или создан новый сезон, отправляем push всем устройствам
+    const shouldNotifyContest = Boolean(contest.notifySubscribers) || isNew;
+    if (shouldNotifyContest) {
         sendPushNotificationToAll({
-            title: 'Новый сезон HariVision! 🏆',
-            body: contest.title ? `Опубликован ${contest.title}` : 'Опубликован новый сезон / конкурс!',
+            title: (isNew ? 'Новый сезон HariVision! 🏆: ' : 'Обновление сезона: ') + (contest.title || ''),
+            body: contest.slogan || (contest.hostCity ? `Город: ${contest.hostCity}` : (contest.title ? `Опубликован ${contest.title}` : 'Опубликован сезон / конкурс!')),
             url: `/#contest/${contest.id}`,
-            tag: 'contest-' + contest.id
+            tag: 'contest-' + contest.id + (isNew ? '' : '-' + Date.now())
         }).catch(err => console.warn('[WebPush] Push error on contest:', err));
     }
 

@@ -952,7 +952,7 @@ export function sortNewsDescending(list = []) {
 // -------------------------------------------------------------
 // CRUD: NEWS
 // -------------------------------------------------------------
-export async function saveNewsArticle(article) {
+export async function saveNewsArticle(article, notifySubscribers = false) {
     if (!article.id) article.id = 'news-' + Date.now();
     if (!article.createdAt) article.createdAt = Date.now();
     article.updatedAt = Date.now();
@@ -973,8 +973,8 @@ export async function saveNewsArticle(article) {
         console.warn('Firestore save news error:', e);
     }
 
-    // Also queue push broadcast in Firestore for instant background delivery to all devices
-    if (isNew) {
+    // Оповещение подписчиков через облачную очередь Firestore (только если чекбокс включен)
+    if (notifySubscribers) {
         try {
             const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/system/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
             fetch(fsUrl, {
@@ -982,10 +982,10 @@ export async function saveNewsArticle(article) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     fields: {
-                        title: { stringValue: 'Новая новость HBU 📰' },
-                        body: { stringValue: article.title || 'Опубликована свежая статья о конкурсе HariVision' },
+                        title: { stringValue: (isNew ? 'Новая новость HBU 📰: ' : 'Обновление новости: ') + (article.title || '') },
+                        body: { stringValue: article.summary || article.title || 'В статью были внесены изменения. Читайте на портале!' },
                         url: { stringValue: '/#news' },
-                        tag: { stringValue: 'news-' + article.id },
+                        tag: { stringValue: 'news-notify-' + article.id + '-' + Date.now() },
                         createdAt: { integerValue: String(Date.now()) },
                         processed: { booleanValue: false }
                     }
@@ -999,7 +999,7 @@ export async function saveNewsArticle(article) {
         const res = await fetch('/api/news', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: safeJsonStringify(article)
+            body: safeJsonStringify({ ...article, notifySubscribers: Boolean(notifySubscribers) })
         });
         if (res.ok) {
             const data = await res.json();
@@ -1042,7 +1042,7 @@ export async function deleteNewsArticle(articleId) {
 // -------------------------------------------------------------
 // CRUD: CONTESTS
 // -------------------------------------------------------------
-export async function saveContest(contest) {
+export async function saveContest(contest, notifySubscribers = false) {
     if (!contest.id) contest.id = 'contest-' + Date.now();
     const idx = (currentState.contests || []).findIndex(c => c.id === contest.id);
     const isNew = idx < 0;
@@ -1062,8 +1062,8 @@ export async function saveContest(contest) {
         console.warn('Firestore save contest error:', e);
     }
 
-    // Also queue push broadcast in Firestore for instant background delivery to all devices
-    if (isNew) {
+    // Оповещение подписчиков через облачную очередь Firestore (только если чекбокс включен)
+    if (notifySubscribers) {
         try {
             const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/system/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
             fetch(fsUrl, {
@@ -1071,10 +1071,10 @@ export async function saveContest(contest) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     fields: {
-                        title: { stringValue: 'Новый сезон HariVision! 🏆' },
-                        body: { stringValue: contest.title ? `Опубликован ${contest.title}` : 'Опубликован новый сезон / конкурс!' },
+                        title: { stringValue: (isNew ? 'Новый сезон HariVision! 🏆: ' : 'Обновление сезона: ') + (contest.title || '') },
+                        body: { stringValue: contest.slogan || (contest.hostCity ? `Город: ${contest.hostCity}` : 'Обновлена информация о конкурсе HariVision!') },
                         url: { stringValue: `/#contest/${contest.id}` },
-                        tag: { stringValue: 'contest-' + contest.id },
+                        tag: { stringValue: 'contest-notify-' + contest.id + '-' + Date.now() },
                         createdAt: { integerValue: String(Date.now()) },
                         processed: { booleanValue: false }
                     }
@@ -1088,7 +1088,7 @@ export async function saveContest(contest) {
         const res = await fetch('/api/contests', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: safeJsonStringify(contest)
+            body: safeJsonStringify({ ...contest, notifySubscribers: Boolean(notifySubscribers) })
         });
         if (res.ok) {
             const data = await res.json();

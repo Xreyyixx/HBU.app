@@ -601,6 +601,17 @@
                     <textarea id="news-input-content" rows="6" required class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 leading-relaxed"></textarea>
                 </div>
 
+                <!-- Оповестить подписчиков об изменениях новости -->
+                <div class="p-3.5 bg-[#16070b] border border-amber-500/25 rounded-2xl flex flex-col gap-1.5 shadow-inner">
+                    <label class="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input type="checkbox" id="news-notify-subscribers" class="w-4 h-4 rounded border-amber-500/40 text-amber-500 focus:ring-amber-400 bg-[#0a0305] accent-amber-500 cursor-pointer" />
+                        <span class="text-xs font-bold text-amber-300">Оповестить подписчиков об изменениях?</span>
+                    </label>
+                    <p class="text-[11px] text-slate-400 ml-6.5 leading-relaxed">
+                        При включении всем подписчикам будет отправлено мгновенное фоновое Web Push уведомление об обновлении или публикации этой новости.
+                    </p>
+                </div>
+
                 <div class="flex justify-end gap-3 pt-3 border-t border-amber-500/20">
                     <button type="button" onclick="closeNewsEditorModal()" class="px-5 py-2.5 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl">Отмена</button>
                     <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg">Сохранить новость</button>
@@ -726,6 +737,17 @@
                     <div id="contest-participants-editor-list" class="flex flex-col gap-3 max-h-72 overflow-y-auto pr-1">
                         <!-- Динамический список участников сезона -->
                     </div>
+                </div>
+
+                <!-- Оповестить подписчиков об изменениях сезона -->
+                <div class="p-3.5 bg-[#16070b] border border-amber-500/25 rounded-2xl flex flex-col gap-1.5 shadow-inner">
+                    <label class="flex items-center gap-2.5 cursor-pointer select-none">
+                        <input type="checkbox" id="contest-notify-subscribers" class="w-4 h-4 rounded border-amber-500/40 text-amber-500 focus:ring-amber-400 bg-[#0a0305] accent-amber-500 cursor-pointer" />
+                        <span class="text-xs font-bold text-amber-300">Оповестить подписчиков об изменениях?</span>
+                    </label>
+                    <p class="text-[11px] text-slate-400 ml-6.5 leading-relaxed">
+                        При включении всем подписчикам будет отправлено мгновенное фоновое Web Push уведомление об изменениях или создании этого сезона HariVision.
+                    </p>
                 </div>
 
                 <div class="flex justify-end gap-3 pt-3 border-t border-amber-500/20">
