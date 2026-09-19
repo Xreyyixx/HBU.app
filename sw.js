@@ -56,38 +56,51 @@ self.addEventListener('notificationclick', (event) => {
     event.notification.close();
 
     let rawUrl = event.notification.data?.url || '/';
-    // Очищаем от index.html: "index.html#voting" -> "/#voting", "index.html" -> "/"
-    let cleanPath = rawUrl;
+    // Очищаем от устаревших путей index.html: "index.html#voting" -> "/#voting", "index.html" -> "/"
+    let cleanPath = String(rawUrl || '/');
     if (cleanPath.startsWith('index.html')) {
-        cleanPath = cleanPath.replace(/^index\.html/, '');
+        cleanPath = cleanPath.replace(/^index\.html/, '') || '/';
     }
-    if (!cleanPath.startsWith('/') && !cleanPath.startsWith('#') && !cleanPath.startsWith('http')) {
+    if (!cleanPath.startsWith('/') && !cleanPath.startsWith('#') && !cleanPath.startsWith('http://') && !cleanPath.startsWith('https://')) {
         cleanPath = '/' + cleanPath;
     }
     if (cleanPath === '') cleanPath = '/';
 
-    const targetUrl = new URL(cleanPath, self.location.origin).href;
+    // Формируем абсолютный URL с текущего origin
+    let targetUrl;
+    try {
+        targetUrl = new URL(cleanPath, self.location.origin).href;
+    } catch (e) {
+        targetUrl = self.location.origin + '/';
+    }
+
+    const hashPart = cleanPath.startsWith('#') ? cleanPath : (targetUrl.includes('#') ? '#' + targetUrl.split('#')[1] : '');
 
     event.waitUntil(
-        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-            // Если уже есть открытая вкладка нашего приложения
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientList) => {
+            // Если уже есть открытая вкладка/окно PWA
             for (const client of clientList) {
                 if ('focus' in client) {
-                    client.focus();
-                    if ('navigate' in client) {
-                        client.navigate(targetUrl);
+                    try {
+                        await client.focus();
+                    } catch (e) {}
+
+                    if ('navigate' in client && client.url !== targetUrl) {
+                        try {
+                            await client.navigate(targetUrl);
+                        } catch (e) {}
                     }
                     if (client.postMessage) {
                         client.postMessage({
                             type: 'NOTIFICATION_CLICK',
                             url: targetUrl,
-                            hash: cleanPath.startsWith('#') ? cleanPath : (targetUrl.includes('#') ? '#' + targetUrl.split('#')[1] : '')
+                            hash: hashPart
                         });
                     }
                     return;
                 }
             }
-            // Если вкладок нет — открываем новую чистую ссылку
+            // Если открытых окон нет — открываем целевой чистый URL
             if (self.clients.openWindow) {
                 return self.clients.openWindow(targetUrl);
             }

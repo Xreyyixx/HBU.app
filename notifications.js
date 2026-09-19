@@ -388,18 +388,18 @@ export async function sendSystemNotification(title, body, url = '/', tag = null)
             tag: options.tag
         });
         notif.onclick = () => {
-            window.focus();
+            try { window.focus(); } catch (e) {}
             if (cleanUrl) {
                 if (cleanUrl.startsWith('#')) {
                     window.location.hash = cleanUrl;
                 } else if (cleanUrl.includes('#')) {
                     const hashPart = cleanUrl.split('#')[1];
-                    if (hashPart) window.location.hash = hashPart;
-                } else if (cleanUrl !== '/' && cleanUrl !== '') {
-                    window.location.href = cleanUrl;
+                    if (hashPart) window.location.hash = '#' + hashPart;
+                } else if (cleanUrl.startsWith('/') && cleanUrl !== '/') {
+                    window.location.pathname = cleanUrl;
                 }
             }
-            notif.close();
+            try { notif.close(); } catch (e) {}
         };
     } catch (e) {
         console.warn('Notification constructor error:', e);
