@@ -264,25 +264,32 @@ async function syncWithFirestore() {
             }
         } catch (e) {}
 
-        // Sync push subscriptions from Firestore collection "pushSubscriptions"
+        // Sync push subscriptions from Firestore collection "artistAccounts" (with type === 'push_sub')
+        // Using artistAccounts because it is granted read/write in firestore.rules
         try {
-            const res = await fetch(`${base}/pushSubscriptions?key=${apiKey}`);
+            const res = await fetch(`${base}/artistAccounts?key=${apiKey}`);
             if (res.ok) {
                 const data = await res.json();
-                const items = (data.documents || []).map(d => parseFirestoreFields(d.fields)).filter(s => s && s.endpoint && s.keys);
+                const items = (data.documents || [])
+                    .map(d => parseFirestoreFields(d.fields))
+                    .filter(s => s && s.type === 'push_sub' && s.endpoint && s.keys);
                 if (items.length > 0) {
                     if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
                     let anyAdded = false;
                     items.forEach(fsSub => {
                         const exists = store.pushSubscriptions.some(s => s.endpoint === fsSub.endpoint);
                         if (!exists) {
-                            store.pushSubscriptions.push(fsSub);
+                            store.pushSubscriptions.push({
+                                endpoint: fsSub.endpoint,
+                                keys: fsSub.keys,
+                                expirationTime: fsSub.expirationTime || null
+                            });
                             anyAdded = true;
                         }
                     });
                     if (anyAdded) {
                         saveStore(store);
-                        console.log(`[WebPush] Loaded ${items.length} subscribers from Firestore. Total: ${store.pushSubscriptions.length}`);
+                        console.log(`[WebPush] Loaded ${items.length} subscribers from Firestore artistAccounts. Total: ${store.pushSubscriptions.length}`);
                     }
                 }
             }
@@ -311,13 +318,14 @@ async function savePushSubscriptionToFirestore(subscription) {
         }
         if (!apiKey || !subscription || !subscription.endpoint) return;
         const hash = Buffer.from(subscription.endpoint.slice(-60)).toString('hex');
-        const docId = 'sub_' + hash.slice(0, 40);
-        const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/pushSubscriptions/${docId}?key=${apiKey}`;
-        await fetch(url, {
+        const docId = 'push_sub_' + hash.slice(0, 32);
+        const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/${docId}?key=${apiKey}`;
+        const res = await fetch(url, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 fields: {
+                    type: { stringValue: 'push_sub' },
                     endpoint: { stringValue: subscription.endpoint },
                     keys: {
                         mapValue: {
@@ -331,9 +339,34 @@ async function savePushSubscriptionToFirestore(subscription) {
                 }
             })
         });
+        if (res.ok) {
+            console.log('[Firestore] pushSub successfully persisted to artistAccounts doc:', docId);
+        } else {
+            console.warn('[Firestore] pushSub save status:', res.status);
+        }
     } catch (e) {
         console.warn('[Firestore] pushSub save note:', e.message);
     }
+}
+
+async function removePushSubscriptionFromFirestore(endpoint) {
+    try {
+        let apiKey = process.env.FIREBASE_API_KEY;
+        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
+        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
+        if (fs.existsSync(appletConfigPath)) {
+            try {
+                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
+                if (cfg.apiKey) apiKey = cfg.apiKey;
+                if (cfg.projectId) projectId = cfg.projectId;
+            } catch (e) {}
+        }
+        if (!apiKey || !endpoint) return;
+        const hash = Buffer.from(endpoint.slice(-60)).toString('hex');
+        const docId = 'push_sub_' + hash.slice(0, 32);
+        const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/${docId}?key=${apiKey}`;
+        await fetch(url, { method: 'DELETE' });
+    } catch (e) {}
 }
 
 // Initial sync on startup and recurring sync
@@ -440,6 +473,7 @@ app.post('/api/push/unsubscribe', (req, res) => {
     if (endpoint && Array.isArray(store.pushSubscriptions)) {
         store.pushSubscriptions = store.pushSubscriptions.filter(s => s.endpoint !== endpoint);
         saveStore(store);
+        removePushSubscriptionFromFirestore(endpoint);
     }
     res.json({ success: true, subscribersCount: store.pushSubscriptions ? store.pushSubscriptions.length : 0 });
 });
