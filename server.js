@@ -195,9 +195,16 @@ try {
 }
 
 let isInitialSyncDone = false;
+let isSyncInProgress = false;
+let knownContestIds = new Set((store.contests || []).map(c => c.id));
+let knownNewsIds = new Set((store.news || []).map(n => n.id));
+const sentPushTags = new Map(); // tag -> timestamp
 
 // Function to sync Firestore collection data into server store
-async function syncWithFirestore() {
+async function syncWithFirestore(isSubSyncOnly = false) {
+    if (isSyncInProgress && !isSubSyncOnly) return;
+    if (!isSubSyncOnly) isSyncInProgress = true;
+
     try {
         let apiKey = process.env.FIREBASE_API_KEY;
         let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
@@ -246,6 +253,22 @@ async function syncWithFirestore() {
                     id: d.name.split('/').pop(),
                     ...parseFirestoreFields(d.fields)
                 }));
+
+                if (isInitialSyncDone && !isSubSyncOnly) {
+                    const newContests = items.filter(c => !knownContestIds.has(c.id));
+                    for (const c of newContests) {
+                        knownContestIds.add(c.id);
+                        console.log('[WebPush] Remote new season/contest detected:', c.title || c.id);
+                        sendPushNotificationToAll({
+                            title: 'Новый сезон HariVision! 🏆',
+                            body: c.title ? `Опубликован ${c.title}` : 'Опубликован новый сезон / конкурс!',
+                            url: `/#contest/${c.id}`,
+                            tag: 'contest-' + c.id
+                        }, true).catch(err => console.warn('[WebPush] Contest push error:', err));
+                    }
+                }
+
+                items.forEach(c => knownContestIds.add(c.id));
                 store.contests = items;
                 updated = true;
             }
@@ -269,7 +292,7 @@ async function syncWithFirestore() {
                                 body: 'Начался прием голосов зрителей HariVision 2026. Поддержите своих фаворитов!',
                                 url: '/#voting',
                                 tag: 'voting-status-open'
-                            }).catch(() => {});
+                            }, true).catch(() => {});
                         } else if (newStatus === 'closed') {
                             console.log('[WebPush] Remote voting close detected. Sending push...');
                             sendPushNotificationToAll({
@@ -277,7 +300,7 @@ async function syncWithFirestore() {
                                 body: 'Прием голосов окончен. Скоро будут подведены официальные итоги!',
                                 url: '/#voting',
                                 tag: 'voting-status-closed'
-                            }).catch(() => {});
+                            }, true).catch(() => {});
                         }
                     }
 
@@ -303,6 +326,22 @@ async function syncWithFirestore() {
                     ...parseFirestoreFields(d.fields)
                 }));
                 items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+                if (isInitialSyncDone && !isSubSyncOnly) {
+                    const newArticles = items.filter(n => !knownNewsIds.has(n.id));
+                    for (const n of newArticles) {
+                        knownNewsIds.add(n.id);
+                        console.log('[WebPush] Remote new article detected:', n.title || n.id);
+                        sendPushNotificationToAll({
+                            title: 'Новая новость HBU 📰',
+                            body: n.title || 'Опубликована свежая статья о конкурсе HariVision',
+                            url: '/#news',
+                            tag: 'news-' + n.id
+                        }, true).catch(err => console.warn('[WebPush] News push error:', err));
+                    }
+                }
+
+                items.forEach(n => knownNewsIds.add(n.id));
                 store.news = items;
                 updated = true;
             }
@@ -332,9 +371,9 @@ async function syncWithFirestore() {
                     sendPushNotificationToAll({
                         title: item.title,
                         body: item.body || item.message || '',
-                        url: item.url || '/#voting',
-                        tag: 'broadcast_' + (item.createdAt || Date.now())
-                    }).catch(() => {});
+                        url: item.url || '/',
+                        tag: item.tag || ('broadcast_' + (item.createdAt || Date.now()))
+                    }, true).catch(() => {});
                 }
             }
         } catch (e) {}
@@ -379,6 +418,8 @@ async function syncWithFirestore() {
         isInitialSyncDone = true;
     } catch (e) {
         console.warn('Firestore server sync error:', e);
+    } finally {
+        if (!isSubSyncOnly) isSyncInProgress = false;
     }
 }
 
@@ -447,9 +488,9 @@ async function removePushSubscriptionFromFirestore(endpoint) {
     } catch (e) {}
 }
 
-// Initial sync on startup and recurring sync
+// Initial sync on startup and recurring sync every 5 seconds
 syncWithFirestore();
-setInterval(syncWithFirestore, 10000);
+setInterval(syncWithFirestore, 5000);
 
 // SSE Подписчики
 let sseClients = [];
@@ -466,11 +507,30 @@ function broadcastState(type = 'update') {
 }
 
 // Отправка Web Push уведомлений всем подписчикам (доставляется даже при закрытом сайте/приложении)
-async function sendPushNotificationToAll({ title, body, url = '/', tag = null }) {
-    try {
-        await syncWithFirestore();
-    } catch (syncErr) {
-        console.warn('[WebPush] syncWithFirestore error before send:', syncErr.message || syncErr);
+async function sendPushNotificationToAll({ title, body, url = '/', tag = null }, skipSync = false) {
+    if (tag && sentPushTags.has(tag)) {
+        const lastSent = sentPushTags.get(tag);
+        if (Date.now() - lastSent < 300000) {
+            console.log(`[WebPush] Suppressing duplicate push with tag: "${tag}"`);
+            return { total: (store.pushSubscriptions || []).length, sent: 0 };
+        }
+    }
+    if (tag) {
+        sentPushTags.set(tag, Date.now());
+        if (sentPushTags.size > 200) {
+            const oneHourAgo = Date.now() - 3600000;
+            for (const [k, v] of sentPushTags.entries()) {
+                if (v < oneHourAgo) sentPushTags.delete(k);
+            }
+        }
+    }
+
+    if (!skipSync) {
+        try {
+            await syncWithFirestore(true);
+        } catch (syncErr) {
+            console.warn('[WebPush] syncWithFirestore error before send:', syncErr.message || syncErr);
+        }
     }
     if (!Array.isArray(store.pushSubscriptions) || store.pushSubscriptions.length === 0) {
         console.log('[WebPush] No subscribers registered in store');
@@ -657,12 +717,13 @@ app.post('/api/news', (req, res) => {
     }
     article.updatedAt = Date.now();
     const idx = store.news.findIndex(n => n.id === article.id);
-    const isNew = idx < 0;
+    const isNew = idx < 0 && !knownNewsIds.has(article.id);
     if (idx >= 0) {
         store.news[idx] = { ...store.news[idx], ...article };
     } else {
         store.news.push(article);
     }
+    knownNewsIds.add(article.id);
     store.news = sortNewsDescending(store.news);
     saveStore(store);
     broadcastState('news_update');
@@ -674,7 +735,7 @@ app.post('/api/news', (req, res) => {
             body: article.title || 'Опубликована свежая статья о конкурсе HariVision',
             url: '/#news',
             tag: 'news-' + article.id
-        }).catch(err => console.warn('Push error on news:', err));
+        }).catch(err => console.warn('[WebPush] Push error on news:', err));
     }
 
     res.json({ success: true, article, news: store.news });
@@ -827,13 +888,25 @@ app.post('/api/contests', (req, res) => {
         contest.id = 'contest-' + Date.now();
     }
     const idx = store.contests.findIndex(c => c.id === contest.id);
+    const isNew = idx < 0 && !knownContestIds.has(contest.id);
     if (idx >= 0) {
         store.contests[idx] = { ...store.contests[idx], ...contest };
     } else {
         store.contests.unshift(contest);
     }
+    knownContestIds.add(contest.id);
     saveStore(store);
     broadcastState('contests_update');
+
+    if (isNew) {
+        sendPushNotificationToAll({
+            title: 'Новый сезон HariVision! 🏆',
+            body: contest.title ? `Опубликован ${contest.title}` : 'Опубликован новый сезон / конкурс!',
+            url: `/#contest/${contest.id}`,
+            tag: 'contest-' + contest.id
+        }).catch(err => console.warn('[WebPush] Push error on contest:', err));
+    }
+
     res.json({ success: true, contest, contests: store.contests });
 });
 

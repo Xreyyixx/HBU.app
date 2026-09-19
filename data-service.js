@@ -957,6 +957,7 @@ export async function saveNewsArticle(article) {
     if (!article.createdAt) article.createdAt = Date.now();
     article.updatedAt = Date.now();
     const idx = (currentState.news || []).findIndex(n => n.id === article.id);
+    const isNew = idx < 0;
     if (idx >= 0) {
         currentState.news[idx] = { ...currentState.news[idx], ...article };
     } else {
@@ -970,6 +971,27 @@ export async function saveNewsArticle(article) {
         await setDoc(doc(db, "news", article.id), article, { merge: true });
     } catch (e) {
         console.warn('Firestore save news error:', e);
+    }
+
+    // Also queue push broadcast in Firestore for instant background delivery to all devices
+    if (isNew) {
+        try {
+            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/system/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
+            fetch(fsUrl, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fields: {
+                        title: { stringValue: 'Новая новость HBU 📰' },
+                        body: { stringValue: article.title || 'Опубликована свежая статья о конкурсе HariVision' },
+                        url: { stringValue: '/#news' },
+                        tag: { stringValue: 'news-' + article.id },
+                        createdAt: { integerValue: String(Date.now()) },
+                        processed: { booleanValue: false }
+                    }
+                })
+            }).catch(() => {});
+        } catch (e) {}
     }
 
     // Save to REST API if available
@@ -1023,6 +1045,7 @@ export async function deleteNewsArticle(articleId) {
 export async function saveContest(contest) {
     if (!contest.id) contest.id = 'contest-' + Date.now();
     const idx = (currentState.contests || []).findIndex(c => c.id === contest.id);
+    const isNew = idx < 0;
     if (idx >= 0) {
         currentState.contests[idx] = { ...currentState.contests[idx], ...contest };
     } else {
@@ -1037,6 +1060,27 @@ export async function saveContest(contest) {
         }
     } catch (e) {
         console.warn('Firestore save contest error:', e);
+    }
+
+    // Also queue push broadcast in Firestore for instant background delivery to all devices
+    if (isNew) {
+        try {
+            const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/system/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
+            fetch(fsUrl, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fields: {
+                        title: { stringValue: 'Новый сезон HariVision! 🏆' },
+                        body: { stringValue: contest.title ? `Опубликован ${contest.title}` : 'Опубликован новый сезон / конкурс!' },
+                        url: { stringValue: `/#contest/${contest.id}` },
+                        tag: { stringValue: 'contest-' + contest.id },
+                        createdAt: { integerValue: String(Date.now()) },
+                        processed: { booleanValue: false }
+                    }
+                })
+            }).catch(() => {});
+        } catch (e) {}
     }
 
     // Save to REST API if available
