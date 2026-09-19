@@ -321,7 +321,8 @@ export async function requestNotificationPermission() {
     const isInIframe = window.self !== window.top;
     if (isInIframe && Notification.permission !== 'granted') {
         try {
-            const win = window.open(window.location.origin + '/?autoSubscribe=1', '_blank');
+            const popupUrl = new URL('./?autoSubscribe=1', window.location.href).href;
+            const win = window.open(popupUrl, '_blank');
             if (win) {
                 if (typeof window.showToast === 'function') {
                     window.showToast('Открываем сайт в отдельной вкладке для подтверждения разрешения браузера...', 5000);
@@ -435,13 +436,13 @@ export async function sendSystemNotification(title, body, url = '/', tag = null)
         cleanUrl = cleanUrl.replace(/^index\.html/, '') || '/';
     }
 
+    const iconUrl = new URL('icons/HBU_icon.png', window.location.href).href;
     const options = {
         body,
-        icon: '/icons/HBU_icon.png',
-        badge: '/icons/HBU_icon.png',
+        icon: iconUrl,
+        badge: iconUrl,
         tag: tag || ('hbu_' + Date.now()),
         renotify: true,
-        vibrate: [200, 100, 200],
         data: { url: cleanUrl }
     };
 
@@ -473,8 +474,9 @@ export async function sendSystemNotification(title, body, url = '/', tag = null)
                 } else if (cleanUrl.includes('#')) {
                     const hashPart = cleanUrl.split('#')[1];
                     if (hashPart) window.location.hash = '#' + hashPart;
-                } else if (cleanUrl.startsWith('/') && cleanUrl !== '/') {
-                    window.location.pathname = cleanUrl;
+                } else {
+                    const rel = cleanUrl.replace(/^\/+/, '');
+                    window.location.href = new URL(rel, window.location.href).href;
                 }
             }
             try { notif.close(); } catch (e) {}
@@ -551,7 +553,7 @@ if (typeof window !== 'undefined') {
         };
         try {
             if ('serviceWorker' in navigator) {
-                const reg = await navigator.serviceWorker.getRegistration('/');
+                const reg = await navigator.serviceWorker.getRegistration();
                 report.activeServiceWorker = reg ? { scope: reg.scope, active: Boolean(reg.active) } : null;
                 if (reg && reg.pushManager) {
                     const sub = await reg.pushManager.getSubscription();

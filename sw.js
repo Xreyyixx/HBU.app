@@ -51,45 +51,52 @@ self.addEventListener('fetch', (event) => {
     );
 });
 
+function getAppBaseUrl() {
+    // self.location is the URL of sw.js itself (e.g. "https://xreyyixx.github.io/HBU.app/sw.js")
+    // new URL('./', self.location.href).href will ALWAYS yield the exact directory ("https://xreyyixx.github.io/HBU.app/")
+    return new URL('./', self.location.href).href;
+}
+
+function resolveAppUrl(rawUrl) {
+    const appBaseUrl = getAppBaseUrl();
+    if (!rawUrl || rawUrl === '/' || rawUrl === './' || rawUrl === 'index.html' || rawUrl === '/index.html') {
+        return appBaseUrl;
+    }
+    const str = String(rawUrl).trim();
+    if (str.startsWith('http://') || str.startsWith('https://')) {
+        return str;
+    }
+    // If it contains a hash (#voting, /#voting, index.html#voting, /index.html#voting, #news, etc.)
+    if (str.includes('#')) {
+        const hash = '#' + str.split('#')[1];
+        return appBaseUrl + hash;
+    }
+    // Relative file (e.g. 'admin.html', '/admin.html')
+    const rel = str.replace(/^\/+/, '');
+    return new URL(rel, appBaseUrl).href;
+}
+
 // Обработка клика по системному уведомлению
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
 
-    const baseScope = (self.registration && self.registration.scope) ? self.registration.scope : self.location.href;
-    let rawUrl = event.notification.data?.url || '/';
-    // Очищаем от устаревших путей index.html: "index.html#voting" -> "#voting", "index.html" -> "/"
-    let cleanPath = String(rawUrl || '/').trim();
-    if (cleanPath.startsWith('index.html')) {
-        cleanPath = cleanPath.replace(/^index\.html/, '') || '/';
-    }
-
-    let targetUrl;
-    try {
-        if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
-            targetUrl = cleanPath;
-        } else {
-            const base = baseScope.endsWith('/') ? baseScope : baseScope + '/';
-            if (cleanPath.startsWith('#')) {
-                targetUrl = base + cleanPath;
-            } else {
-                const rel = cleanPath.startsWith('/') ? cleanPath.slice(1) : cleanPath;
-                targetUrl = new URL(rel, base).href;
-            }
-        }
-    } catch (e) {
-        targetUrl = baseScope;
-    }
-
-    const hashPart = cleanPath.startsWith('#') ? cleanPath : (targetUrl.includes('#') ? '#' + targetUrl.split('#')[1] : '');
+    const appBaseUrl = getAppBaseUrl();
+    const rawTarget = event.notification.data?.url || event.notification.data?.rawUrl || '/';
+    const targetUrl = resolveAppUrl(rawTarget);
+    const hashPart = targetUrl.includes('#') ? ('#' + targetUrl.split('#')[1]) : '';
 
     event.waitUntil(
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientList) => {
+            const baseWithoutSlash = appBaseUrl.endsWith('/') ? appBaseUrl.slice(0, -1) : appBaseUrl;
+
             // Если уже есть открытая вкладка/окно PWA
             for (const client of clientList) {
-                if ('focus' in client) {
-                    try {
-                        await client.focus();
-                    } catch (e) {}
+                if (client.url && (client.url.startsWith(appBaseUrl) || client.url === baseWithoutSlash || client.url.startsWith(baseWithoutSlash + '?'))) {
+                    if ('focus' in client) {
+                        try {
+                            await client.focus();
+                        } catch (e) {}
+                    }
 
                     if ('navigate' in client && client.url !== targetUrl) {
                         try {
@@ -116,14 +123,14 @@ self.addEventListener('notificationclick', (event) => {
 
 // Обработка фоновых push-сообщений (Web Push даже при закрытом приложении)
 self.addEventListener('push', (event) => {
-    const baseScope = (self.registration && self.registration.scope) ? self.registration.scope : self.location.href;
+    const appBaseUrl = getAppBaseUrl();
     let payload = {
         title: 'HariVision 2026',
         body: 'Новое уведомление от Haribo Broadcasting Union!',
         icon: 'icons/HBU_icon.png',
         badge: 'icons/HBU_icon.png',
         tag: 'hbu_push_' + Date.now(),
-        data: { url: '/#voting' }
+        url: '/#voting'
     };
     if (event.data) {
         try {
@@ -136,30 +143,31 @@ self.addEventListener('push', (event) => {
         }
     }
 
+    const rawTarget = payload.url || payload.data?.url || '/#voting';
+    const targetUrl = resolveAppUrl(rawTarget);
+
     let iconUrl;
-    let badgeUrl;
     try {
-        const base = baseScope.endsWith('/') ? baseScope : baseScope + '/';
-        const iconPath = (payload.icon || 'icons/HBU_icon.png').replace(/^\//, '');
-        const badgePath = (payload.badge || 'icons/HBU_icon.png').replace(/^\//, '');
-        iconUrl = new URL(iconPath, base).href;
-        badgeUrl = new URL(badgePath, base).href;
+        const iconPath = (payload.icon || 'icons/HBU_icon.png').replace(/^\/+/, '');
+        iconUrl = new URL(iconPath, appBaseUrl).href;
     } catch (e) {
         iconUrl = undefined;
-        badgeUrl = undefined;
     }
 
     const notifOptions = {
         body: payload.body || '',
-        tag: payload.tag || ('hbu_push_' + Date.now()),
-        renotify: true,
-        data: payload.data || { url: '/#voting' }
+        data: {
+            url: targetUrl,
+            rawUrl: rawTarget,
+            time: Date.now()
+        }
     };
-    if (iconUrl) notifOptions.icon = iconUrl;
-    if (badgeUrl) notifOptions.badge = badgeUrl;
-
-    if (Array.isArray(payload.vibrate)) {
-        notifOptions.vibrate = payload.vibrate;
+    if (iconUrl) {
+        notifOptions.icon = iconUrl;
+        notifOptions.badge = iconUrl;
+    }
+    if (payload.tag) {
+        notifOptions.tag = String(payload.tag);
     }
 
     event.waitUntil(
@@ -168,7 +176,7 @@ self.addEventListener('push', (event) => {
                 console.warn('[SW Push] Fallback minimal notification:', err);
                 return self.registration.showNotification(payload.title || 'HariVision 2026', {
                     body: payload.body || '',
-                    data: payload.data || { url: '/#voting' }
+                    data: { url: targetUrl }
                 });
             })
     );

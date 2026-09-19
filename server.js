@@ -194,6 +194,8 @@ try {
     console.error('Error setting VAPID details:', e);
 }
 
+let isInitialSyncDone = false;
+
 // Function to sync Firestore collection data into server store
 async function syncWithFirestore() {
     try {
@@ -235,7 +237,7 @@ async function syncWithFirestore() {
 
         let updated = false;
 
-        // Sync contests directly from Firestore collection "contests"
+        // 1. Sync contests directly from Firestore collection "contests"
         try {
             const res = await fetch(`${base}/contests?key=${apiKey}`);
             if (res.ok) {
@@ -249,7 +251,49 @@ async function syncWithFirestore() {
             }
         } catch (e) {}
 
-        // Sync news directly from Firestore collection "news"
+        // 2. Sync voting_state from Firestore "system/voting_state"
+        try {
+            const res = await fetch(`${base}/system/voting_state?key=${apiKey}`);
+            if (res.ok) {
+                const doc = await res.json();
+                const fsState = parseFirestoreFields(doc.fields);
+                if (fsState && fsState.status) {
+                    const prevStatus = store.votingState ? store.votingState.status : 'closed';
+                    const newStatus = fsState.status;
+
+                    if (isInitialSyncDone && prevStatus !== newStatus) {
+                        if (newStatus === 'open') {
+                            console.log('[WebPush] Remote voting open detected. Sending push...');
+                            sendPushNotificationToAll({
+                                title: 'Голосование открыто! 🗳️',
+                                body: 'Начался прием голосов зрителей HariVision 2026. Поддержите своих фаворитов!',
+                                url: '/#voting',
+                                tag: 'voting-status-open'
+                            }).catch(() => {});
+                        } else if (newStatus === 'closed') {
+                            console.log('[WebPush] Remote voting close detected. Sending push...');
+                            sendPushNotificationToAll({
+                                title: 'Голосование завершено 🏁',
+                                body: 'Прием голосов окончен. Скоро будут подведены официальные итоги!',
+                                url: '/#voting',
+                                tag: 'voting-status-closed'
+                            }).catch(() => {});
+                        }
+                    }
+
+                    store.votingState = {
+                        status: newStatus,
+                        endsAt: fsState.endsAt || null,
+                        sessionId: fsState.sessionId || store.votingState?.sessionId || ('session_' + Date.now()),
+                        openedAt: fsState.openedAt || null,
+                        updatedAt: fsState.updatedAt || Date.now()
+                    };
+                    updated = true;
+                }
+            }
+        } catch (e) {}
+
+        // 3. Sync news directly from Firestore collection "news"
         try {
             const res = await fetch(`${base}/news?key=${apiKey}`);
             if (res.ok) {
@@ -264,32 +308,65 @@ async function syncWithFirestore() {
             }
         } catch (e) {}
 
-        // Sync push subscriptions from Firestore collection "artistAccounts" (with type === 'push_sub')
-        // Using artistAccounts because it is granted read/write in firestore.rules
+        // 4. Check broadcast queue in Firestore "system/broadcast_queue"
         try {
-            const res = await fetch(`${base}/artistAccounts?key=${apiKey}`);
+            const res = await fetch(`${base}/system/broadcast_queue?key=${apiKey}`);
+            if (res.ok) {
+                const doc = await res.json();
+                const item = parseFirestoreFields(doc.fields);
+                if (item && item.title && !item.processed && (Date.now() - (item.createdAt || 0) < 600000)) {
+                    console.log('[Firestore Sync] Found pending broadcast in queue:', item.title);
+                    // Mark as processed
+                    await fetch(`${base}/system/broadcast_queue?key=${apiKey}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            fields: {
+                                ...doc.fields,
+                                processed: { booleanValue: true },
+                                processedAt: { integerValue: String(Date.now()) }
+                            }
+                        })
+                    }).catch(() => {});
+
+                    sendPushNotificationToAll({
+                        title: item.title,
+                        body: item.body || item.message || '',
+                        url: item.url || '/#voting',
+                        tag: 'broadcast_' + (item.createdAt || Date.now())
+                    }).catch(() => {});
+                }
+            }
+        } catch (e) {}
+
+        // 5. Sync push subscriptions from Firestore collection "artistAccounts" (with type === 'push_sub')
+        try {
+            const res = await fetch(`${base}/artistAccounts?key=${apiKey}&pageSize=300`);
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || [])
                     .map(d => parseFirestoreFields(d.fields))
-                    .filter(s => s && s.type === 'push_sub' && s.endpoint && s.keys);
+                    .filter(s => s && s.type === 'push_sub' && s.endpoint && s.keys && s.keys.p256dh && s.keys.auth);
                 if (items.length > 0) {
                     if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
                     let anyAdded = false;
                     items.forEach(fsSub => {
-                        const exists = store.pushSubscriptions.some(s => s.endpoint === fsSub.endpoint);
-                        if (!exists) {
+                        const existing = store.pushSubscriptions.find(s => s.endpoint === fsSub.endpoint);
+                        if (!existing) {
                             store.pushSubscriptions.push({
                                 endpoint: fsSub.endpoint,
                                 keys: fsSub.keys,
                                 expirationTime: fsSub.expirationTime || null
                             });
                             anyAdded = true;
+                        } else if (existing.keys?.p256dh !== fsSub.keys.p256dh || existing.keys?.auth !== fsSub.keys.auth) {
+                            existing.keys = fsSub.keys;
+                            anyAdded = true;
                         }
                     });
                     if (anyAdded) {
                         saveStore(store);
-                        console.log(`[WebPush] Loaded ${items.length} subscribers from Firestore artistAccounts. Total: ${store.pushSubscriptions.length}`);
+                        console.log(`[WebPush] Synchronized subscribers from Firestore. Total: ${store.pushSubscriptions.length}`);
                     }
                 }
             }
@@ -299,6 +376,7 @@ async function syncWithFirestore() {
             saveStore(store);
             broadcastState('firestore_sync');
         }
+        isInitialSyncDone = true;
     } catch (e) {
         console.warn('Firestore server sync error:', e);
     }
@@ -371,7 +449,7 @@ async function removePushSubscriptionFromFirestore(endpoint) {
 
 // Initial sync on startup and recurring sync
 syncWithFirestore();
-setInterval(syncWithFirestore, 30000);
+setInterval(syncWithFirestore, 10000);
 
 // SSE Подписчики
 let sseClients = [];
@@ -398,13 +476,23 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null })
         console.log('[WebPush] No subscribers registered in store');
         return { total: 0, sent: 0 };
     }
+
+    let cleanUrl = String(url || '/').trim();
+    if (cleanUrl.startsWith('index.html')) {
+        cleanUrl = cleanUrl.replace(/^index\.html/, '') || '/';
+    }
+
     const payload = JSON.stringify({
-        title,
-        body,
-        icon: '/icons/HBU_icon.png',
-        badge: '/icons/HBU_icon.png',
+        title: title || 'HariVision 2026',
+        body: body || '',
+        icon: 'icons/HBU_icon.png',
+        badge: 'icons/HBU_icon.png',
         tag: tag || ('hbu_push_' + Date.now()),
-        data: { url: url || '/' }
+        url: cleanUrl,
+        data: {
+            url: cleanUrl,
+            time: Date.now()
+        }
     });
 
     const deadEndpoints = [];
@@ -431,6 +519,7 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null })
     if (deadEndpoints.length > 0) {
         store.pushSubscriptions = store.pushSubscriptions.filter(s => !deadEndpoints.includes(s.endpoint));
         saveStore(store);
+        deadEndpoints.forEach(ep => removePushSubscriptionFromFirestore(ep).catch(() => {}));
     }
 
     console.log(`[WebPush] Sent to ${sentCount}/${store.pushSubscriptions.length} devices`);
