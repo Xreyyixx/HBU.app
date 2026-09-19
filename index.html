@@ -339,7 +339,7 @@
     <!-- Service Worker for PWA -->
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(reg => {
+            navigator.serviceWorker.register('./sw.js').then(reg => {
                 reg.update();
             }).catch(err => console.warn('SW registration error:', err));
         }

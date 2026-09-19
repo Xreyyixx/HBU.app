@@ -55,23 +55,29 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
 
+    const baseScope = (self.registration && self.registration.scope) ? self.registration.scope : self.location.href;
     let rawUrl = event.notification.data?.url || '/';
-    // Очищаем от устаревших путей index.html: "index.html#voting" -> "/#voting", "index.html" -> "/"
-    let cleanPath = String(rawUrl || '/');
+    // Очищаем от устаревших путей index.html: "index.html#voting" -> "#voting", "index.html" -> "/"
+    let cleanPath = String(rawUrl || '/').trim();
     if (cleanPath.startsWith('index.html')) {
         cleanPath = cleanPath.replace(/^index\.html/, '') || '/';
     }
-    if (!cleanPath.startsWith('/') && !cleanPath.startsWith('#') && !cleanPath.startsWith('http://') && !cleanPath.startsWith('https://')) {
-        cleanPath = '/' + cleanPath;
-    }
-    if (cleanPath === '') cleanPath = '/';
 
-    // Формируем абсолютный URL с текущего origin
     let targetUrl;
     try {
-        targetUrl = new URL(cleanPath, self.location.origin).href;
+        if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+            targetUrl = cleanPath;
+        } else {
+            const base = baseScope.endsWith('/') ? baseScope : baseScope + '/';
+            if (cleanPath.startsWith('#')) {
+                targetUrl = base + cleanPath;
+            } else {
+                const rel = cleanPath.startsWith('/') ? cleanPath.slice(1) : cleanPath;
+                targetUrl = new URL(rel, base).href;
+            }
+        }
     } catch (e) {
-        targetUrl = self.location.origin + '/';
+        targetUrl = baseScope;
     }
 
     const hashPart = cleanPath.startsWith('#') ? cleanPath : (targetUrl.includes('#') ? '#' + targetUrl.split('#')[1] : '');
@@ -110,11 +116,12 @@ self.addEventListener('notificationclick', (event) => {
 
 // Обработка фоновых push-сообщений (Web Push даже при закрытом приложении)
 self.addEventListener('push', (event) => {
+    const baseScope = (self.registration && self.registration.scope) ? self.registration.scope : self.location.href;
     let payload = {
         title: 'HariVision 2026',
         body: 'Новое уведомление от Haribo Broadcasting Union!',
-        icon: '/icons/HBU_icon.png',
-        badge: '/icons/HBU_icon.png',
+        icon: 'icons/HBU_icon.png',
+        badge: 'icons/HBU_icon.png',
         tag: 'hbu_push_' + Date.now(),
         data: { url: '/#voting' }
     };
@@ -129,21 +136,27 @@ self.addEventListener('push', (event) => {
         }
     }
 
-    let iconUrl = '/icons/HBU_icon.png';
-    let badgeUrl = '/icons/HBU_icon.png';
+    let iconUrl;
+    let badgeUrl;
     try {
-        iconUrl = new URL(payload.icon || '/icons/HBU_icon.png', self.location.origin).href;
-        badgeUrl = new URL(payload.badge || '/icons/HBU_icon.png', self.location.origin).href;
-    } catch (e) {}
+        const base = baseScope.endsWith('/') ? baseScope : baseScope + '/';
+        const iconPath = (payload.icon || 'icons/HBU_icon.png').replace(/^\//, '');
+        const badgePath = (payload.badge || 'icons/HBU_icon.png').replace(/^\//, '');
+        iconUrl = new URL(iconPath, base).href;
+        badgeUrl = new URL(badgePath, base).href;
+    } catch (e) {
+        iconUrl = undefined;
+        badgeUrl = undefined;
+    }
 
     const notifOptions = {
         body: payload.body || '',
-        icon: iconUrl,
-        badge: badgeUrl,
         tag: payload.tag || ('hbu_push_' + Date.now()),
         renotify: true,
         data: payload.data || { url: '/#voting' }
     };
+    if (iconUrl) notifOptions.icon = iconUrl;
+    if (badgeUrl) notifOptions.badge = badgeUrl;
 
     if (Array.isArray(payload.vibrate)) {
         notifOptions.vibrate = payload.vibrate;

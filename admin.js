@@ -1,4 +1,5 @@
 import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db } from './config.js';
+import { syncPushSubscription } from './notifications.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
@@ -1806,113 +1807,14 @@ window.subscribeCurrentAdminDevice = async function() {
 
         showAdminNotification('Регистрация устройства в Web Push...', 'info');
 
-        let reg = await navigator.serviceWorker.getRegistration();
-        if (!reg) {
-            reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-        }
-
-        let activeReg = reg;
-        if ('ready' in navigator.serviceWorker) {
-            try {
-                activeReg = await Promise.race([
-                    navigator.serviceWorker.ready,
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
-                ]);
-            } catch (e) {
-                activeReg = reg;
-            }
-        }
-
-        const pm = (activeReg && activeReg.pushManager) || (reg && reg.pushManager);
-        if (!pm) {
-            throw new Error('PushManager недоступен в Service Worker');
-        }
-
-        const VAPID_KEY = 'BPZuY8-gjysoqNyqec1Rqdz2iPd1gNRiwiP0kSOnAxWaSuVGsRvKafnY75wGl5vSsExJGAnC3RPkmzjhMo42wRw';
-        const padding = '='.repeat((4 - VAPID_KEY.length % 4) % 4);
-        const base64 = (VAPID_KEY + padding).replace(/-/g, '+').replace(/_/g, '/');
-        const rawData = window.atob(base64);
-        const targetKeyBytes = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) targetKeyBytes[i] = rawData.charCodeAt(i);
-
-        let sub = await pm.getSubscription();
-        if (sub) {
-            let keyMatches = true;
-            if (sub.options && sub.options.applicationServerKey) {
-                try {
-                    const rawKey = sub.options.applicationServerKey;
-                    const cur = rawKey instanceof ArrayBuffer ? new Uint8Array(rawKey) : new Uint8Array(rawKey.buffer || rawKey);
-                    if (cur.length > 0 && cur.length === targetKeyBytes.length) {
-                        for (let i = 0; i < cur.length; i++) {
-                            if (cur[i] !== targetKeyBytes[i]) {
-                                keyMatches = false;
-                                break;
-                            }
-                        }
-                    }
-                } catch (cmpErr) {
-                    keyMatches = true;
-                }
-            }
-            if (!keyMatches) {
-                console.log('[Admin] Сброс устаревшей подписки...');
-                try {
-                    await sub.unsubscribe();
-                    sub = null;
-                } catch (e) {
-                    console.warn('Unsubscribe error:', e);
-                }
-            }
-        }
-
-        if (!sub) {
-            sub = await pm.subscribe({ userVisibleOnly: true, applicationServerKey: targetKeyBytes });
-        }
-
-        const jsonSub = (typeof sub.toJSON === 'function') ? sub.toJSON() : {};
-        let p256dh = jsonSub.keys?.p256dh || '';
-        let auth = jsonSub.keys?.auth || '';
-
-        if (!p256dh && typeof sub.getKey === 'function') {
-            const rawP = sub.getKey('p256dh');
-            if (rawP) {
-                let bin = ''; const b = new Uint8Array(rawP);
-                for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]);
-                p256dh = window.btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-            }
-        }
-        if (!auth && typeof sub.getKey === 'function') {
-            const rawA = sub.getKey('auth');
-            if (rawA) {
-                let bin = ''; const b = new Uint8Array(rawA);
-                for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]);
-                auth = window.btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-            }
-        }
-
-        if (!p256dh || !auth) {
-            throw new Error('Ключи p256dh / auth не получены от браузера');
-        }
-
-        const res = await fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                subscription: {
-                    endpoint: sub.endpoint,
-                    expirationTime: sub.expirationTime || null,
-                    keys: { p256dh, auth }
-                }
-            })
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-            showAdminNotification(`✅ Устройство успешно подписано! Всего подписчиков: ${data.subscribersCount}`, 'success');
+        const result = await syncPushSubscription();
+        if (result && result.success) {
+            showAdminNotification('✅ Устройство успешно подписано на Web Push!', 'success');
             if (typeof window.refreshAdminPushSubscribers === 'function') {
                 window.refreshAdminPushSubscribers();
             }
         } else {
-            throw new Error(data.error || 'Ошибка сохранения на сервере');
+            showAdminNotification('Ошибка подписки: ' + (result?.error || result?.reason || 'Неизвестная ошибка'), 'error');
         }
     } catch (e) {
         showAdminNotification('Ошибка подписки: ' + e.message, 'error');

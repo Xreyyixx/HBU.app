@@ -389,6 +389,11 @@ function broadcastState(type = 'update') {
 
 // Отправка Web Push уведомлений всем подписчикам (доставляется даже при закрытом сайте/приложении)
 async function sendPushNotificationToAll({ title, body, url = '/', tag = null }) {
+    try {
+        await syncWithFirestore();
+    } catch (syncErr) {
+        console.warn('[WebPush] syncWithFirestore error before send:', syncErr.message || syncErr);
+    }
     if (!Array.isArray(store.pushSubscriptions) || store.pushSubscriptions.length === 0) {
         console.log('[WebPush] No subscribers registered in store');
         return { total: 0, sent: 0 };
@@ -479,7 +484,10 @@ app.post('/api/push/unsubscribe', (req, res) => {
 });
 
 // Web Push API: статус подписчиков
-app.get('/api/push/subscribers-count', (req, res) => {
+app.get('/api/push/subscribers-count', async (req, res) => {
+    try {
+        await syncWithFirestore();
+    } catch (e) {}
     res.json({ count: Array.isArray(store.pushSubscriptions) ? store.pushSubscriptions.length : 0 });
 });
 

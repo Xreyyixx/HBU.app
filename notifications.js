@@ -54,6 +54,62 @@ function arrayBufferToBase64Url(buffer) {
         .replace(/=+$/, '');
 }
 
+function getSubscriptionDocId(endpoint) {
+    const slice = String(endpoint || '').slice(-60);
+    let hex = '';
+    for (let i = 0; i < slice.length; i++) {
+        hex += slice.charCodeAt(i).toString(16).padStart(2, '0');
+    }
+    return 'push_sub_' + hex.slice(0, 32);
+}
+
+const FIREBASE_API_KEY = "AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw";
+const FIREBASE_PROJECT_ID = "voting-91412";
+
+async function savePushSubscriptionDirectlyToFirestore(subData) {
+    if (!subData || !subData.endpoint || !subData.keys) return false;
+    try {
+        const docId = getSubscriptionDocId(subData.endpoint);
+        const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/artistAccounts/${docId}?key=${FIREBASE_API_KEY}`;
+        const body = {
+            fields: {
+                type: { stringValue: 'push_sub' },
+                endpoint: { stringValue: subData.endpoint },
+                keys: {
+                    mapValue: {
+                        fields: {
+                            p256dh: { stringValue: subData.keys.p256dh },
+                            auth: { stringValue: subData.keys.auth }
+                        }
+                    }
+                },
+                updatedAt: { integerValue: String(Date.now()) }
+            }
+        };
+        const res = await fetch(url, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        return res.ok;
+    } catch (e) {
+        console.warn('[WebPush] Direct Firestore save note:', e);
+        return false;
+    }
+}
+
+async function removePushSubscriptionDirectlyFromFirestore(endpoint) {
+    if (!endpoint) return false;
+    try {
+        const docId = getSubscriptionDocId(endpoint);
+        const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/artistAccounts/${docId}?key=${FIREBASE_API_KEY}`;
+        const res = await fetch(url, { method: 'DELETE' });
+        return res.ok;
+    } catch (e) {
+        return false;
+    }
+}
+
 // Регистрация подписки Web Push на сервере для доставки в фоне и при закрытом сайте
 export async function syncPushSubscription() {
     if (typeof window === 'undefined') {
@@ -72,13 +128,10 @@ export async function syncPushSubscription() {
     try {
         console.log('[WebPush] Starting registration...');
 
-        // 1. Получаем регистрацию Service Worker
-        let reg = await navigator.serviceWorker.getRegistration('/');
+        // 1. Получаем регистрацию Service Worker (относительный путь для работы на любых доменах и подпутях)
+        let reg = await navigator.serviceWorker.getRegistration();
         if (!reg) {
-            reg = await navigator.serviceWorker.getRegistration();
-        }
-        if (!reg) {
-            reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+            reg = await navigator.serviceWorker.register('./sw.js');
         }
 
         // Если pushManager еще не доступен на reg, проверяем ready с надежным таймаутом
@@ -182,19 +235,41 @@ export async function syncPushSubscription() {
             keys: { p256dh, auth }
         };
 
-        // 6. Сохраняем на сервере
-        const subRes = await fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subscription: subData })
-        });
-        const subResult = await subRes.json();
-        if (!subRes.ok || !subResult.success) {
-            throw new Error(subResult.error || `Ошибка сервера HTTP ${subRes.status}`);
+        // 6. Сохраняем подписку:
+        // А) В облачную базу Firestore (гарантирует сохранение даже на GitHub Pages или статическом хостинге)
+        let firestoreOk = false;
+        try {
+            firestoreOk = await savePushSubscriptionDirectlyToFirestore(subData);
+        } catch (fsErr) {
+            console.warn('[WebPush] Direct Firestore save note:', fsErr);
         }
 
-        console.log('[WebPush] Устройство успешно зарегистрировано на сервере! Всего подписчиков:', subResult.subscribersCount);
-        return { success: true, subscribersCount: subResult.subscribersCount };
+        // Б) На серверный эндпоинт (если Node.js бэкенд доступен на том же хосте)
+        let serverOk = false;
+        let subscribersCount = 1;
+        try {
+            const subRes = await fetch('/api/push/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subscription: subData })
+            });
+            if (subRes.ok) {
+                const subResult = await subRes.json();
+                if (subResult.success) {
+                    serverOk = true;
+                    subscribersCount = subResult.subscribersCount || 1;
+                }
+            }
+        } catch (serverErr) {
+            // Нормально на статическом хостинге / GitHub Pages
+        }
+
+        if (!firestoreOk && !serverOk) {
+            throw new Error('Не удалось сохранить подписку на сервере или в облаке');
+        }
+
+        console.log(`[WebPush] Устройство успешно зарегистрировано! (Firestore: ${firestoreOk}, Server: ${serverOk})`);
+        return { success: true, subscribersCount };
     } catch (e) {
         console.error('[WebPush Subscription Error]', e);
         return { success: false, error: e.message || String(e) };
@@ -212,11 +287,14 @@ export async function unsubscribePush() {
         if (sub) {
             const endpoint = sub.endpoint;
             await sub.unsubscribe();
-            await fetch('/api/push/unsubscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ endpoint })
-            });
+            removePushSubscriptionDirectlyFromFirestore(endpoint).catch(() => {});
+            try {
+                await fetch('/api/push/unsubscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ endpoint })
+                });
+            } catch (e) {}
         }
     } catch (e) {
         console.warn('Web Push unsubscribe error:', e);
