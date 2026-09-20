@@ -395,9 +395,21 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                         items = typeof fields.data === 'string' ? JSON.parse(fields.data) : fields.data;
                     } catch (err) {}
                     if (Array.isArray(items)) {
-                        items.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                        if (JSON.stringify(store.calendarNotes) !== JSON.stringify(items)) {
-                            store.calendarNotes = items;
+                        items = items.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
+                        // Merge items with existing store to prevent empty cloud snapshots from erasing local notes
+                        const map = new Map();
+                        (store.calendarNotes || []).forEach(n => {
+                            if (n && n.id && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id)) map.set(String(n.id), n);
+                        });
+                        items.forEach(n => {
+                            if (n && n.id && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id)) {
+                                const prev = map.get(String(n.id)) || {};
+                                map.set(String(n.id), { ...prev, ...n });
+                            }
+                        });
+                        const merged = Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                        if (JSON.stringify(store.calendarNotes) !== JSON.stringify(merged)) {
+                            store.calendarNotes = merged;
                             updated = true;
                         }
                     }
@@ -464,6 +476,8 @@ async function saveCalendarToFirestore(calendarNotes) {
         }
         if (!apiKey || !Array.isArray(calendarNotes)) return;
 
+        const cleanNotes = calendarNotes.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
+
         const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/calendar_store?key=${apiKey}`;
         await fetch(url, {
             method: 'PATCH',
@@ -471,12 +485,31 @@ async function saveCalendarToFirestore(calendarNotes) {
             body: JSON.stringify({
                 fields: {
                     type: { stringValue: 'calendar_store' },
-                    data: { stringValue: JSON.stringify(calendarNotes) },
+                    data: { stringValue: JSON.stringify(cleanNotes) },
                     updatedAt: { integerValue: String(Date.now()) }
                 }
             })
         });
-        console.log('[Firestore] calendar_store updated in artistAccounts doc. Total events:', calendarNotes.length);
+
+        // Also dual-write each event into the /calendar/{id} collection
+        for (const note of cleanNotes) {
+            if (!note || !note.id) continue;
+            const docUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/calendar/${note.id}?key=${apiKey}`;
+            const fsFields = {};
+            for (const [k, v] of Object.entries(note)) {
+                if (v === null || v === undefined) continue;
+                if (typeof v === 'string') fsFields[k] = { stringValue: v };
+                else if (typeof v === 'number') fsFields[k] = { integerValue: String(v) };
+                else if (typeof v === 'boolean') fsFields[k] = { booleanValue: v };
+            }
+            fetch(docUrl, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: fsFields })
+            }).catch(() => {});
+        }
+
+        console.log('[Firestore] calendar saved to cloud. Total events:', cleanNotes.length);
     } catch (e) {
         console.warn('[Firestore] saveCalendarToFirestore error:', e.message);
     }
@@ -912,8 +945,10 @@ app.delete('/api/calendar/:id', (req, res) => {
         if (apiKey) {
             const docUrl1 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/cal_${id}?key=${apiKey}`;
             const docUrl2 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/calendar_${id}?key=${apiKey}`;
+            const docUrl3 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/calendar/${id}?key=${apiKey}`;
             fetch(docUrl1, { method: 'DELETE' }).catch(() => {});
             fetch(docUrl2, { method: 'DELETE' }).catch(() => {});
+            fetch(docUrl3, { method: 'DELETE' }).catch(() => {});
         }
     } catch (e) {}
 
@@ -1316,9 +1351,18 @@ app.post('/api/sync', (req, res) => {
     if (Array.isArray(contests) && contests.length > 0) store.contests = contests;
     if (Array.isArray(participants) && participants.length > 0) store.participants = participants;
     if (Array.isArray(calendarNotes)) {
-        store.calendarNotes = calendarNotes
-            .filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id))
-            .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        const cleanIncoming = calendarNotes.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
+        const map = new Map();
+        (store.calendarNotes || []).forEach(n => {
+            if (n && n.id && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id)) map.set(String(n.id), n);
+        });
+        cleanIncoming.forEach(n => {
+            if (n && n.id && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id)) {
+                const prev = map.get(String(n.id)) || {};
+                map.set(String(n.id), { ...prev, ...n });
+            }
+        });
+        store.calendarNotes = Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         saveCalendarToFirestore(store.calendarNotes).catch(() => {});
     }
     if (Array.isArray(votes) && votes.length > 0) {

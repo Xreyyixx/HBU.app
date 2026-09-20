@@ -57,7 +57,7 @@ window.manualCloudSync = async function() {
         btn.disabled = true;
     }
     try {
-        const result = await syncAllToFirestore();
+        const result = await syncAllToFirestore(appState);
         try {
             await fetchFirestoreStateDirectly();
         } catch (e) {}

@@ -344,10 +344,24 @@ export function mergeVotes(current = [], incoming = []) {
 export const deletedCalendarNoteIds = new Set();
 
 export function mergeCalendarNotes(current = [], incoming = []) {
+    const curArr = Array.isArray(current) ? current : [];
     const inArr = Array.isArray(incoming) ? incoming : [];
-    return inArr
-        .filter(item => item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id))
-        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const map = new Map();
+
+    curArr.forEach(item => {
+        if (item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id)) {
+            map.set(String(item.id), { ...item });
+        }
+    });
+
+    inArr.forEach(item => {
+        if (item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id)) {
+            const existing = map.get(String(item.id)) || {};
+            map.set(String(item.id), { ...existing, ...item });
+        }
+    });
+
+    return Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 }
 
 export async function fetchFirestoreStateDirectly() {
@@ -491,14 +505,35 @@ export async function fetchFirestoreStateDirectly() {
                 }
                 if (Array.isArray(calList)) {
                     const cleanList = calList
-                        .filter(item => item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id))
-                        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(cleanList)) {
-                        currentState.calendarNotes = cleanList;
+                        .filter(item => item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id));
+                    const mergedNotes = mergeCalendarNotes(currentState.calendarNotes, cleanList);
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(mergedNotes)) {
+                        currentState.calendarNotes = mergedNotes;
                         stateChanged = true;
                     }
                 }
             }
+
+            // Also check individual docs in /calendar/ collection
+            try {
+                const calColSnap = await getDocs(collection(db, "calendar"));
+                if (!calColSnap.empty) {
+                    const fromCol = [];
+                    calColSnap.forEach(d => {
+                        const data = d.data() || {};
+                        if (data && data.date && !deletedCalendarNoteIds.has(d.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(d.id)) {
+                            fromCol.push({ id: d.id, ...sanitizeFirestoreData(data) });
+                        }
+                    });
+                    if (fromCol.length > 0) {
+                        const mergedCol = mergeCalendarNotes(currentState.calendarNotes, fromCol);
+                        if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(mergedCol)) {
+                            currentState.calendarNotes = mergedCol;
+                            stateChanged = true;
+                        }
+                    }
+                }
+            } catch (colErr) {}
         } catch (e) {
             console.warn('Firestore calendar fetch direct error:', e);
         }
@@ -753,15 +788,34 @@ function initFirestoreListeners() {
                 }
                 if (Array.isArray(calList)) {
                     const cleanList = calList
-                        .filter(item => item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id))
-                        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(cleanList)) {
-                        currentState.calendarNotes = cleanList;
+                        .filter(item => item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id));
+                    const mergedNotes = mergeCalendarNotes(currentState.calendarNotes, cleanList);
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(mergedNotes)) {
+                        currentState.calendarNotes = mergedNotes;
                         notifyStateChanged(true);
                     }
                 }
             }
         }, (err) => console.warn('Firestore calendar realtime listener warning:', err));
+
+        onSnapshot(collection(db, "calendar"), (snapshot) => {
+            if (!snapshot.empty) {
+                const colNotes = [];
+                snapshot.forEach(d => {
+                    const data = d.data() || {};
+                    if (data && data.date && !deletedCalendarNoteIds.has(d.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(d.id)) {
+                        colNotes.push({ id: d.id, ...sanitizeFirestoreData(data) });
+                    }
+                });
+                if (colNotes.length > 0) {
+                    const mergedCol = mergeCalendarNotes(currentState.calendarNotes, colNotes);
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(mergedCol)) {
+                        currentState.calendarNotes = mergedCol;
+                        notifyStateChanged(true);
+                    }
+                }
+            }
+        }, (err) => console.warn('Firestore calendar collection realtime warning:', err));
     } catch (e) {}
 }
 
@@ -808,10 +862,10 @@ async function fetchState(isInitial = false) {
                 // Sync calendarNotes
                 if (Array.isArray(data.calendarNotes)) {
                     const cleanNotes = data.calendarNotes
-                        .filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id) && !deletedCalendarNoteIds.has(n.id))
-                        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(cleanNotes)) {
-                        currentState.calendarNotes = cleanNotes;
+                        .filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id) && !deletedCalendarNoteIds.has(n.id));
+                    const mergedNotes = mergeCalendarNotes(currentState.calendarNotes, cleanNotes);
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(mergedNotes)) {
+                        currentState.calendarNotes = mergedNotes;
                         updated = true;
                     }
                 }
@@ -2578,10 +2632,25 @@ export async function resetAllVotes() {
     } catch (e) {}
 }
 
-export async function syncAllToFirestore() {
+export async function syncAllToFirestore(localStateOverride = null) {
     let serverOk = false;
     let firestoreOk = false;
     let firestoreError = null;
+
+    if (localStateOverride && typeof localStateOverride === 'object') {
+        if (Array.isArray(localStateOverride.calendarNotes) && localStateOverride.calendarNotes.length > 0) {
+            currentState.calendarNotes = mergeCalendarNotes(currentState.calendarNotes, localStateOverride.calendarNotes);
+        }
+        if (Array.isArray(localStateOverride.news) && localStateOverride.news.length > 0) {
+            currentState.news = localStateOverride.news;
+        }
+        if (Array.isArray(localStateOverride.contests) && localStateOverride.contests.length > 0) {
+            currentState.contests = localStateOverride.contests;
+        }
+        if (Array.isArray(localStateOverride.participants) && localStateOverride.participants.length > 0) {
+            currentState.participants = localStateOverride.participants;
+        }
+    }
 
     try {
         await ensureFirebaseAuth();
@@ -2593,7 +2662,9 @@ export async function syncAllToFirestore() {
     const cleanParticipants = (currentState.participants || []).map(p => sanitizeFirestoreData(p)).filter(Boolean);
     const cleanVotingState = sanitizeFirestoreData(currentState.votingState) || {};
     const cleanVotes = (currentState.votes || []).map(v => sanitizeFirestoreData(v)).filter(Boolean);
-    const cleanCalendarNotes = (currentState.calendarNotes || []).map(c => sanitizeFirestoreData(c)).filter(Boolean);
+    const cleanCalendarNotes = (currentState.calendarNotes || [])
+        .filter(n => n && n.id && !deletedCalendarNoteIds.has(n.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id))
+        .map(c => sanitizeFirestoreData(c)).filter(Boolean);
 
     // 1. Sync to Backend Server Database
     try {
@@ -2620,7 +2691,7 @@ export async function syncAllToFirestore() {
             serverOk = true;
             try {
                 const srvData = await res.json();
-                if (srvData && srvData.store && Array.isArray(srvData.store.calendarNotes) && srvData.store.calendarNotes.length > 0) {
+                if (srvData && srvData.store && Array.isArray(srvData.store.calendarNotes)) {
                     currentState.calendarNotes = mergeCalendarNotes(currentState.calendarNotes, srvData.store.calendarNotes);
                 }
             } catch (e) {}
@@ -2647,10 +2718,8 @@ export async function syncAllToFirestore() {
 
         // Calendar Notes Collection (Public Events synced across all devices)
         try {
-            const rawNotes = Array.isArray(cleanCalendarNotes)
-                ? cleanCalendarNotes 
-                : (Array.isArray(currentState.calendarNotes) ? currentState.calendarNotes : []);
-            const notesToSave = rawNotes.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
+            const notesToSave = (currentState.calendarNotes || [])
+                .filter(n => n && n.id && !deletedCalendarNoteIds.has(n.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
             
             await setDoc(doc(db, "artistAccounts", "calendar_store"), {
                 type: 'calendar_store',
@@ -2660,8 +2729,13 @@ export async function syncAllToFirestore() {
 
             for (const note of notesToSave) {
                 if (note && note.id) {
+                    const clean = sanitizeFirestoreData(note);
+                    setDoc(doc(db, "calendar", String(note.id)), {
+                        ...clean,
+                        updatedAt: Date.now()
+                    }, { merge: true }).catch(() => {});
                     setDoc(doc(db, "artistAccounts", "cal_" + note.id), {
-                        ...sanitizeFirestoreData(note),
+                        ...clean,
                         docType: 'calendar_event',
                         updatedAt: Date.now()
                     }, { merge: true }).catch(() => {});
@@ -2798,8 +2872,13 @@ export async function saveAdminCalendarNote(note) {
                 updatedAt: Date.now()
             }, { merge: true });
 
+            const cleanNote = sanitizeFirestoreData(note);
+            setDoc(doc(db, "calendar", String(note.id)), {
+                ...cleanNote,
+                updatedAt: Date.now()
+            }, { merge: true }).catch(() => {});
             setDoc(doc(db, "artistAccounts", "cal_" + note.id), {
-                ...sanitizeFirestoreData(note),
+                ...cleanNote,
                 docType: 'calendar_event',
                 updatedAt: Date.now()
             }, { merge: true }).catch(() => {});
@@ -2855,6 +2934,7 @@ export async function deleteAdminCalendarNote(id) {
                 updatedAt: Date.now()
             }, { merge: true });
 
+            deleteDoc(doc(db, "calendar", id)).catch(() => {});
             deleteDoc(doc(db, "artistAccounts", "cal_" + id)).catch(() => {});
             deleteDoc(doc(db, "artistAccounts", "calendar_" + id)).catch(() => {});
         }
