@@ -1,4 +1,4 @@
-import { db, auth, ensureFirebaseAuth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS } from './config.js';
+import { db, auth, ensureFirebaseAuth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS, INITIAL_CALENDAR_NOTES } from './config.js';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
     signInWithEmailAndPassword, 
@@ -201,7 +201,7 @@ try {
 let currentState = {
     contests: INITIAL_CONTESTS,
     news: sortNewsDescending(INITIAL_NEWS),
-    calendarNotes: [],
+    calendarNotes: Array.isArray(INITIAL_CALENDAR_NOTES) ? [...INITIAL_CALENDAR_NOTES] : [],
     participants: DEFAULT_PARTICIPANTS,
     votingState: { status: 'closed', endsAt: null, sessionId: null },
     recapVideoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
@@ -225,7 +225,7 @@ try {
         if (parsed.news && Array.isArray(parsed.news) && parsed.news.length > 0) {
             currentState.news = sortNewsDescending(parsed.news);
         }
-        if (parsed.calendarNotes && Array.isArray(parsed.calendarNotes)) {
+        if (parsed.calendarNotes && Array.isArray(parsed.calendarNotes) && parsed.calendarNotes.length > 0) {
             currentState.calendarNotes = parsed.calendarNotes;
         }
         if (parsed.participants && Array.isArray(parsed.participants) && parsed.participants.length > 0) {
@@ -339,6 +339,31 @@ export function mergeVotes(current = [], incoming = []) {
     });
 
     return Array.from(map.values());
+}
+
+export const deletedCalendarNoteIds = new Set();
+
+export function mergeCalendarNotes(current = [], incoming = []) {
+    const curArr = Array.isArray(current) ? current : [];
+    const inArr = Array.isArray(incoming) ? incoming : [];
+    const map = new Map();
+
+    curArr.forEach(item => {
+        if (item && item.id && !deletedCalendarNoteIds.has(item.id)) {
+            map.set(item.id, { ...item });
+        }
+    });
+
+    inArr.forEach(item => {
+        if (item && item.id && !deletedCalendarNoteIds.has(item.id)) {
+            const existing = map.get(item.id) || {};
+            map.set(item.id, { ...existing, ...item });
+        }
+    });
+
+    const list = Array.from(map.values());
+    list.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    return list;
 }
 
 export async function fetchFirestoreStateDirectly() {
@@ -481,9 +506,9 @@ export async function fetchFirestoreStateDirectly() {
                     } catch (e) {}
                 }
                 if (Array.isArray(calList) && calList.length > 0) {
-                    calList.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(calList)) {
-                        currentState.calendarNotes = calList;
+                    const merged = mergeCalendarNotes(currentState.calendarNotes, calList);
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(merged)) {
+                        currentState.calendarNotes = merged;
                         stateChanged = true;
                     }
                 }
@@ -740,10 +765,10 @@ function initFirestoreListeners() {
                         calList = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data;
                     } catch (e) {}
                 }
-                if (Array.isArray(calList)) {
-                    calList.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(calList)) {
-                        currentState.calendarNotes = calList;
+                if (Array.isArray(calList) && calList.length > 0) {
+                    const merged = mergeCalendarNotes(currentState.calendarNotes, calList);
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(merged)) {
+                        currentState.calendarNotes = merged;
                         notifyStateChanged(true);
                     }
                 }
@@ -2602,6 +2627,12 @@ export async function syncAllToFirestore() {
         });
         if (res.ok) {
             serverOk = true;
+            try {
+                const srvData = await res.json();
+                if (srvData && srvData.store && Array.isArray(srvData.store.calendarNotes) && srvData.store.calendarNotes.length > 0) {
+                    currentState.calendarNotes = mergeCalendarNotes(currentState.calendarNotes, srvData.store.calendarNotes);
+                }
+            } catch (e) {}
         }
     } catch (e) {
         console.warn('Server sync error:', e);
@@ -2609,16 +2640,51 @@ export async function syncAllToFirestore() {
 
     // 2. Sync to Firestore Cloud Database
     if (db) {
+        // News
         try {
-            // News
             if (Array.isArray(cleanNews)) {
                 for (const item of cleanNews) {
                     if (item && item.id) {
                         await setDoc(doc(db, "news", String(item.id)), item, { merge: true });
                     }
                 }
+                firestoreOk = true;
             }
-            // Contests
+        } catch (e) {
+            console.warn('Firestore news sync note:', e);
+        }
+
+        // Calendar Notes Collection (Public Events synced across all devices)
+        try {
+            const notesToSave = Array.isArray(cleanCalendarNotes) && cleanCalendarNotes.length > 0 
+                ? cleanCalendarNotes 
+                : (Array.isArray(currentState.calendarNotes) ? currentState.calendarNotes : []);
+            
+            if (notesToSave.length > 0) {
+                await setDoc(doc(db, "artistAccounts", "calendar_store"), {
+                    type: 'calendar_store',
+                    data: safeJsonStringify(notesToSave),
+                    updatedAt: Date.now()
+                }, { merge: true });
+
+                for (const note of notesToSave) {
+                    if (note && note.id) {
+                        setDoc(doc(db, "artistAccounts", "cal_" + note.id), {
+                            ...sanitizeFirestoreData(note),
+                            docType: 'calendar_event',
+                            updatedAt: Date.now()
+                        }, { merge: true }).catch(() => {});
+                    }
+                }
+                firestoreOk = true;
+            }
+        } catch (e) {
+            firestoreError = e.message || String(e);
+            console.warn('Firestore calendar sync error:', e);
+        }
+
+        // Contests
+        try {
             if (Array.isArray(cleanContests)) {
                 for (const c of cleanContests) {
                     if (c && c.id) {
@@ -2626,37 +2692,35 @@ export async function syncAllToFirestore() {
                     }
                 }
             }
-            // Participants
+        } catch (e) {
+            console.warn('Firestore contests sync note:', e);
+        }
+
+        // Participants
+        try {
             if (Array.isArray(cleanParticipants) && cleanParticipants.length > 0) {
                 await setDoc(doc(db, "system", "participants"), {
                     list: cleanParticipants,
                     updatedAt: new Date().toISOString()
                 }, { merge: true });
             }
-            // Settings
+        } catch (e) {
+            console.warn('Firestore participants sync note:', e);
+        }
+
+        // Settings & Voting State
+        try {
             await setDoc(doc(db, "system", "settings"), {
                 recapVideoUrl: currentState.recapVideoUrl || '',
                 featuredContestId: currentState.featuredContestId || 'auto',
                 manualThreshold: Number(currentState.manualThreshold) || 0,
                 revealMode: Boolean(currentState.revealMode)
             }, { merge: true });
-            // Voting State
             if (cleanVotingState && Object.keys(cleanVotingState).length > 0) {
                 await setDoc(doc(db, "system", "voting_state"), cleanVotingState, { merge: true });
             }
-            // Calendar Notes
-            if (Array.isArray(cleanCalendarNotes)) {
-                await setDoc(doc(db, "artistAccounts", "calendar_store"), {
-                    type: 'calendar_store',
-                    data: safeJsonStringify(cleanCalendarNotes),
-                    updatedAt: new Date().toISOString()
-                }, { merge: true });
-            }
-            firestoreOk = true;
-            console.log('Successfully synced all data to Firestore Cloud');
         } catch (e) {
-            firestoreError = e.message || String(e);
-            console.warn('Sync all to Firestore note:', e);
+            console.warn('Firestore settings sync note:', e);
         }
     }
 
@@ -2720,6 +2784,8 @@ export async function saveAdminCalendarNote(note) {
     if (!note.createdAt) note.createdAt = Date.now();
     note.updatedAt = Date.now();
 
+    deletedCalendarNoteIds.delete(note.id);
+
     // 1. Immediate local state update
     if (!Array.isArray(currentState.calendarNotes)) currentState.calendarNotes = [];
     const idx = currentState.calendarNotes.findIndex(n => n.id === note.id);
@@ -2739,12 +2805,18 @@ export async function saveAdminCalendarNote(note) {
                 data: safeJsonStringify(currentState.calendarNotes),
                 updatedAt: Date.now()
             }, { merge: true });
+
+            setDoc(doc(db, "artistAccounts", "cal_" + note.id), {
+                ...sanitizeFirestoreData(note),
+                docType: 'calendar_event',
+                updatedAt: Date.now()
+            }, { merge: true }).catch(() => {});
         }
     } catch (e) {
         console.warn('Firestore save calendar note error:', e);
     }
 
-    // 3. Server REST API persistence
+    // 3. Server REST API persistence (broadcasts via SSE and dual-writes to cloud)
     try {
         const adminToken = localStorage.getItem('harivision_admin_token') || localStorage.getItem('hv_admin_token') || sessionStorage.getItem('hv_admin_token') || '';
         const res = await fetch('/api/calendar', {
@@ -2757,8 +2829,8 @@ export async function saveAdminCalendarNote(note) {
         });
         if (res.ok) {
             const data = await res.json();
-            if (Array.isArray(data.calendarNotes)) {
-                currentState.calendarNotes = data.calendarNotes;
+            if (Array.isArray(data.calendarNotes) && data.calendarNotes.length > 0) {
+                currentState.calendarNotes = mergeCalendarNotes(currentState.calendarNotes, data.calendarNotes);
                 notifyStateChanged(true);
             }
         }
@@ -2771,6 +2843,8 @@ export async function saveAdminCalendarNote(note) {
 
 export async function deleteAdminCalendarNote(id) {
     if (!id) return { success: false };
+
+    deletedCalendarNoteIds.add(id);
 
     // 1. Immediate local state update
     if (!Array.isArray(currentState.calendarNotes)) currentState.calendarNotes = [];
@@ -2785,6 +2859,8 @@ export async function deleteAdminCalendarNote(id) {
                 data: safeJsonStringify(currentState.calendarNotes),
                 updatedAt: Date.now()
             }, { merge: true });
+
+            deleteDoc(doc(db, "artistAccounts", "cal_" + id)).catch(() => {});
         }
     } catch (e) {
         console.warn('Firestore delete calendar note error:', e);

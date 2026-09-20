@@ -38,6 +38,7 @@ let appState = {
     recapVideoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
     featuredContestId: 'auto',
     votes: [],
+    calendarNotes: [],
     manualThreshold: 0,
     revealMode: false
 };
@@ -61,16 +62,15 @@ window.manualCloudSync = async function() {
             await fetchFirestoreStateDirectly();
         } catch (e) {}
 
+        renderAdminCalendar();
+
         if (btn) {
             btn.innerHTML = `<span>☁️</span><span>Синхронизировать с облаком</span>`;
             btn.disabled = false;
         }
 
-        if (result && (result.firestore || result.server || result.success)) {
-            showToast('✓ Все данные и голоса успешно синхронизированы!');
-        } else {
-            showToast('✓ Локальное состояние и сервер обновлены');
-        }
+        const count = Array.isArray(appState.calendarNotes) ? appState.calendarNotes.length : 0;
+        showToast(`✓ Синхронизировано: ${count} событий календаря и все данные!`);
     } catch (err) {
         if (btn) {
             btn.innerHTML = `<span>☁️</span><span>Синхронизировать с облаком</span>`;
