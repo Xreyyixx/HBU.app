@@ -201,7 +201,7 @@ try {
 let currentState = {
     contests: INITIAL_CONTESTS,
     news: sortNewsDescending(INITIAL_NEWS),
-    calendarNotes: Array.isArray(INITIAL_CALENDAR_NOTES) ? [...INITIAL_CALENDAR_NOTES] : [],
+    calendarNotes: [],
     participants: DEFAULT_PARTICIPANTS,
     votingState: { status: 'closed', endsAt: null, sessionId: null },
     recapVideoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
@@ -225,8 +225,8 @@ try {
         if (parsed.news && Array.isArray(parsed.news) && parsed.news.length > 0) {
             currentState.news = sortNewsDescending(parsed.news);
         }
-        if (parsed.calendarNotes && Array.isArray(parsed.calendarNotes) && parsed.calendarNotes.length > 0) {
-            currentState.calendarNotes = parsed.calendarNotes;
+        if (parsed.calendarNotes && Array.isArray(parsed.calendarNotes)) {
+            currentState.calendarNotes = parsed.calendarNotes.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
         }
         if (parsed.participants && Array.isArray(parsed.participants) && parsed.participants.length > 0) {
             currentState.participants = parsed.participants;
@@ -344,26 +344,10 @@ export function mergeVotes(current = [], incoming = []) {
 export const deletedCalendarNoteIds = new Set();
 
 export function mergeCalendarNotes(current = [], incoming = []) {
-    const curArr = Array.isArray(current) ? current : [];
     const inArr = Array.isArray(incoming) ? incoming : [];
-    const map = new Map();
-
-    curArr.forEach(item => {
-        if (item && item.id && !deletedCalendarNoteIds.has(item.id)) {
-            map.set(item.id, { ...item });
-        }
-    });
-
-    inArr.forEach(item => {
-        if (item && item.id && !deletedCalendarNoteIds.has(item.id)) {
-            const existing = map.get(item.id) || {};
-            map.set(item.id, { ...existing, ...item });
-        }
-    });
-
-    const list = Array.from(map.values());
-    list.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    return list;
+    return inArr
+        .filter(item => item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id))
+        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 }
 
 export async function fetchFirestoreStateDirectly() {
@@ -505,10 +489,12 @@ export async function fetchFirestoreStateDirectly() {
                         calList = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data;
                     } catch (e) {}
                 }
-                if (Array.isArray(calList) && calList.length > 0) {
-                    const merged = mergeCalendarNotes(currentState.calendarNotes, calList);
-                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(merged)) {
-                        currentState.calendarNotes = merged;
+                if (Array.isArray(calList)) {
+                    const cleanList = calList
+                        .filter(item => item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id))
+                        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(cleanList)) {
+                        currentState.calendarNotes = cleanList;
                         stateChanged = true;
                     }
                 }
@@ -765,10 +751,12 @@ function initFirestoreListeners() {
                         calList = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data;
                     } catch (e) {}
                 }
-                if (Array.isArray(calList) && calList.length > 0) {
-                    const merged = mergeCalendarNotes(currentState.calendarNotes, calList);
-                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(merged)) {
-                        currentState.calendarNotes = merged;
+                if (Array.isArray(calList)) {
+                    const cleanList = calList
+                        .filter(item => item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id))
+                        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(cleanList)) {
+                        currentState.calendarNotes = cleanList;
                         notifyStateChanged(true);
                     }
                 }
@@ -819,8 +807,11 @@ async function fetchState(isInitial = false) {
 
                 // Sync calendarNotes
                 if (Array.isArray(data.calendarNotes)) {
-                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(data.calendarNotes)) {
-                        currentState.calendarNotes = data.calendarNotes;
+                    const cleanNotes = data.calendarNotes
+                        .filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id) && !deletedCalendarNoteIds.has(n.id))
+                        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(cleanNotes)) {
+                        currentState.calendarNotes = cleanNotes;
                         updated = true;
                     }
                 }
@@ -2656,28 +2647,27 @@ export async function syncAllToFirestore() {
 
         // Calendar Notes Collection (Public Events synced across all devices)
         try {
-            const notesToSave = Array.isArray(cleanCalendarNotes) && cleanCalendarNotes.length > 0 
+            const rawNotes = Array.isArray(cleanCalendarNotes)
                 ? cleanCalendarNotes 
                 : (Array.isArray(currentState.calendarNotes) ? currentState.calendarNotes : []);
+            const notesToSave = rawNotes.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
             
-            if (notesToSave.length > 0) {
-                await setDoc(doc(db, "artistAccounts", "calendar_store"), {
-                    type: 'calendar_store',
-                    data: safeJsonStringify(notesToSave),
-                    updatedAt: Date.now()
-                }, { merge: true });
+            await setDoc(doc(db, "artistAccounts", "calendar_store"), {
+                type: 'calendar_store',
+                data: safeJsonStringify(notesToSave),
+                updatedAt: Date.now()
+            }, { merge: true });
 
-                for (const note of notesToSave) {
-                    if (note && note.id) {
-                        setDoc(doc(db, "artistAccounts", "cal_" + note.id), {
-                            ...sanitizeFirestoreData(note),
-                            docType: 'calendar_event',
-                            updatedAt: Date.now()
-                        }, { merge: true }).catch(() => {});
-                    }
+            for (const note of notesToSave) {
+                if (note && note.id) {
+                    setDoc(doc(db, "artistAccounts", "cal_" + note.id), {
+                        ...sanitizeFirestoreData(note),
+                        docType: 'calendar_event',
+                        updatedAt: Date.now()
+                    }, { merge: true }).catch(() => {});
                 }
-                firestoreOk = true;
             }
+            firestoreOk = true;
         } catch (e) {
             firestoreError = e.message || String(e);
             console.warn('Firestore calendar sync error:', e);
@@ -2786,8 +2776,9 @@ export async function saveAdminCalendarNote(note) {
 
     deletedCalendarNoteIds.delete(note.id);
 
-    // 1. Immediate local state update
+    // 1. Immediate local state update (clean out any legacy sample notes)
     if (!Array.isArray(currentState.calendarNotes)) currentState.calendarNotes = [];
+    currentState.calendarNotes = currentState.calendarNotes.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
     const idx = currentState.calendarNotes.findIndex(n => n.id === note.id);
     if (idx >= 0) {
         currentState.calendarNotes[idx] = { ...currentState.calendarNotes[idx], ...note };
@@ -2797,8 +2788,9 @@ export async function saveAdminCalendarNote(note) {
     currentState.calendarNotes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     notifyStateChanged(true);
 
-    // 2. Direct Firestore persistence to artistAccounts/calendar_store
+    // 2. Direct Firestore persistence to artistAccounts/calendar_store and individual doc
     try {
+        await ensureFirebaseAuth();
         if (db) {
             await setDoc(doc(db, "artistAccounts", "calendar_store"), {
                 type: 'calendar_store',
@@ -2829,8 +2821,10 @@ export async function saveAdminCalendarNote(note) {
         });
         if (res.ok) {
             const data = await res.json();
-            if (Array.isArray(data.calendarNotes) && data.calendarNotes.length > 0) {
-                currentState.calendarNotes = mergeCalendarNotes(currentState.calendarNotes, data.calendarNotes);
+            if (Array.isArray(data.calendarNotes)) {
+                currentState.calendarNotes = data.calendarNotes
+                    .filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id) && !deletedCalendarNoteIds.has(n.id))
+                    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                 notifyStateChanged(true);
             }
         }
@@ -2848,11 +2842,12 @@ export async function deleteAdminCalendarNote(id) {
 
     // 1. Immediate local state update
     if (!Array.isArray(currentState.calendarNotes)) currentState.calendarNotes = [];
-    currentState.calendarNotes = currentState.calendarNotes.filter(n => n.id !== id);
+    currentState.calendarNotes = currentState.calendarNotes.filter(n => n.id !== id && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
     notifyStateChanged(true);
 
     // 2. Direct Firestore persistence update
     try {
+        await ensureFirebaseAuth();
         if (db) {
             await setDoc(doc(db, "artistAccounts", "calendar_store"), {
                 type: 'calendar_store',
@@ -2861,6 +2856,7 @@ export async function deleteAdminCalendarNote(id) {
             }, { merge: true });
 
             deleteDoc(doc(db, "artistAccounts", "cal_" + id)).catch(() => {});
+            deleteDoc(doc(db, "artistAccounts", "calendar_" + id)).catch(() => {});
         }
     } catch (e) {
         console.warn('Firestore delete calendar note error:', e);
@@ -2878,7 +2874,9 @@ export async function deleteAdminCalendarNote(id) {
         if (res.ok) {
             const data = await res.json();
             if (Array.isArray(data.calendarNotes)) {
-                currentState.calendarNotes = data.calendarNotes;
+                currentState.calendarNotes = data.calendarNotes
+                    .filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id) && !deletedCalendarNoteIds.has(n.id))
+                    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
                 notifyStateChanged(true);
             }
         }

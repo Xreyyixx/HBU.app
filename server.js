@@ -106,48 +106,7 @@ const PERMANENT_VAPID_KEYS = {
     privateKey: process.env.VAPID_PRIVATE_KEY || 'BKUXgpRE6_RibzMPaed4crervZfo1YuLEr12ahNIs8c'
 };
 
-const INITIAL_CALENDAR_NOTES = [
-    {
-        id: 'cal-1',
-        date: '2026-09-25',
-        type: 'announcement',
-        title: 'Старт заявочной кампании HariVision 2026',
-        text: 'Официальное открытие приёма музыкальных заявок и конкурсных треков от национальных вещателей и независимых исполнителей со всего мира. Регламент и критерии оценки опубликованы на портале HBU.',
-        photoUrl: '',
-        videoUrl: '',
-        createdAt: 1788000000000
-    },
-    {
-        id: 'cal-2',
-        date: '2026-10-12',
-        type: 'event',
-        title: 'Жеребьёвка полуфиналов и пресс-конференция',
-        text: 'Торжественная церемония распределения участников по полуфиналам сезона, презентация официального слогана и пресс-конференция руководства Haribo Broadcasting Union.',
-        photoUrl: '',
-        videoUrl: '',
-        createdAt: 1788000000000
-    },
-    {
-        id: 'cal-3',
-        date: '2026-10-28',
-        type: 'contest',
-        title: 'Гранд-Финал HariVision 2026 (День Шоу)',
-        text: 'Главное музыкальное событие года! Прямой эфир финального гранд-концерта с участием финалистов, живые выступления и открытие зрительского голосования Public Vote.',
-        photoUrl: '',
-        videoUrl: 'https://rutube.ru/play/embed/e96677936f2a7ea4fd28a07f3533ce14/?p=3_d_ogH8HZvxYX1wKWrEvA',
-        createdAt: 1788000000000
-    },
-    {
-        id: 'cal-4',
-        date: '2026-11-15',
-        type: 'holiday',
-        title: 'Всемирный день музыки HBU',
-        text: 'Праздничный гала-вечер и специальный музыкальный марафон в честь победителей и легенд конкурсов HariVision прошлых лет. Поздравляем всех зрителей и артистов!',
-        photoUrl: '',
-        videoUrl: '',
-        createdAt: 1788000000000
-    }
-];
+const INITIAL_CALENDAR_NOTES = [];
 
 function loadStore() {
     try {
@@ -160,7 +119,7 @@ function loadStore() {
             if (!Array.isArray(data.participants) || data.participants.length === 0) data.participants = DEFAULT_PARTICIPANTS;
             if (!Array.isArray(data.contests)) data.contests = [];
             if (!Array.isArray(data.news)) data.news = [];
-            if (!Array.isArray(data.calendarNotes) || data.calendarNotes.length === 0) data.calendarNotes = INITIAL_CALENDAR_NOTES;
+            if (!Array.isArray(data.calendarNotes)) data.calendarNotes = [];
             if (!data.votingState) data.votingState = { status: 'closed', endsAt: null, sessionId: null };
             if (!data.recapVideoUrl) data.recapVideoUrl = '';
             if (data.featuredContestId === undefined) data.featuredContestId = 'auto';
@@ -193,7 +152,7 @@ function loadStore() {
             ...n,
             reactions: n.reactions || {}
         }))),
-        calendarNotes: INITIAL_CALENDAR_NOTES,
+        calendarNotes: [],
         participants: DEFAULT_PARTICIPANTS,
         votingState: { status: 'closed', endsAt: null, sessionId: null },
         recapVideoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
@@ -223,7 +182,7 @@ function saveStore(data) {
 let store = loadStore();
 if (!Array.isArray(store.news)) store.news = [];
 if (!Array.isArray(store.contests)) store.contests = [];
-if (!Array.isArray(store.calendarNotes) || store.calendarNotes.length === 0) store.calendarNotes = INITIAL_CALENDAR_NOTES;
+if (!Array.isArray(store.calendarNotes)) store.calendarNotes = [];
 if (!Array.isArray(store.participants) || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
 store.vapidKeys = PERMANENT_VAPID_KEYS;
 if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
@@ -435,20 +394,14 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                     try {
                         items = typeof fields.data === 'string' ? JSON.parse(fields.data) : fields.data;
                     } catch (err) {}
-                    if (Array.isArray(items) && items.length > 0) {
+                    if (Array.isArray(items)) {
                         items.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                        const map = new Map();
-                        (store.calendarNotes || []).forEach(n => { if (n && n.id) map.set(n.id, n); });
-                        items.forEach(n => { if (n && n.id) map.set(n.id, { ...(map.get(n.id) || {}), ...n }); });
-                        const merged = Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                        if (JSON.stringify(store.calendarNotes) !== JSON.stringify(merged)) {
-                            store.calendarNotes = merged;
+                        if (JSON.stringify(store.calendarNotes) !== JSON.stringify(items)) {
+                            store.calendarNotes = items;
                             updated = true;
                         }
                     }
                 }
-            } else if (res.status === 404 && Array.isArray(store.calendarNotes) && store.calendarNotes.length > 0) {
-                saveCalendarToFirestore(store.calendarNotes).catch(() => {});
             }
         } catch (e) {}
 
@@ -858,7 +811,7 @@ app.delete('/api/news/:id', (req, res) => {
 
 // --- CALENDAR CRUD ---
 app.get('/api/calendar', (req, res) => {
-    if (!Array.isArray(store.calendarNotes)) store.calendarNotes = INITIAL_CALENDAR_NOTES;
+    if (!Array.isArray(store.calendarNotes)) store.calendarNotes = [];
     res.json(store.calendarNotes);
 });
 
@@ -957,8 +910,10 @@ app.delete('/api/calendar/:id', (req, res) => {
             } catch (e) {}
         }
         if (apiKey) {
-            const docUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/calendar_${id}?key=${apiKey}`;
-            fetch(docUrl, { method: 'DELETE' }).catch(() => {});
+            const docUrl1 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/cal_${id}?key=${apiKey}`;
+            const docUrl2 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/calendar_${id}?key=${apiKey}`;
+            fetch(docUrl1, { method: 'DELETE' }).catch(() => {});
+            fetch(docUrl2, { method: 'DELETE' }).catch(() => {});
         }
     } catch (e) {}
 
@@ -1360,11 +1315,10 @@ app.post('/api/sync', (req, res) => {
     if (Array.isArray(news) && news.length > 0) store.news = news;
     if (Array.isArray(contests) && contests.length > 0) store.contests = contests;
     if (Array.isArray(participants) && participants.length > 0) store.participants = participants;
-    if (Array.isArray(calendarNotes) && calendarNotes.length > 0) {
-        const map = new Map();
-        (store.calendarNotes || []).forEach(n => { if (n && n.id) map.set(n.id, n); });
-        calendarNotes.forEach(n => { if (n && n.id) map.set(n.id, { ...(map.get(n.id) || {}), ...n }); });
-        store.calendarNotes = Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    if (Array.isArray(calendarNotes)) {
+        store.calendarNotes = calendarNotes
+            .filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id))
+            .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         saveCalendarToFirestore(store.calendarNotes).catch(() => {});
     }
     if (Array.isArray(votes) && votes.length > 0) {

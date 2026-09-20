@@ -118,45 +118,4 @@ export const INITIAL_CONTESTS = [];
 
 export const INITIAL_NEWS = [];
 
-export const INITIAL_CALENDAR_NOTES = [
-    {
-        id: 'cal-1',
-        date: '2026-09-25',
-        type: 'announcement',
-        title: 'Старт заявочной кампании HariVision 2026',
-        text: 'Официальное открытие приёма музыкальных заявок и конкурсных треков от национальных вещателей и независимых исполнителей со всего мира. Регламент и критерии оценки опубликованы на портале HBU.',
-        photoUrl: '',
-        videoUrl: '',
-        createdAt: 1788000000000
-    },
-    {
-        id: 'cal-2',
-        date: '2026-10-12',
-        type: 'event',
-        title: 'Жеребьёвка полуфиналов и пресс-конференция',
-        text: 'Торжественная церемония распределения участников по полуфиналам сезона, презентация официального слогана и пресс-конференция руководства Haribo Broadcasting Union.',
-        photoUrl: '',
-        videoUrl: '',
-        createdAt: 1788000000000
-    },
-    {
-        id: 'cal-3',
-        date: '2026-10-28',
-        type: 'contest',
-        title: 'Гранд-Финал HariVision 2026 (День Шоу)',
-        text: 'Главное музыкальное событие года! Прямой эфир финального гранд-концерта с участием финалистов, живые выступления и открытие зрительского голосования Public Vote.',
-        photoUrl: '',
-        videoUrl: 'https://rutube.ru/play/embed/e96677936f2a7ea4fd28a07f3533ce14/?p=3_d_ogH8HZvxYX1wKWrEvA',
-        createdAt: 1788000000000
-    },
-    {
-        id: 'cal-4',
-        date: '2026-11-15',
-        type: 'holiday',
-        title: 'Всемирный день музыки HBU',
-        text: 'Праздничный гала-вечер и специальный музыкальный марафон в честь победителей и легенд конкурсов HariVision прошлых лет. Поздравляем всех зрителей и артистов!',
-        photoUrl: '',
-        videoUrl: '',
-        createdAt: 1788000000000
-    }
-];
+export const INITIAL_CALENDAR_NOTES = [];

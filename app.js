@@ -2391,14 +2391,14 @@ window.saveAdminCalendarNoteFromModal = async function(dateStr) {
         else calendarNotesData.push({ ...noteData });
         calendarNotesData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
+        const wasEditing = Boolean(calendarAdminEditingNoteId);
         calendarAdminEditingDate = null;
         calendarAdminEditingNoteId = null;
 
-        showToast(noteData.id === calendarAdminEditingNoteId ? '✓ Событие в календаре обновлено' : '✓ Официальное событие сохранено и опубликовано для всех');
+        showToast(wasEditing ? '✓ Событие в календаре обновлено' : '✓ Официальное событие сохранено и опубликовано для всех');
 
         renderCalendarModalBody(dateStr);
-        renderCalendarGrid(calendarCurrentYear, calendarCurrentMonth);
-        renderUpcomingEventsList();
+        renderMainView();
     } catch (e) {
         console.error('Error saving calendar note from modal:', e);
         showToast('✕ Ошибка сохранения: ' + e.message);
@@ -2421,8 +2421,7 @@ window.deleteAdminCalendarNoteFromModal = async function(id, dateStr) {
         }
         showToast('✓ Официальное событие удалено');
         renderCalendarModalBody(dateStr);
-        renderCalendarGrid(calendarCurrentYear, calendarCurrentMonth);
-        renderUpcomingEventsList();
+        renderMainView();
     } catch (e) {
         console.error('Error deleting calendar note from modal:', e);
         showToast('✕ Ошибка при удалении: ' + e.message);
