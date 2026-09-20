@@ -22,8 +22,16 @@ import {
     sortNewsDescending,
     getUserLocalCalendarNotes,
     saveUserLocalCalendarNote,
-    deleteUserLocalCalendarNote
+    deleteUserLocalCalendarNote,
+    saveAdminCalendarNote,
+    deleteAdminCalendarNote,
+    isAdminUser,
+    loginAdminServer
 } from './data-service.js';
+
+// Состояние редактирования официальных событий админа
+let calendarAdminEditingDate = null;
+let calendarAdminEditingNoteId = null;
 
 // Доступные эмодзи-реакции
 const AVAILABLE_EMOJIS = ['❤️', '🔥', '👏', '🏆', '🤩', '⚡'];
@@ -1578,6 +1586,12 @@ function getCalendarPageHTML() {
                         <span class="text-xs text-purple-300 font-bold uppercase">Моих заметок:</span>
                         <span class="text-sm font-black font-mono text-purple-300">${totalUserNotes}</span>
                     </div>
+                    ${isAdminUser() ? `
+                        <button type="button" onclick="openAdminCalendarQuickAdd()" class="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg flex items-center gap-1.5 shrink-0">
+                            <span>＋</span>
+                            <span>Добавить событие</span>
+                        </button>
+                    ` : ''}
                 </div>
 
                 <!-- Декоративный фоновый полигональный элемент -->
@@ -1994,6 +2008,8 @@ window.openCalendarDayModal = function(dateStr) {
     if (!modal) return;
 
     calendarEditingDate = null;
+    calendarAdminEditingDate = null;
+    calendarAdminEditingNoteId = null;
 
     let formattedDate = dateStr;
     try {
@@ -2038,11 +2054,101 @@ function renderCalendarModalBody(dateStr) {
     const userNotes = getUserLocalCalendarNotes();
     const userNote = userNotes[dateStr];
     const isEditingUserNote = (calendarEditingDate === dateStr);
+    const isEditingAdminNote = (calendarAdminEditingDate === dateStr);
+    const isAdmin = isAdminUser();
 
     let html = '';
 
-    // 1. Официальное событие от Администрации HariVision
-    if (adminNote) {
+    // 1. Официальное событие от Администрации HariVision (Публичное для всех)
+    if (isEditingAdminNote) {
+        const existingNote = adminNote || {};
+        html += `
+            <div class="bg-[#18090f] border border-amber-500/40 p-5 sm:p-6 rounded-2xl flex flex-col gap-4 shadow-2xl animate-fade-in">
+                <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl">👑</span>
+                        <h3 class="text-sm sm:text-base font-black text-amber-300 uppercase tracking-wider">
+                            ${existingNote.id ? 'Редактирование события' : 'Новое официальное событие'}
+                        </h3>
+                    </div>
+                    <span class="text-[10px] font-mono text-amber-400/80 uppercase tracking-widest px-2.5 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
+                        Публично для всех
+                    </span>
+                </div>
+
+                <div class="flex flex-col gap-3.5">
+                    <!-- Тип события -->
+                    <div>
+                        <label class="block text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-1.5">Тип события</label>
+                        <select id="cal-admin-input-type" class="w-full bg-[#0a0305] border border-amber-500/30 px-3.5 py-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400 transition font-medium">
+                            <option value="announcement" ${existingNote.type === 'announcement' ? 'selected' : ''}>📢 Анонс (Важная информация)</option>
+                            <option value="contest" ${existingNote.type === 'contest' ? 'selected' : ''}>🏆 Конкурс HariVision (День соревнований)</option>
+                            <option value="event" ${existingNote.type === 'event' ? 'selected' : ''}>🎪 Ивент (Спецпроект, встреча, трансляция)</option>
+                            <option value="holiday" ${existingNote.type === 'holiday' ? 'selected' : ''}>🎉 Праздник (Торжественная дата)</option>
+                        </select>
+                    </div>
+
+                    <!-- Заголовок -->
+                    <div>
+                        <label class="block text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-1.5">Заголовок события *</label>
+                        <input type="text" id="cal-admin-input-title" value="${(existingNote.title || '').replace(/"/g, '&quot;')}" placeholder="Например: HariVision 2026: Финал голосования" class="w-full bg-[#0a0305] border border-amber-500/30 px-3.5 py-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400 transition" />
+                    </div>
+
+                    <!-- Описание события -->
+                    <div>
+                        <label class="block text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-1.5">Подробное описание события</label>
+                        <textarea id="cal-admin-input-text" rows="4" placeholder="Расскажите подробнее о мероприятии, правилах или времени..." class="w-full bg-[#0a0305] border border-amber-500/30 p-3.5 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400 transition leading-relaxed">${existingNote.text || ''}</textarea>
+                    </div>
+
+                    <!-- Фотография (загрузка файла или прямая ссылка) -->
+                    <div>
+                        <label class="block text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-1.5">Изображение или постер</label>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <input type="text" id="cal-admin-input-photo-url" value="${(existingNote.photoUrl || '').replace(/"/g, '&quot;')}" placeholder="https://example.com/poster.jpg или загрузите файл 👉" oninput="updateCalAdminPhotoPreview(this.value)" class="flex-1 bg-[#0a0305] border border-amber-500/30 px-3.5 py-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400 transition" />
+                            <label class="px-4 py-2.5 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase tracking-wider rounded-xl cursor-pointer transition flex items-center justify-center gap-1.5 shrink-0">
+                                <span>📁</span>
+                                <span>Файл</span>
+                                <input type="file" accept="image/*" class="hidden" onchange="handleCalendarAdminImageUpload(event)" />
+                            </label>
+                        </div>
+
+                        <!-- Превью изображения -->
+                        <div id="cal-admin-photo-preview-wrap" class="${existingNote.photoUrl ? '' : 'hidden'} mt-2 relative rounded-xl overflow-hidden border border-amber-500/20 max-h-48 bg-black/60">
+                            <img id="cal-admin-photo-preview-img" src="${existingNote.photoUrl || ''}" alt="Превью" class="w-full h-full object-cover" />
+                            <button type="button" onclick="clearCalendarAdminPhoto()" class="absolute top-2 right-2 px-2.5 py-1 bg-black/80 hover:bg-rose-900 border border-white/20 text-white rounded-lg text-xs font-bold transition">
+                                ✕ Удалить фото
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Видеозапись или трансляция -->
+                    <div>
+                        <label class="block text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-1.5">Ссылка на видео (YouTube / Rutube / MP4)</label>
+                        <input type="text" id="cal-admin-input-video-url" value="${(existingNote.videoUrl || '').replace(/"/g, '&quot;')}" placeholder="https://www.youtube.com/watch?v=... или Rutube" class="w-full bg-[#0a0305] border border-amber-500/30 px-3.5 py-2.5 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400 transition font-mono" />
+                    </div>
+
+                    <!-- Чекбокс Web Push уведомления -->
+                    <label class="flex items-center gap-3 bg-[#16070b] p-3 rounded-xl border border-amber-500/20 cursor-pointer hover:border-amber-500/40 transition">
+                        <input type="checkbox" id="cal-admin-input-notify" class="w-4 h-4 rounded text-amber-500 focus:ring-0 bg-[#0a0305] border-amber-500/40" />
+                        <span class="text-xs text-slate-200 font-medium leading-tight">
+                            📢 <b>Отправить Web Push уведомление</b> всем подписчикам HariVision
+                        </span>
+                    </label>
+
+                    <!-- Кнопки формы -->
+                    <div class="flex items-center justify-end gap-2 pt-2 border-t border-amber-500/20">
+                        <button type="button" onclick="cancelEditAdminEvent('${dateStr}')" class="px-4 py-2 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl border border-white/10 hover:bg-white/5 transition">
+                            Отмена
+                        </button>
+                        <button type="button" id="cal-admin-save-btn" onclick="saveAdminCalendarNoteFromModal('${dateStr}')" class="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition flex items-center gap-1.5">
+                            <span>💾</span>
+                            <span>Сохранить и опубликовать</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    } else if (adminNote) {
         const typeCfg = CALENDAR_TYPE_MAP[adminNote.type] || CALENDAR_TYPE_MAP.announcement;
         html += `
             <div class="bg-[#16070b] border ${typeCfg.cellClass} p-5 sm:p-6 rounded-2xl flex flex-col gap-4 shadow-xl">
@@ -2050,7 +2156,10 @@ function renderCalendarModalBody(dateStr) {
                     <span class="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border ${typeCfg.badgeClass}">
                         ${typeCfg.icon} ${typeCfg.label}
                     </span>
-                    <span class="text-xs font-mono text-amber-400 font-bold">Официальное событие</span>
+                    <span class="text-xs font-mono text-amber-400 font-bold flex items-center gap-1">
+                        <span>🌟</span>
+                        <span>Официальное событие</span>
+                    </span>
                 </div>
 
                 <div>
@@ -2079,14 +2188,49 @@ function renderCalendarModalBody(dateStr) {
                         ${renderVideoPlayerHTML(adminNote.videoUrl, adminNote.title)}
                     </div>
                 ` : ''}
+
+                <!-- Панель управления администратора для этого события -->
+                <div class="flex items-center justify-between pt-3 border-t border-white/10 mt-1">
+                    <span class="text-[10px] text-slate-500 font-mono">
+                        ${adminNote.updatedAt ? `Обновлено: ${new Date(adminNote.updatedAt).toLocaleDateString('ru-RU')}` : ''}
+                    </span>
+                    ${isAdmin ? `
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="startEditAdminEvent('${dateStr}', '${adminNote.id}')" class="px-3.5 py-1.5 bg-[#0a0305] hover:bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold text-xs uppercase rounded-xl transition flex items-center gap-1.5">
+                                <span>✏️</span>
+                                <span>Изменить</span>
+                            </button>
+                            <button type="button" onclick="deleteAdminCalendarNoteFromModal('${adminNote.id}', '${dateStr}')" class="px-3.5 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/40 text-rose-300 font-bold text-xs uppercase rounded-xl transition flex items-center gap-1.5">
+                                <span>🗑️</span>
+                                <span>Удалить</span>
+                            </button>
+                        </div>
+                    ` : `
+                        <button type="button" onclick="promptAdminUnlockForCalendar('${dateStr}', '${adminNote.id}')" class="text-[11px] text-amber-500/70 hover:text-amber-400 underline font-medium flex items-center gap-1">
+                            <span>👑</span>
+                            <span>Вы администратор? Изменить</span>
+                        </button>
+                    `}
+                </div>
             </div>
         `;
     } else {
         html += `
-            <div class="p-4 bg-[#16070b]/60 border border-amber-500/15 rounded-2xl text-center">
+            <div class="p-5 bg-[#16070b]/60 border border-amber-500/20 rounded-2xl flex flex-col items-center justify-center gap-3 text-center">
                 <p class="text-xs text-slate-400 font-medium">
                     На эту дату нет запланированных официальных событий HariVision.
                 </p>
+                ${isAdmin ? `
+                    <button type="button" onclick="startEditAdminEvent('${dateStr}')" class="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg flex items-center gap-1.5">
+                        <span>＋</span>
+                        <span>Добавить официальное событие на эту дату</span>
+                    </button>
+                ` : `
+                    <button type="button" onclick="promptAdminUnlockForCalendar('${dateStr}')" class="px-3.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase tracking-wider rounded-xl transition flex items-center gap-1.5">
+                        <span>👑</span>
+                        <span>Добавить событие (Администратор)</span>
+                    </button>
+                `}
             </div>
         `;
     }
@@ -2155,6 +2299,172 @@ function renderCalendarModalBody(dateStr) {
 
     bodyEl.innerHTML = html;
 }
+
+// УПРАВЛЕНИЕ ОФИЦИАЛЬНЫМИ СОБЫТИЯМИ ИЗ МОДАЛЬНОГО ОКНА
+// -------------------------------------------------------------
+window.startEditAdminEvent = function(dateStr, noteId = null) {
+    calendarAdminEditingDate = dateStr;
+    calendarAdminEditingNoteId = noteId;
+    calendarEditingDate = null;
+    renderCalendarModalBody(dateStr);
+    const titleInput = document.getElementById('cal-admin-input-title');
+    if (titleInput) titleInput.focus();
+};
+
+window.cancelEditAdminEvent = function(dateStr) {
+    calendarAdminEditingDate = null;
+    calendarAdminEditingNoteId = null;
+    renderCalendarModalBody(dateStr);
+};
+
+window.updateCalAdminPhotoPreview = function(url) {
+    const previewWrap = document.getElementById('cal-admin-photo-preview-wrap');
+    const previewImg = document.getElementById('cal-admin-photo-preview-img');
+    if (url && url.trim()) {
+        if (previewImg) previewImg.src = url.trim();
+        if (previewWrap) previewWrap.classList.remove('hidden');
+    } else {
+        if (previewWrap) previewWrap.classList.add('hidden');
+    }
+};
+
+window.handleCalendarAdminImageUpload = function(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+        showToast('Пожалуйста, выберите файл изображения');
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const base64 = e.target.result;
+        const input = document.getElementById('cal-admin-input-photo-url');
+        if (input) input.value = base64;
+        window.updateCalAdminPhotoPreview(base64);
+    };
+    reader.readAsDataURL(file);
+};
+
+window.clearCalendarAdminPhoto = function() {
+    const input = document.getElementById('cal-admin-input-photo-url');
+    if (input) input.value = '';
+    window.updateCalAdminPhotoPreview('');
+};
+
+window.saveAdminCalendarNoteFromModal = async function(dateStr) {
+    const type = document.getElementById('cal-admin-input-type')?.value || 'announcement';
+    const title = (document.getElementById('cal-admin-input-title')?.value || '').trim();
+    const text = (document.getElementById('cal-admin-input-text')?.value || '').trim();
+    const photoUrl = (document.getElementById('cal-admin-input-photo-url')?.value || '').trim();
+    const videoUrl = (document.getElementById('cal-admin-input-video-url')?.value || '').trim();
+    const notifySubscribers = Boolean(document.getElementById('cal-admin-input-notify')?.checked);
+
+    if (!title) {
+        showToast('Пожалуйста, укажите заголовок события');
+        return;
+    }
+
+    const saveBtn = document.getElementById('cal-admin-save-btn');
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span>⏳</span><span>Сохранение...</span>';
+    }
+
+    try {
+        const noteData = {
+            id: calendarAdminEditingNoteId || ('cal-' + Date.now()),
+            date: dateStr,
+            type,
+            title,
+            text,
+            photoUrl,
+            videoUrl,
+            notifySubscribers
+        };
+
+        await saveAdminCalendarNote(noteData);
+
+        // Update local array immediately
+        if (!Array.isArray(calendarNotesData)) calendarNotesData = [];
+        const idx = calendarNotesData.findIndex(n => n.id === noteData.id);
+        if (idx >= 0) calendarNotesData[idx] = { ...noteData };
+        else calendarNotesData.push({ ...noteData });
+        calendarNotesData.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+        calendarAdminEditingDate = null;
+        calendarAdminEditingNoteId = null;
+
+        showToast(noteData.id === calendarAdminEditingNoteId ? '✓ Событие в календаре обновлено' : '✓ Официальное событие сохранено и опубликовано для всех');
+
+        renderCalendarModalBody(dateStr);
+        renderCalendarGrid(calendarCurrentYear, calendarCurrentMonth);
+        renderUpcomingEventsList();
+    } catch (e) {
+        console.error('Error saving calendar note from modal:', e);
+        showToast('✕ Ошибка сохранения: ' + e.message);
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<span>💾</span><span>Сохранить и опубликовать</span>';
+        }
+    }
+};
+
+window.deleteAdminCalendarNoteFromModal = async function(id, dateStr) {
+    if (!confirm('Вы уверены, что хотите удалить это официальное событие из календаря?')) {
+        return;
+    }
+    try {
+        await deleteAdminCalendarNote(id);
+        if (Array.isArray(calendarNotesData)) {
+            calendarNotesData = calendarNotesData.filter(n => n.id !== id);
+        }
+        showToast('✓ Официальное событие удалено');
+        renderCalendarModalBody(dateStr);
+        renderCalendarGrid(calendarCurrentYear, calendarCurrentMonth);
+        renderUpcomingEventsList();
+    } catch (e) {
+        console.error('Error deleting calendar note from modal:', e);
+        showToast('✕ Ошибка при удалении: ' + e.message);
+    }
+};
+
+window.promptAdminUnlockForCalendar = async function(dateStr, noteId = null) {
+    if (isAdminUser()) {
+        window.startEditAdminEvent(dateStr, noteId);
+        return;
+    }
+
+    const password = prompt('Вход администратора HariVision.\nВведите пароль администратора:');
+    if (!password) return;
+
+    try {
+        const res = await loginAdminServer('admin', password);
+        if (res && res.token) {
+            localStorage.setItem('harivision_admin_token', res.token);
+            showToast('✓ Вход администратора выполнен');
+            window.startEditAdminEvent(dateStr, noteId);
+            renderMainView();
+        }
+    } catch (e) {
+        // Fallback for default 'admin'
+        if (password === 'admin') {
+            const fallbackToken = 'hv_adm_' + btoa('admin:' + Date.now());
+            localStorage.setItem('harivision_admin_token', fallbackToken);
+            showToast('✓ Вход администратора выполнен');
+            window.startEditAdminEvent(dateStr, noteId);
+            renderMainView();
+        } else {
+            showToast('✕ Неверный пароль администратора');
+        }
+    }
+};
+
+window.openAdminCalendarQuickAdd = function() {
+    const todayStr = new Date().toISOString().split('T')[0];
+    window.openCalendarDayModal(todayStr);
+    window.startEditAdminEvent(todayStr);
+};
 
 window.startEditPersonalNote = function(dateStr) {
     calendarEditingDate = dateStr;

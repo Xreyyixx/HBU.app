@@ -469,6 +469,25 @@ export async function fetchFirestoreStateDirectly() {
             }
         } catch (e) {}
 
+        // 8. Calendar Notes Collection (Public Events)
+        try {
+            const calSnap = await getDocs(collection(db, "calendar"));
+            const calList = [];
+            calSnap.forEach(d => {
+                const cleaned = sanitizeFirestoreData(d.data());
+                calList.push({ id: d.id, ...(cleaned || {}) });
+            });
+            if (calList.length > 0) {
+                calList.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(calList)) {
+                    currentState.calendarNotes = calList;
+                    stateChanged = true;
+                }
+            }
+        } catch (e) {
+            console.warn('Firestore calendar fetch direct error:', e);
+        }
+
         if (stateChanged) {
             notifyStateChanged(false);
             syncCurrentUserArtistStatus();
@@ -704,6 +723,25 @@ function initFirestoreListeners() {
                 }
             }
         }, (err) => console.warn('Firestore broadcast listener error:', err));
+    } catch (e) {}
+
+    // J. Real-Time Calendar Notes Listener (Public Events synced across all devices)
+    try {
+        onSnapshot(collection(db, "calendar"), (snapshot) => {
+            if (!snapshot.empty) {
+                const calList = [];
+                snapshot.forEach(docSnap => {
+                    const raw = docSnap.data() || {};
+                    const cleaned = sanitizeFirestoreData(raw) || {};
+                    calList.push({ id: docSnap.id, ...cleaned });
+                });
+                calList.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(calList)) {
+                    currentState.calendarNotes = calList;
+                    notifyStateChanged(true);
+                }
+            }
+        }, (err) => console.warn('Firestore calendar realtime listener warning:', err));
     } catch (e) {}
 }
 
@@ -2532,6 +2570,7 @@ export async function syncAllToFirestore() {
     const cleanParticipants = (currentState.participants || []).map(p => sanitizeFirestoreData(p)).filter(Boolean);
     const cleanVotingState = sanitizeFirestoreData(currentState.votingState) || {};
     const cleanVotes = (currentState.votes || []).map(v => sanitizeFirestoreData(v)).filter(Boolean);
+    const cleanCalendarNotes = (currentState.calendarNotes || []).map(c => sanitizeFirestoreData(c)).filter(Boolean);
 
     // 1. Sync to Backend Server Database
     try {
@@ -2539,6 +2578,7 @@ export async function syncAllToFirestore() {
             news: cleanNews,
             contests: cleanContests,
             participants: cleanParticipants,
+            calendarNotes: cleanCalendarNotes,
             settings: {
                 recapVideoUrl: currentState.recapVideoUrl || '',
                 featuredContestId: currentState.featuredContestId || 'auto',
@@ -2596,6 +2636,14 @@ export async function syncAllToFirestore() {
             // Voting State
             if (cleanVotingState && Object.keys(cleanVotingState).length > 0) {
                 await setDoc(doc(db, "system", "voting_state"), cleanVotingState, { merge: true });
+            }
+            // Calendar Notes
+            if (Array.isArray(cleanCalendarNotes)) {
+                for (const item of cleanCalendarNotes) {
+                    if (item && item.id) {
+                        await setDoc(doc(db, "calendar", String(item.id)), item, { merge: true });
+                    }
+                }
             }
             firestoreOk = true;
             console.log('Successfully synced all data to Firestore Cloud');
@@ -2659,44 +2707,101 @@ export function deleteUserLocalCalendarNote(dateStr) {
 }
 
 export async function saveAdminCalendarNote(note) {
-    const adminToken = localStorage.getItem('hv_admin_token') || sessionStorage.getItem('hv_admin_token') || '';
-    const res = await fetch('/api/calendar', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': adminToken ? `Bearer ${adminToken}` : ''
-        },
-        body: JSON.stringify(note)
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Ошибка при сохранении события в календарь');
+    if (!note) throw new Error('Данные события не указаны');
+    if (!note.date) throw new Error('Дата события обязательна');
+    if (!note.id) note.id = 'cal-' + Date.now();
+    if (!note.createdAt) note.createdAt = Date.now();
+    note.updatedAt = Date.now();
+
+    // 1. Immediate local state update
+    if (!Array.isArray(currentState.calendarNotes)) currentState.calendarNotes = [];
+    const idx = currentState.calendarNotes.findIndex(n => n.id === note.id);
+    if (idx >= 0) {
+        currentState.calendarNotes[idx] = { ...currentState.calendarNotes[idx], ...note };
+    } else {
+        currentState.calendarNotes.push(note);
     }
-    const data = await res.json();
-    if (Array.isArray(data.calendarNotes)) {
-        currentState.calendarNotes = data.calendarNotes;
-        notifyStateChanged(true);
+    currentState.calendarNotes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    notifyStateChanged(true);
+
+    // 2. Direct Firestore persistence
+    try {
+        if (db) {
+            const cleanNote = sanitizeFirestoreData(note) || {};
+            await setDoc(doc(db, "calendar", note.id), cleanNote, { merge: true });
+        }
+    } catch (e) {
+        console.warn('Firestore save calendar note error:', e);
     }
-    return data;
+
+    // 3. Server REST API persistence
+    try {
+        const adminToken = localStorage.getItem('harivision_admin_token') || localStorage.getItem('hv_admin_token') || sessionStorage.getItem('hv_admin_token') || '';
+        const res = await fetch('/api/calendar', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': adminToken ? `Bearer ${adminToken}` : ''
+            },
+            body: safeJsonStringify(note)
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.calendarNotes)) {
+                currentState.calendarNotes = data.calendarNotes;
+                notifyStateChanged(true);
+            }
+        }
+    } catch (e) {
+        console.warn('Server save calendar note error:', e);
+    }
+
+    return { success: true, note, calendarNotes: currentState.calendarNotes };
 }
 
 export async function deleteAdminCalendarNote(id) {
-    const adminToken = localStorage.getItem('hv_admin_token') || sessionStorage.getItem('hv_admin_token') || '';
-    const res = await fetch(`/api/calendar/${id}`, {
-        method: 'DELETE',
-        headers: {
-            'Authorization': adminToken ? `Bearer ${adminToken}` : ''
+    if (!id) return { success: false };
+
+    // 1. Immediate local state update
+    if (!Array.isArray(currentState.calendarNotes)) currentState.calendarNotes = [];
+    currentState.calendarNotes = currentState.calendarNotes.filter(n => n.id !== id);
+    notifyStateChanged(true);
+
+    // 2. Direct Firestore deletion
+    try {
+        if (db) {
+            await deleteDoc(doc(db, "calendar", id));
         }
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Ошибка при удалении события из календаря');
+    } catch (e) {
+        console.warn('Firestore delete calendar note error:', e);
     }
-    const data = await res.json();
-    if (Array.isArray(data.calendarNotes)) {
-        currentState.calendarNotes = data.calendarNotes;
-        notifyStateChanged(true);
+
+    // 3. Server REST API deletion
+    try {
+        const adminToken = localStorage.getItem('harivision_admin_token') || localStorage.getItem('hv_admin_token') || sessionStorage.getItem('hv_admin_token') || '';
+        const res = await fetch(`/api/calendar/${id}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': adminToken ? `Bearer ${adminToken}` : ''
+            }
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.calendarNotes)) {
+                currentState.calendarNotes = data.calendarNotes;
+                notifyStateChanged(true);
+            }
+        }
+    } catch (e) {
+        console.warn('Server delete calendar note error:', e);
     }
-    return data;
+
+    return { success: true, calendarNotes: currentState.calendarNotes };
+}
+
+export function isAdminUser() {
+    if (typeof localStorage === 'undefined') return false;
+    const token = localStorage.getItem('harivision_admin_token') || localStorage.getItem('hv_admin_token');
+    return Boolean(token || (auth && auth.currentUser && (auth.currentUser.email === 'admin@harivision.org' || auth.currentUser.email === 'admin')));
 }
 

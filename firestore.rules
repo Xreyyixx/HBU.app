@@ -27,6 +27,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Calendar events (admin announcements, contests, events, holidays)
+    match /calendar/{document=**} {
+      allow read, write: if true;
+    }
+
     // Users and artist accounts
     match /users/{document=**} {
       allow read, write: if true;

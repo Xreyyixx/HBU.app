@@ -424,7 +424,30 @@ async function syncWithFirestore(isSubSyncOnly = false) {
             }
         } catch (e) {}
 
-        // 5. Sync push subscriptions from Firestore collection "artistAccounts" (with type === 'push_sub')
+        // 5. Sync calendar notes directly from Firestore collection "calendar"
+        try {
+            const res = await fetch(`${base}/calendar?key=${apiKey}`);
+            if (res.ok) {
+                const data = await res.json();
+                const items = (data.documents || []).map(d => ({
+                    id: d.name.split('/').pop(),
+                    ...parseFirestoreFields(d.fields)
+                }));
+                if (items.length > 0) {
+                    items.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                    const map = new Map();
+                    (store.calendarNotes || []).forEach(n => { if (n && n.id) map.set(n.id, n); });
+                    items.forEach(n => { if (n && n.id) map.set(n.id, { ...(map.get(n.id) || {}), ...n }); });
+                    const merged = Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                    if (JSON.stringify(store.calendarNotes) !== JSON.stringify(merged)) {
+                        store.calendarNotes = merged;
+                        updated = true;
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // 6. Sync push subscriptions from Firestore collection "artistAccounts" (with type === 'push_sub')
         try {
             const res = await fetch(`${base}/artistAccounts?key=${apiKey}&pageSize=300`);
             if (res.ok) {
@@ -803,7 +826,7 @@ app.get('/api/calendar', (req, res) => {
 });
 
 app.post('/api/calendar', (req, res) => {
-    const note = req.body;
+    const note = (req.body && req.body.note) ? req.body.note : req.body;
     if (!note || !note.date) {
         return res.status(400).json({ success: false, error: 'Дата события обязательна' });
     }
@@ -826,6 +849,35 @@ app.post('/api/calendar', (req, res) => {
     store.calendarNotes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     saveStore(store);
     broadcastState('calendar_update');
+
+    // Dual-write to Firestore via REST
+    try {
+        let apiKey = process.env.FIREBASE_API_KEY;
+        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
+        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
+        if (fs.existsSync(appletConfigPath)) {
+            try {
+                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
+                if (cfg.apiKey) apiKey = cfg.apiKey;
+                if (cfg.projectId) projectId = cfg.projectId;
+            } catch (e) {}
+        }
+        if (apiKey) {
+            const docUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/calendar/${note.id}?key=${apiKey}`;
+            const fsFields = {};
+            for (const [k, v] of Object.entries(note)) {
+                if (v === null || v === undefined) continue;
+                if (typeof v === 'string') fsFields[k] = { stringValue: v };
+                else if (typeof v === 'number') fsFields[k] = { integerValue: String(v) };
+                else if (typeof v === 'boolean') fsFields[k] = { booleanValue: v };
+            }
+            fetch(docUrl, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: fsFields })
+            }).catch(() => {});
+        }
+    } catch (e) {}
 
     if (Boolean(note.notifySubscribers)) {
         const typeTitles = {
@@ -852,6 +904,25 @@ app.delete('/api/calendar/:id', (req, res) => {
     store.calendarNotes = store.calendarNotes.filter(n => n.id !== id);
     saveStore(store);
     broadcastState('calendar_update');
+
+    // Delete from Firestore via REST
+    try {
+        let apiKey = process.env.FIREBASE_API_KEY;
+        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
+        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
+        if (fs.existsSync(appletConfigPath)) {
+            try {
+                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
+                if (cfg.apiKey) apiKey = cfg.apiKey;
+                if (cfg.projectId) projectId = cfg.projectId;
+            } catch (e) {}
+        }
+        if (apiKey) {
+            const docUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/calendar/${id}?key=${apiKey}`;
+            fetch(docUrl, { method: 'DELETE' }).catch(() => {});
+        }
+    } catch (e) {}
+
     res.json({ success: true, calendarNotes: store.calendarNotes });
 });
 
@@ -1246,10 +1317,16 @@ app.post('/api/votes/reset-all', (req, res) => {
 
 // Full state sync endpoint
 app.post('/api/sync', (req, res) => {
-    const { news, contests, participants, settings, votingState, votes } = req.body || {};
+    const { news, contests, participants, calendarNotes, settings, votingState, votes } = req.body || {};
     if (Array.isArray(news) && news.length > 0) store.news = news;
     if (Array.isArray(contests) && contests.length > 0) store.contests = contests;
     if (Array.isArray(participants) && participants.length > 0) store.participants = participants;
+    if (Array.isArray(calendarNotes) && calendarNotes.length > 0) {
+        const map = new Map();
+        (store.calendarNotes || []).forEach(n => { if (n && n.id) map.set(n.id, n); });
+        calendarNotes.forEach(n => { if (n && n.id) map.set(n.id, { ...(map.get(n.id) || {}), ...n }); });
+        store.calendarNotes = Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    }
     if (Array.isArray(votes) && votes.length > 0) {
         const curMap = new Map();
         (store.votes || []).forEach(v => {

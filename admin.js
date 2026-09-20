@@ -99,6 +99,7 @@ function setAdminAuthenticated(authenticated) {
         updateVotingSessionUI();
         renderAdminNews();
         renderAdminContests();
+        renderAdminCalendar();
         updateBannerSelectUI();
     } else {
         authPanel.classList.remove('hidden');
@@ -2330,6 +2331,12 @@ window.saveCalendarNoteFromAdmin = async function(event) {
         };
 
         await saveAdminCalendarNote(noteData);
+        if (!Array.isArray(appState.calendarNotes)) appState.calendarNotes = [];
+        const idx = appState.calendarNotes.findIndex(n => n.id === noteData.id);
+        if (idx >= 0) appState.calendarNotes[idx] = { ...noteData };
+        else appState.calendarNotes.push({ ...noteData });
+        appState.calendarNotes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
         showToast(editId ? '✓ Событие в календаре успешно обновлено' : '✓ Событие успешно добавлено в календарь');
         closeCalendarEditorModal();
         renderAdminCalendar();
@@ -2350,6 +2357,9 @@ window.deleteCalendarNoteFromAdmin = async function(id) {
     }
     try {
         await deleteAdminCalendarNote(id);
+        if (Array.isArray(appState.calendarNotes)) {
+            appState.calendarNotes = appState.calendarNotes.filter(n => n.id !== id);
+        }
         showToast('✓ Событие удалено из календаря');
         renderAdminCalendar();
     } catch (err) {
