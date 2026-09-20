@@ -201,6 +201,7 @@ try {
 let currentState = {
     contests: INITIAL_CONTESTS,
     news: sortNewsDescending(INITIAL_NEWS),
+    calendarNotes: [],
     participants: DEFAULT_PARTICIPANTS,
     votingState: { status: 'closed', endsAt: null, sessionId: null },
     recapVideoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
@@ -223,6 +224,9 @@ try {
         }
         if (parsed.news && Array.isArray(parsed.news) && parsed.news.length > 0) {
             currentState.news = sortNewsDescending(parsed.news);
+        }
+        if (parsed.calendarNotes && Array.isArray(parsed.calendarNotes)) {
+            currentState.calendarNotes = parsed.calendarNotes;
         }
         if (parsed.participants && Array.isArray(parsed.participants) && parsed.participants.length > 0) {
             currentState.participants = parsed.participants;
@@ -272,6 +276,7 @@ function notifyStateChanged(force = false) {
     const serialized = safeJsonStringify({
         contests: currentState.contests,
         news: currentState.news,
+        calendarNotes: currentState.calendarNotes,
         participants: currentState.participants,
         votingState: currentState.votingState,
         recapVideoUrl: currentState.recapVideoUrl,
@@ -738,6 +743,14 @@ async function fetchState(isInitial = false) {
                 if (Array.isArray(data.contests) && data.contests.length > 0) {
                     if (safeJsonStringify(currentState.contests) !== safeJsonStringify(data.contests)) {
                         currentState.contests = data.contests;
+                        updated = true;
+                    }
+                }
+
+                // Sync calendarNotes
+                if (Array.isArray(data.calendarNotes)) {
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(data.calendarNotes)) {
+                        currentState.calendarNotes = data.calendarNotes;
                         updated = true;
                     }
                 }
@@ -2602,5 +2615,88 @@ export async function syncAllToFirestore() {
 
 export function getCurrentState() {
     return currentState;
+}
+
+// -------------------------------------------------------------
+// CALENDAR FUNCTIONS (ADMIN API + USER LOCAL NOTES)
+// -------------------------------------------------------------
+const LOCAL_STORAGE_USER_CALENDAR_NOTES = 'harivision_user_calendar_notes';
+
+export function getUserLocalCalendarNotes() {
+    try {
+        const raw = localStorage.getItem(LOCAL_STORAGE_USER_CALENDAR_NOTES);
+        return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+export function saveUserLocalCalendarNote(dateStr, noteData) {
+    try {
+        const notes = getUserLocalCalendarNotes();
+        if (!noteData || (typeof noteData === 'string' && !noteData.trim())) {
+            delete notes[dateStr];
+        } else {
+            notes[dateStr] = typeof noteData === 'string' ? { text: noteData.trim(), updatedAt: Date.now() } : noteData;
+        }
+        localStorage.setItem(LOCAL_STORAGE_USER_CALENDAR_NOTES, safeJsonStringify(notes, '{}'));
+        return true;
+    } catch (e) {
+        console.warn('Error saving local calendar note:', e);
+        return false;
+    }
+}
+
+export function deleteUserLocalCalendarNote(dateStr) {
+    try {
+        const notes = getUserLocalCalendarNotes();
+        delete notes[dateStr];
+        localStorage.setItem(LOCAL_STORAGE_USER_CALENDAR_NOTES, safeJsonStringify(notes, '{}'));
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+export async function saveAdminCalendarNote(note) {
+    const adminToken = localStorage.getItem('hv_admin_token') || sessionStorage.getItem('hv_admin_token') || '';
+    const res = await fetch('/api/calendar', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': adminToken ? `Bearer ${adminToken}` : ''
+        },
+        body: JSON.stringify(note)
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Ошибка при сохранении события в календарь');
+    }
+    const data = await res.json();
+    if (Array.isArray(data.calendarNotes)) {
+        currentState.calendarNotes = data.calendarNotes;
+        notifyStateChanged(true);
+    }
+    return data;
+}
+
+export async function deleteAdminCalendarNote(id) {
+    const adminToken = localStorage.getItem('hv_admin_token') || sessionStorage.getItem('hv_admin_token') || '';
+    const res = await fetch(`/api/calendar/${id}`, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': adminToken ? `Bearer ${adminToken}` : ''
+        }
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Ошибка при удалении события из календаря');
+    }
+    const data = await res.json();
+    if (Array.isArray(data.calendarNotes)) {
+        currentState.calendarNotes = data.calendarNotes;
+        notifyStateChanged(true);
+    }
+    return data;
 }
 

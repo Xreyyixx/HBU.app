@@ -95,6 +95,7 @@
             <button id="nav-btn-home" onclick="navigateToView('home')" class="px-3.5 py-1.5 rounded-full text-amber-300 hover:text-white hover:bg-amber-500/10 transition">Главная</button>
             <button id="nav-btn-contests" onclick="navigateToView('contests')" class="px-3.5 py-1.5 rounded-full text-slate-300 hover:text-amber-300 hover:bg-amber-500/10 transition">Архив конкурсов</button>
             <button id="nav-btn-news" onclick="navigateToView('news')" class="px-3.5 py-1.5 rounded-full text-slate-300 hover:text-amber-300 hover:bg-amber-500/10 transition">Новости</button>
+            <button id="nav-btn-calendar" onclick="navigateToView('calendar')" class="px-3.5 py-1.5 rounded-full text-slate-300 hover:text-amber-300 hover:bg-amber-500/10 transition">Календарь</button>
             <button id="nav-btn-voting" onclick="navigateToView('voting')" class="px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black shadow-md transition">🗳️ Голосование</button>
         </nav>
 
@@ -193,6 +194,11 @@
                     <span>Новости HBU</span>
                 </button>
 
+                <button onclick="navigateToView('calendar'); toggleSideMenu(false);" class="flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-[#16070b] hover:bg-amber-500/15 border border-amber-500/15 text-left text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-amber-300 transition">
+                    <span class="text-base">📅</span>
+                    <span>Календарь событий</span>
+                </button>
+
                 <button onclick="navigateToView('voting'); toggleSideMenu(false);" class="flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-left text-xs font-black uppercase tracking-wider transition shadow-lg">
                     <span class="text-base">🗳️</span>
                     <span>Public Vote (Голосование)</span>
@@ -242,6 +248,32 @@
 
             <div class="pt-2 flex justify-end">
                 <button onclick="closeNewsModal()" class="px-6 py-2.5 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-200 font-bold text-xs uppercase tracking-wider rounded-xl transition">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calendar Day Modal (События и заметки на дату) -->
+    <div id="calendar-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 hidden flex items-center justify-center p-3 sm:p-5" onclick="if(event.target===this) closeCalendarModal()">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 flex flex-col gap-5 rounded-3xl shadow-[0_20px_70px_rgba(0,0,0,0.9)] page-fade">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <div class="flex items-center gap-2.5">
+                    <span id="cal-modal-icon" class="text-2xl">📅</span>
+                    <div>
+                        <span id="cal-modal-type-badge" class="hidden text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full border"></span>
+                        <h3 id="cal-modal-date-title" class="text-sm sm:text-base font-black text-white uppercase tracking-wide mt-0.5"></h3>
+                    </div>
+                </div>
+                <button onclick="closeCalendarModal()" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white bg-[#16070b] border border-amber-500/20 rounded-xl transition font-bold text-sm">✕</button>
+            </div>
+
+            <!-- Modal Content (Injected dynamically) -->
+            <div id="cal-modal-body" class="flex flex-col gap-6">
+                <!-- Injected via openCalendarDayModal -->
+            </div>
+
+            <div class="pt-2 flex justify-end border-t border-amber-500/20">
+                <button onclick="closeCalendarModal()" class="px-6 py-2.5 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-200 font-bold text-xs uppercase tracking-wider rounded-xl transition">Закрыть</button>
             </div>
         </div>
     </div>

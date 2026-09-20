@@ -19,7 +19,10 @@ import {
     calculateBlockedIdsForArtist,
     safeJsonStringify,
     renderVideoPlayerHTML,
-    sortNewsDescending
+    sortNewsDescending,
+    getUserLocalCalendarNotes,
+    saveUserLocalCalendarNote,
+    deleteUserLocalCalendarNote
 } from './data-service.js';
 
 // Доступные эмодзи-реакции
@@ -38,11 +41,12 @@ function getInitialViewFromHash() {
     if (hash === 'voting' || hash === 'vote') return 'voting';
     if (hash === 'news') return 'news';
     if (hash === 'contests') return 'contests';
+    if (hash === 'calendar') return 'calendar';
     if (hash.startsWith('contest/')) return 'contest-detail';
     return 'home';
 }
 
-let currentPortalView = getInitialViewFromHash(); // 'home' | 'contests' | 'contest-detail' | 'news' | 'voting'
+let currentPortalView = getInitialViewFromHash(); // 'home' | 'contests' | 'contest-detail' | 'news' | 'voting' | 'calendar'
 let selectedContestId = null;
 if (window.location.hash.startsWith('#contest/')) {
     selectedContestId = window.location.hash.replace(/^#contest\//, '');
@@ -55,6 +59,7 @@ let contestsData = [];
 let newsData = [];
 let participantsData = DEFAULT_PARTICIPANTS;
 let votesData = [];
+let calendarNotesData = [];
 
 // Состояние голосования
 let selectedRepresentative = null;
@@ -528,6 +533,7 @@ window.navigateToView = function(viewName, param, skipHashUpdate = false) {
         if (viewName === 'voting') newHash = '#voting';
         else if (viewName === 'news') newHash = '#news';
         else if (viewName === 'contests') newHash = '#contests';
+        else if (viewName === 'calendar') newHash = '#calendar';
         else if (viewName === 'contest-detail' && selectedContestId) newHash = `#contest/${selectedContestId}`;
         else if (viewName === 'home') newHash = '';
 
@@ -545,7 +551,7 @@ window.navigateToView = function(viewName, param, skipHashUpdate = false) {
     }
 
     // Обновление кнопок шапки
-    const navButtons = ['home', 'contests', 'news', 'voting'];
+    const navButtons = ['home', 'contests', 'news', 'calendar', 'voting'];
     navButtons.forEach(btn => {
         const el = document.getElementById(`nav-btn-${btn}`);
         if (el) {
@@ -862,6 +868,8 @@ function renderMainView() {
         container.innerHTML = getContestDetailHTML(selectedContestId);
     } else if (currentPortalView === 'news') {
         container.innerHTML = getNewsHTML();
+    } else if (currentPortalView === 'calendar') {
+        container.innerHTML = getCalendarPageHTML();
     } else if (currentPortalView === 'voting') {
         container.innerHTML = getVotingPageHTML();
         renderVotingCard();
@@ -943,6 +951,10 @@ function getHomeHTML() {
                         <button onclick="navigateToView('voting')" class="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-widest shadow-xl hover:scale-105 transition flex items-center gap-2">
                             <span>🗳️</span>
                             <span>Перейти к голосованию</span>
+                        </button>
+                        <button onclick="navigateToView('calendar')" class="px-6 py-3.5 rounded-2xl bg-[#16070b] hover:bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase tracking-wider transition flex items-center gap-2 shadow">
+                            <span>📅</span>
+                            <span>Календарь событий</span>
                         </button>
                         ${hasContest ? `
                             <button onclick="navigateToView('contest-detail', '${featuredContest.id}')" class="px-6 py-3.5 rounded-2xl ${isLive ? 'bg-[#16070b] hover:bg-amber-500/10 border border-amber-500/30 text-white font-bold' : 'bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black shadow-xl hover:scale-105'} text-xs uppercase tracking-widest transition">
@@ -1468,6 +1480,725 @@ function getNewsHTML() {
 }
 
 // -------------------------------------------------------------
+// РАЗДЕЛ: КАЛЕНДАРЬ СОБЫТИЙ HARIVISION (3 МЕСЯЦА)
+// -------------------------------------------------------------
+let selectedCalendarMonthIndex = 0; // 0 = текущий месяц, 1 = следующий, 2 = через один
+let calendarFilter = 'all'; // 'all' | 'announcement' | 'contest' | 'event' | 'holiday' | 'personal'
+let calendarViewMode = 'single'; // 'single' | 'all3'
+let calendarEditingDate = null;
+
+const CALENDAR_TYPE_MAP = {
+    announcement: {
+        label: 'Анонс',
+        icon: '📢',
+        cellClass: 'border-sky-500/60 bg-sky-950/25 text-sky-200 hover:border-sky-300 shadow-[inset_0_1px_0_rgba(56,189,248,0.2)]',
+        badgeClass: 'bg-sky-500/15 text-sky-300 border-sky-500/40',
+        dotClass: 'bg-sky-400',
+        tagTitle: 'Информационный анонс'
+    },
+    contest: {
+        label: 'Конкурс / Шоу',
+        icon: '🏆',
+        cellClass: 'border-amber-400 bg-amber-950/35 text-amber-200 hover:border-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.25)]',
+        badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.3)]',
+        dotClass: 'bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.9)]',
+        tagTitle: 'День проведения конкурса'
+    },
+    event: {
+        label: 'Ивент',
+        icon: '🎪',
+        cellClass: 'border-emerald-500/60 bg-emerald-950/25 text-emerald-200 hover:border-emerald-300 shadow-[inset_0_1px_0_rgba(52,211,153,0.2)]',
+        badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+        dotClass: 'bg-emerald-400',
+        tagTitle: 'Специальное мероприятие'
+    },
+    holiday: {
+        label: 'Праздник',
+        icon: '🎉',
+        cellClass: 'border-rose-500/60 bg-rose-950/25 text-rose-200 hover:border-rose-300 shadow-[inset_0_1px_0_rgba(251,113,133,0.2)]',
+        badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
+        dotClass: 'bg-rose-400',
+        tagTitle: 'Праздничный день'
+    }
+};
+
+function getThreeMonthsList() {
+    const now = new Date();
+    const months = [];
+    for (let i = 0; i < 3; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        const name = d.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+        const capName = name.charAt(0).toUpperCase() + name.slice(1);
+        months.push({
+            index: i,
+            year: d.getFullYear(),
+            month: d.getMonth(),
+            fullName: capName,
+            shortName: d.toLocaleDateString('ru-RU', { month: 'short' }).toUpperCase()
+        });
+    }
+    return months;
+}
+
+function getCalendarPageHTML() {
+    const months = getThreeMonthsList();
+    const userNotes = getUserLocalCalendarNotes();
+    const notes = Array.isArray(calendarNotesData) ? calendarNotesData : [];
+
+    // Подсчет количества событий для бейджей
+    const totalAdminNotes = notes.length;
+    const totalUserNotes = Object.keys(userNotes).length;
+
+    return `
+        <div class="w-full max-w-6xl mx-auto flex flex-col gap-6 page-fade">
+            <!-- Шапка раздела -->
+            <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 sm:p-8 rounded-3xl backdrop-blur-xl shadow-2xl relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div class="relative z-10 flex flex-col gap-2 max-w-2xl">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">📅</span>
+                        <span class="text-xs font-black tracking-widest text-amber-400 uppercase">Расписание событий</span>
+                        <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                            3 месяца вперед
+                        </span>
+                    </div>
+                    <h1 class="text-xl sm:text-3xl font-black text-white uppercase tracking-wider">
+                        Календарь HariVision
+                    </h1>
+                    <p class="text-xs sm:text-sm text-slate-300 font-normal leading-relaxed">
+                        Следите за всеми ключевыми датами: анонсы, дни проведения конкурсов, специальные ивенты и праздники. Вы также можете сохранять личные заметки на любые дни.
+                    </p>
+                </div>
+
+                <div class="relative z-10 flex flex-wrap md:flex-col items-start md:items-end gap-2 shrink-0">
+                    <div class="bg-[#16070b] border border-amber-500/20 px-4 py-2.5 rounded-2xl flex items-center gap-3 shadow-inner">
+                        <span class="text-xs text-slate-400 font-bold uppercase">Официальных событий:</span>
+                        <span class="text-sm font-black font-mono text-amber-400">${totalAdminNotes}</span>
+                    </div>
+                    <div class="bg-[#16070b] border border-purple-500/30 px-4 py-2.5 rounded-2xl flex items-center gap-3 shadow-inner">
+                        <span class="text-xs text-purple-300 font-bold uppercase">Моих заметок:</span>
+                        <span class="text-sm font-black font-mono text-purple-300">${totalUserNotes}</span>
+                    </div>
+                </div>
+
+                <!-- Декоративный фоновый полигональный элемент -->
+                <div class="absolute -right-8 -bottom-10 opacity-10 pointer-events-none hidden sm:block">
+                    ${getHeartSVG("w-64 h-64")}
+                </div>
+            </div>
+
+            <!-- Панель переключения месяцев и фильтрации -->
+            <div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+                <!-- Вкладки месяцев -->
+                <div class="flex items-center gap-1.5 bg-[#0d0408]/90 border border-amber-500/20 p-1.5 rounded-2xl backdrop-blur-md overflow-x-auto">
+                    ${months.map(m => `
+                        <button onclick="setCalendarMonthIndex(${m.index})" class="px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap transition flex items-center gap-2 ${
+                            calendarViewMode === 'single' && selectedCalendarMonthIndex === m.index
+                                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md font-black'
+                                : 'text-slate-300 hover:text-amber-300 hover:bg-[#16070b]'
+                        }">
+                            <span>🗓️</span>
+                            <span>${m.fullName}</span>
+                        </button>
+                    `).join('')}
+
+                    <div class="w-px h-6 bg-amber-500/20 mx-1"></div>
+
+                    <button onclick="setCalendarViewMode('all3')" class="px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap transition flex items-center gap-2 ${
+                        calendarViewMode === 'all3'
+                            ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md font-black'
+                            : 'text-slate-300 hover:text-amber-300 hover:bg-[#16070b]'
+                    }">
+                        <span>📑</span>
+                        <span>Все 3 месяца</span>
+                    </button>
+                </div>
+
+                <!-- Фильтр по видам заметок -->
+                <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
+                    <button onclick="setCalendarFilter('all')" class="px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase tracking-wider whitespace-nowrap transition border ${
+                        calendarFilter === 'all' 
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 font-black' 
+                            : 'bg-[#0d0408]/80 text-slate-300 border-amber-500/20 hover:border-amber-500/40'
+                    }">Все</button>
+
+                    <button onclick="setCalendarFilter('contest')" class="px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase tracking-wider whitespace-nowrap transition border ${
+                        calendarFilter === 'contest' 
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-[0_0_10px_rgba(245,158,11,0.3)]' 
+                            : 'bg-[#0d0408]/80 text-amber-300 border-amber-500/30 hover:border-amber-400'
+                    }">🏆 Конкурсы</button>
+
+                    <button onclick="setCalendarFilter('announcement')" class="px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase tracking-wider whitespace-nowrap transition border ${
+                        calendarFilter === 'announcement' 
+                            ? 'bg-sky-500 text-slate-950 border-sky-400 font-black' 
+                            : 'bg-[#0d0408]/80 text-sky-300 border-sky-500/30 hover:border-sky-400'
+                    }">📢 Анонсы</button>
+
+                    <button onclick="setCalendarFilter('event')" class="px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase tracking-wider whitespace-nowrap transition border ${
+                        calendarFilter === 'event' 
+                            ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black' 
+                            : 'bg-[#0d0408]/80 text-emerald-300 border-emerald-500/30 hover:border-emerald-400'
+                    }">🎪 Ивенты</button>
+
+                    <button onclick="setCalendarFilter('holiday')" class="px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase tracking-wider whitespace-nowrap transition border ${
+                        calendarFilter === 'holiday' 
+                            ? 'bg-rose-500 text-slate-950 border-rose-400 font-black' 
+                            : 'bg-[#0d0408]/80 text-rose-300 border-rose-500/30 hover:border-rose-400'
+                    }">🎉 Праздники</button>
+
+                    <button onclick="setCalendarFilter('personal')" class="px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase tracking-wider whitespace-nowrap transition border ${
+                        calendarFilter === 'personal' 
+                            ? 'bg-purple-500 text-slate-950 border-purple-400 font-black' 
+                            : 'bg-[#0d0408]/80 text-purple-300 border-purple-500/30 hover:border-purple-400'
+                    }">📌 Мои заметки</button>
+                </div>
+            </div>
+
+            <!-- Легенда видов заметок -->
+            <div class="bg-[#0d0408]/70 border border-amber-500/20 px-4 py-3 rounded-2xl backdrop-blur-md flex flex-wrap items-center justify-between gap-3 text-[11px]">
+                <div class="flex flex-wrap items-center gap-3 sm:gap-4">
+                    <span class="text-amber-500/80 font-bold uppercase tracking-wider text-[10px]">Виды заметок:</span>
+                    <div class="flex items-center gap-1.5 text-sky-300">
+                        <span class="w-2.5 h-2.5 rounded-full bg-sky-400 inline-block"></span>
+                        <span class="font-bold">Анонс</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 text-amber-300">
+                        <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.8)] inline-block"></span>
+                        <span class="font-bold">Конкурс / Шоу</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 text-emerald-300">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"></span>
+                        <span class="font-bold">Ивент</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 text-rose-300">
+                        <span class="w-2.5 h-2.5 rounded-full bg-rose-400 inline-block"></span>
+                        <span class="font-bold">Праздник</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 text-purple-300">
+                        <span class="w-2.5 h-2.5 rounded-full bg-purple-400 inline-block"></span>
+                        <span class="font-bold">Личная заметка</span>
+                    </div>
+                </div>
+
+                <div class="text-slate-400 text-[10px]">
+                    💡 Нажмите на любую дату, чтобы прочитать подробности или оставить свою заметку.
+                </div>
+            </div>
+
+            <!-- Сетка календаря -->
+            ${calendarViewMode === 'single' ? `
+                <div class="bg-[#0d0408]/90 border border-amber-500/20 p-4 sm:p-7 rounded-3xl backdrop-blur-xl shadow-2xl">
+                    ${renderSingleMonthCalendarHTML(months[selectedCalendarMonthIndex])}
+                </div>
+            ` : `
+                <div class="flex flex-col gap-8">
+                    ${months.map(m => `
+                        <div class="bg-[#0d0408]/90 border border-amber-500/20 p-4 sm:p-7 rounded-3xl backdrop-blur-xl shadow-2xl">
+                            ${renderSingleMonthCalendarHTML(m)}
+                        </div>
+                    `).join('')}
+                </div>
+            `}
+
+            <!-- Список ближайших событий HariVision за выбранный период -->
+            ${renderUpcomingEventsListHTML(months)}
+        </div>
+    `;
+}
+
+function renderSingleMonthCalendarHTML(monthObj) {
+    const { year, month, fullName } = monthObj;
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    const adminNotes = Array.isArray(calendarNotesData) ? calendarNotesData : [];
+    const userNotes = getUserLocalCalendarNotes();
+
+    // Количество дней в месяце
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    // День недели первого дня (Пн = 0, Вс = 6)
+    const firstDayWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+
+    const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+    let cellsHtml = '';
+
+    // Пустые ячейки до первого дня
+    for (let i = 0; i < firstDayWeekday; i++) {
+        cellsHtml += `
+            <div class="min-h-[82px] sm:min-h-[105px] p-2 bg-[#080204]/40 border border-amber-500/5 rounded-2xl opacity-30 pointer-events-none"></div>
+        `;
+    }
+
+    // Ячейки дней месяца
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const isToday = (dateStr === todayStr);
+
+        // Поиск заметок
+        const adminNote = adminNotes.find(n => n.date === dateStr);
+        const userNote = userNotes[dateStr];
+
+        // Проверка фильтра
+        let matchesFilter = true;
+        if (calendarFilter !== 'all') {
+            if (calendarFilter === 'personal') {
+                matchesFilter = Boolean(userNote);
+            } else {
+                matchesFilter = Boolean(adminNote && adminNote.type === calendarFilter);
+            }
+        }
+
+        const typeCfg = adminNote ? (CALENDAR_TYPE_MAP[adminNote.type] || CALENDAR_TYPE_MAP.announcement) : null;
+
+        let cellBorderClass = 'border-amber-500/15 hover:border-amber-500/40 bg-[#16070b]/90';
+        if (adminNote && matchesFilter) {
+            cellBorderClass = typeCfg.cellClass;
+        } else if (userNote && matchesFilter) {
+            cellBorderClass = 'border-purple-500/50 hover:border-purple-400 bg-purple-950/20';
+        }
+
+        const isDimmed = !matchesFilter && (adminNote || userNote);
+
+        cellsHtml += `
+            <button type="button" onclick="openCalendarDayModal('${dateStr}')" class="group min-h-[82px] sm:min-h-[105px] p-2 sm:p-2.5 rounded-2xl border ${cellBorderClass} flex flex-col justify-between text-left transition-all duration-200 relative overflow-hidden ${isDimmed ? 'opacity-35' : ''} hover:scale-[1.02] active:scale-[0.99] focus:outline-none focus:ring-1 focus:ring-amber-400/50">
+                <!-- Верхняя строка ячейки (Номер дня + бейджи) -->
+                <div class="w-full flex items-center justify-between gap-1">
+                    <span class="text-xs sm:text-sm font-black font-mono transition ${
+                        isToday 
+                            ? 'w-6 h-6 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-md' 
+                            : (adminNote ? 'text-white' : 'text-slate-300 group-hover:text-amber-300')
+                    }">
+                        ${day}
+                    </span>
+
+                    <div class="flex items-center gap-1">
+                        ${isToday ? `
+                            <span class="hidden sm:inline-block text-[9px] font-black uppercase tracking-wider text-amber-300 bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30">
+                                Сегодня
+                            </span>
+                        ` : ''}
+                        ${userNote ? `
+                            <span class="text-[10px]" title="Ваша личная заметка">📌</span>
+                        ` : ''}
+                        ${adminNote && adminNote.photoUrl ? `
+                            <span class="text-[10px]" title="Есть фото">📷</span>
+                        ` : ''}
+                        ${adminNote && adminNote.videoUrl ? `
+                            <span class="text-[10px]" title="Есть видео">🎬</span>
+                        ` : ''}
+                    </div>
+                </div>
+
+                <!-- Нижняя часть ячейки (Название и тип события) -->
+                <div class="w-full mt-1 flex flex-col gap-0.5">
+                    ${adminNote ? `
+                        <div class="w-full flex items-center gap-1">
+                            <span class="text-xs">${typeCfg.icon}</span>
+                            <span class="text-[10px] font-black uppercase tracking-wider truncate ${adminNote.type === 'contest' ? 'text-amber-300 font-extrabold' : 'text-slate-200'}">
+                                ${adminNote.title || typeCfg.label}
+                            </span>
+                        </div>
+                    ` : (userNote ? `
+                        <div class="w-full flex items-center gap-1 text-purple-300">
+                            <span class="text-[10px]">📌</span>
+                            <span class="text-[10px] font-bold truncate">${userNote.text || 'Моя заметка'}</span>
+                        </div>
+                    ` : `
+                        <span class="text-[9px] text-slate-500 opacity-0 group-hover:opacity-100 transition truncate">
+                            + Заметка
+                        </span>
+                    `)}
+                </div>
+            </button>
+        `;
+    }
+
+    return `
+        <div class="flex flex-col gap-4">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <h3 class="text-base sm:text-lg font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    <span>🗓️</span>
+                    <span>${fullName}</span>
+                </h3>
+                <span class="text-xs text-amber-400/80 font-mono font-bold">
+                    HariVision Season
+                </span>
+            </div>
+
+            <!-- Дни недели -->
+            <div class="grid grid-cols-7 gap-1.5 sm:gap-2 text-center">
+                ${weekdays.map(d => `
+                    <div class="py-1.5 text-[10px] sm:text-xs font-black uppercase tracking-wider text-amber-500/70">
+                        ${d}
+                    </div>
+                `).join('')}
+            </div>
+
+            <!-- Сетка дней -->
+            <div class="grid grid-cols-7 gap-1.5 sm:gap-2">
+                ${cellsHtml}
+            </div>
+        </div>
+    `;
+}
+
+function renderUpcomingEventsListHTML(months) {
+    const adminNotes = Array.isArray(calendarNotesData) ? calendarNotesData : [];
+    const userNotes = getUserLocalCalendarNotes();
+
+    // Собираем все события в 3-месячном окне
+    const startObj = months[0];
+    const endObj = months[months.length - 1];
+
+    const startDateStr = `${startObj.year}-${String(startObj.month + 1).padStart(2, '0')}-01`;
+    const lastDayOfEndMonth = new Date(endObj.year, endObj.month + 1, 0).getDate();
+    const endDateStr = `${endObj.year}-${String(endObj.month + 1).padStart(2, '0')}-${String(lastDayOfEndMonth).padStart(2, '0')}`;
+
+    let allItems = [];
+
+    adminNotes.forEach(n => {
+        if (n.date >= startDateStr && n.date <= endDateStr) {
+            allItems.push({
+                isUser: false,
+                date: n.date,
+                type: n.type,
+                title: n.title,
+                text: n.text,
+                photoUrl: n.photoUrl,
+                videoUrl: n.videoUrl
+            });
+        }
+    });
+
+    Object.keys(userNotes).forEach(dateStr => {
+        if (dateStr >= startDateStr && dateStr <= endDateStr) {
+            const u = userNotes[dateStr];
+            allItems.push({
+                isUser: true,
+                date: dateStr,
+                type: 'personal',
+                title: 'Личная заметка',
+                text: u.text,
+                photoUrl: '',
+                videoUrl: ''
+            });
+        }
+    });
+
+    // Фильтрация
+    if (calendarFilter !== 'all') {
+        allItems = allItems.filter(item => {
+            if (calendarFilter === 'personal') return item.isUser;
+            return !item.isUser && item.type === calendarFilter;
+        });
+    }
+
+    // Сортировка по возрастанию даты
+    allItems.sort((a, b) => a.date.localeCompare(b.date));
+
+    return `
+        <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 sm:p-8 rounded-3xl backdrop-blur-xl shadow-2xl flex flex-col gap-5">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <div class="flex items-center gap-2">
+                    <span class="text-xl">📋</span>
+                    <h3 class="text-base sm:text-lg font-black text-white uppercase tracking-wider">
+                        События на ближайшие 3 месяца
+                    </h3>
+                </div>
+                <span class="text-xs font-mono text-amber-400 font-bold">
+                    Найдено: ${allItems.length}
+                </span>
+            </div>
+
+            ${allItems.length === 0 ? `
+                <div class="p-8 text-center bg-[#16070b] border border-dashed border-amber-500/20 rounded-2xl">
+                    <span class="text-3xl block mb-2">🗓️</span>
+                    <p class="text-xs text-slate-400 uppercase font-bold tracking-wider">
+                        Нет запланированных событий по выбранному фильтру
+                    </p>
+                </div>
+            ` : `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    ${allItems.map(item => {
+                        const typeCfg = item.isUser ? {
+                            label: 'Личная заметка',
+                            icon: '📌',
+                            badgeClass: 'bg-purple-500/15 text-purple-300 border-purple-500/40'
+                        } : (CALENDAR_TYPE_MAP[item.type] || CALENDAR_TYPE_MAP.announcement);
+
+                        let formattedDate = item.date;
+                        try {
+                            const p = item.date.split('-');
+                            const d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+                            formattedDate = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' });
+                        } catch (e) {}
+
+                        return `
+                            <div onclick="openCalendarDayModal('${item.date}')" class="cursor-pointer group bg-[#16070b] hover:bg-[#1f0a10] border border-amber-500/15 hover:border-amber-400/50 p-4 sm:p-5 rounded-2xl transition flex flex-col justify-between gap-3 shadow">
+                                <div class="flex flex-col gap-2">
+                                    <div class="flex items-center justify-between gap-2 flex-wrap">
+                                        <span class="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${typeCfg.badgeClass}">
+                                            ${typeCfg.icon} ${typeCfg.label}
+                                        </span>
+                                        <span class="text-xs font-mono font-bold text-amber-400">
+                                            🗓️ ${formattedDate}
+                                        </span>
+                                    </div>
+
+                                    <h4 class="text-sm font-black text-white uppercase tracking-wide group-hover:text-amber-300 transition line-clamp-1">
+                                        ${item.title || 'Без названия'}
+                                    </h4>
+
+                                    <p class="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                                        ${item.text || 'Нет подробного описания'}
+                                    </p>
+                                </div>
+
+                                <div class="flex items-center justify-between pt-2 border-t border-amber-500/10 text-[10px] font-bold uppercase text-amber-400">
+                                    <div class="flex items-center gap-2">
+                                        ${item.photoUrl ? '<span>📷 Фото</span>' : ''}
+                                        ${item.videoUrl ? '<span>🎬 Видео</span>' : ''}
+                                    </div>
+                                    <span class="group-hover:translate-x-1 transition-transform">Открыть &rarr;</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `}
+        </div>
+    `;
+}
+
+window.setCalendarMonthIndex = function(idx) {
+    selectedCalendarMonthIndex = idx;
+    calendarViewMode = 'single';
+    renderMainView();
+};
+
+window.setCalendarViewMode = function(mode) {
+    calendarViewMode = mode;
+    renderMainView();
+};
+
+window.setCalendarFilter = function(filter) {
+    calendarFilter = filter;
+    renderMainView();
+};
+
+// -------------------------------------------------------------
+// МОДАЛЬНОЕ ОКНО СОБЫТИЯ НА ДАТУ
+// -------------------------------------------------------------
+window.openCalendarDayModal = function(dateStr) {
+    const modal = document.getElementById('calendar-modal');
+    if (!modal) return;
+
+    calendarEditingDate = null;
+
+    let formattedDate = dateStr;
+    try {
+        const p = dateStr.split('-');
+        const d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+        formattedDate = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' });
+    } catch (e) {}
+
+    const titleEl = document.getElementById('cal-modal-date-title');
+    if (titleEl) titleEl.innerText = formattedDate;
+
+    const iconEl = document.getElementById('cal-modal-icon');
+    const badgeEl = document.getElementById('cal-modal-type-badge');
+
+    const adminNotes = Array.isArray(calendarNotesData) ? calendarNotesData : [];
+    const adminNote = adminNotes.find(n => n.date === dateStr);
+
+    if (adminNote) {
+        const typeCfg = CALENDAR_TYPE_MAP[adminNote.type] || CALENDAR_TYPE_MAP.announcement;
+        if (iconEl) iconEl.innerText = typeCfg.icon;
+        if (badgeEl) {
+            badgeEl.className = `text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full border ${typeCfg.badgeClass}`;
+            badgeEl.innerText = `${typeCfg.icon} ${typeCfg.label}`;
+            badgeEl.classList.remove('hidden');
+        }
+    } else {
+        if (iconEl) iconEl.innerText = '📅';
+        if (badgeEl) badgeEl.classList.add('hidden');
+    }
+
+    renderCalendarModalBody(dateStr);
+    modal.classList.remove('hidden');
+};
+
+function renderCalendarModalBody(dateStr) {
+    const bodyEl = document.getElementById('cal-modal-body');
+    if (!bodyEl) return;
+
+    const adminNotes = Array.isArray(calendarNotesData) ? calendarNotesData : [];
+    const adminNote = adminNotes.find(n => n.date === dateStr);
+
+    const userNotes = getUserLocalCalendarNotes();
+    const userNote = userNotes[dateStr];
+    const isEditingUserNote = (calendarEditingDate === dateStr);
+
+    let html = '';
+
+    // 1. Официальное событие от Администрации HariVision
+    if (adminNote) {
+        const typeCfg = CALENDAR_TYPE_MAP[adminNote.type] || CALENDAR_TYPE_MAP.announcement;
+        html += `
+            <div class="bg-[#16070b] border ${typeCfg.cellClass} p-5 sm:p-6 rounded-2xl flex flex-col gap-4 shadow-xl">
+                <div class="flex items-center justify-between gap-2 border-b border-white/10 pb-3">
+                    <span class="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border ${typeCfg.badgeClass}">
+                        ${typeCfg.icon} ${typeCfg.label}
+                    </span>
+                    <span class="text-xs font-mono text-amber-400 font-bold">Официальное событие</span>
+                </div>
+
+                <div>
+                    <h2 class="text-lg sm:text-xl font-black text-white uppercase tracking-wide mb-2">
+                        ${adminNote.title || 'Без названия'}
+                    </h2>
+                    <div class="text-xs sm:text-sm text-slate-200 font-normal leading-relaxed whitespace-pre-wrap">
+                        ${adminNote.text || ''}
+                    </div>
+                </div>
+
+                <!-- Фотография к событию -->
+                ${adminNote.photoUrl ? `
+                    <div class="rounded-xl overflow-hidden border border-amber-500/20 max-h-96 bg-black/60 shadow-lg">
+                        <img src="${adminNote.photoUrl}" alt="${adminNote.title || 'Фото события'}" class="w-full h-full object-cover" />
+                    </div>
+                ` : ''}
+
+                <!-- Встроенный плеер видео -->
+                ${adminNote.videoUrl ? `
+                    <div class="w-full flex flex-col gap-2 pt-2">
+                        <span class="text-[10px] font-bold text-amber-400 uppercase tracking-widest flex items-center gap-1.5">
+                            <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                            Видеозапись события
+                        </span>
+                        ${renderVideoPlayerHTML(adminNote.videoUrl, adminNote.title)}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="p-4 bg-[#16070b]/60 border border-amber-500/15 rounded-2xl text-center">
+                <p class="text-xs text-slate-400 font-medium">
+                    На эту дату нет запланированных официальных событий HariVision.
+                </p>
+            </div>
+        `;
+    }
+
+    // 2. Личная заметка пользователя (хранится в localStorage)
+    html += `
+        <div class="bg-[#120509] border border-purple-500/30 p-5 rounded-2xl flex flex-col gap-3 shadow-inner">
+            <div class="flex items-center justify-between border-b border-purple-500/20 pb-2.5">
+                <div class="flex items-center gap-2">
+                    <span class="text-base">📌</span>
+                    <h4 class="text-xs font-black text-purple-300 uppercase tracking-wider">
+                        Моя личная заметка
+                    </h4>
+                </div>
+                <span class="text-[10px] text-slate-400 flex items-center gap-1">
+                    <span>🔒</span>
+                    <span>Только для вас (на этом устройстве)</span>
+                </span>
+            </div>
+
+            ${isEditingUserNote ? `
+                <div class="flex flex-col gap-3 pt-1">
+                    <textarea id="cal-user-note-input" rows="3" placeholder="Напишите вашу заметку, напоминание или план..." class="w-full bg-[#0a0305] border border-purple-500/40 p-3 text-xs text-white rounded-xl focus:outline-none focus:border-purple-300 leading-relaxed">${userNote ? userNote.text : ''}</textarea>
+                    
+                    <div class="flex items-center justify-end gap-2">
+                        <button type="button" onclick="cancelEditPersonalNote('${dateStr}')" class="px-4 py-2 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl border border-white/10 hover:bg-white/5 transition">
+                            Отмена
+                        </button>
+                        <button type="button" onclick="savePersonalNote('${dateStr}')" class="px-5 py-2 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-400 text-white font-black text-xs uppercase rounded-xl shadow-lg transition">
+                            💾 Сохранить
+                        </button>
+                    </div>
+                </div>
+            ` : (userNote ? `
+                <div class="flex flex-col gap-3 pt-1">
+                    <div class="p-3.5 bg-[#0a0305] border border-purple-500/20 rounded-xl text-xs text-slate-200 font-medium whitespace-pre-wrap leading-relaxed">
+                        ${userNote.text}
+                    </div>
+
+                    <div class="flex items-center justify-between pt-1">
+                        <span class="text-[10px] text-slate-500 font-mono">
+                            Обновлено: ${userNote.updatedAt ? new Date(userNote.updatedAt).toLocaleDateString('ru-RU') : ''}
+                        </span>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="startEditPersonalNote('${dateStr}')" class="px-3 py-1.5 bg-[#16070b] hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-bold text-xs uppercase rounded-lg transition">
+                                ✏️ Изменить
+                            </button>
+                            <button type="button" onclick="deletePersonalNote('${dateStr}')" class="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-bold text-xs uppercase rounded-lg transition">
+                                🗑️ Удалить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ` : `
+                <div class="flex flex-col items-center justify-center py-3 gap-2 text-center">
+                    <p class="text-xs text-slate-400">
+                        У вас ещё нет личной заметки на эту дату.
+                    </p>
+                    <button type="button" onclick="startEditPersonalNote('${dateStr}')" class="px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 text-purple-300 font-bold text-xs uppercase rounded-xl transition">
+                        + Добавить личную заметку
+                    </button>
+                </div>
+            `)}
+        </div>
+    `;
+
+    bodyEl.innerHTML = html;
+}
+
+window.startEditPersonalNote = function(dateStr) {
+    calendarEditingDate = dateStr;
+    renderCalendarModalBody(dateStr);
+    const input = document.getElementById('cal-user-note-input');
+    if (input) input.focus();
+};
+
+window.cancelEditPersonalNote = function(dateStr) {
+    calendarEditingDate = null;
+    renderCalendarModalBody(dateStr);
+};
+
+window.savePersonalNote = function(dateStr) {
+    const input = document.getElementById('cal-user-note-input');
+    const text = (input ? input.value : '').trim();
+
+    if (!text) {
+        showToast('Пожалуйста, напишите текст заметки');
+        return;
+    }
+
+    saveUserLocalCalendarNote(dateStr, text);
+    calendarEditingDate = null;
+    renderCalendarModalBody(dateStr);
+    renderMainView();
+    showToast('✓ Личная заметка сохранена');
+};
+
+window.deletePersonalNote = function(dateStr) {
+    if (!confirm('Удалить эту личную заметку?')) return;
+    deleteUserLocalCalendarNote(dateStr);
+    calendarEditingDate = null;
+    renderCalendarModalBody(dateStr);
+    renderMainView();
+    showToast('✓ Заметка удалена');
+};
+
+window.closeCalendarModal = function() {
+    const modal = document.getElementById('calendar-modal');
+    if (modal) modal.classList.add('hidden');
+};
+
+// -------------------------------------------------------------
 // ШАБЛОН СТРАНИЦЫ ГОЛОСОВАНИЯ
 // -------------------------------------------------------------
 function getVotingPageHTML() {
@@ -1811,6 +2542,7 @@ subscribeState((state) => {
     newsData = sortNewsDescending(state.news || []);
     participantsData = state.participants || DEFAULT_PARTICIPANTS;
     votesData = state.votes || [];
+    calendarNotesData = state.calendarNotes || [];
     
     const newVotingState = state.votingState || { status: 'closed', endsAt: null, sessionId: null };
     const savedSession = localStorage.getItem('harivision_voted_session');
@@ -1906,7 +2638,8 @@ subscribeState((state) => {
         participants: participantsData,
         recapUrl: systemState.recapVideoUrl,
         featuredId: systemState.featuredContestId,
-        voteStatus: systemState.status
+        voteStatus: systemState.status,
+        calendar: calendarNotesData
     });
 
     if (currentContentHash !== lastRenderedContentHash) {

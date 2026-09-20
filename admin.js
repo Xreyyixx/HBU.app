@@ -21,6 +21,8 @@ import {
     verifyAdminSession,
     deleteVote as deleteVoteFromService, 
     resetAllVotes,
+    saveAdminCalendarNote,
+    deleteAdminCalendarNote,
     mergeVotes,
     sanitizeFirestoreData,
     safeJsonStringify,
@@ -292,7 +294,7 @@ function showToast(message, isError = false) {
 // -------------------------------------------------------------
 window.switchAdminTab = function(tabName) {
     activeAdminTab = tabName;
-    const tabs = ['voting', 'news', 'contests', 'notifications'];
+    const tabs = ['voting', 'news', 'contests', 'calendar', 'notifications'];
 
     tabs.forEach(tab => {
         const btn = document.getElementById(`tab-btn-${tab}`);
@@ -306,6 +308,10 @@ window.switchAdminTab = function(tabName) {
             if (sec) sec.classList.add('hidden');
         }
     });
+
+    if (tabName === 'calendar') {
+        renderAdminCalendar();
+    }
 };
 
 // -------------------------------------------------------------
@@ -1656,6 +1662,7 @@ subscribeState((newState) => {
     updateVotingSessionUI();
     renderAdminNews();
     renderAdminContests();
+    renderAdminCalendar();
     updateBannerSelectUI();
 });
 
@@ -2003,5 +2010,349 @@ window.handleAdminBroadcastSubmit = async function(event) {
             submitBtn.disabled = false;
             submitBtn.innerHTML = '<span>🚀</span><span>Отправить всем пользователям</span>';
         }
+    }
+};
+
+// -------------------------------------------------------------
+// РАЗДЕЛ 5: УПРАВЛЕНИЕ КАЛЕНДАРЕМ (СОБЫТИЯ, АНОНСЫ, МЕДИА)
+// -------------------------------------------------------------
+let adminCalendarFilter = 'all';
+
+window.setAdminCalendarFilter = function(filter) {
+    adminCalendarFilter = filter;
+    const filterButtons = ['all', 'announcement', 'contest', 'event', 'holiday'];
+    filterButtons.forEach(f => {
+        const btn = document.getElementById(`admin-cal-filter-${f}`);
+        if (!btn) return;
+        if (f === filter) {
+            btn.className = "px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-amber-500 text-slate-950 transition";
+        } else {
+            const colors = {
+                announcement: 'text-sky-400 border-sky-500/20',
+                contest: 'text-amber-300 border-amber-500/20',
+                event: 'text-emerald-400 border-emerald-500/20',
+                holiday: 'text-rose-400 border-rose-500/20',
+                all: 'text-slate-300 border-amber-500/20'
+            };
+            btn.className = `px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-[#16070b] ${colors[f] || 'text-slate-300'} hover:bg-amber-500/10 border transition`;
+        }
+    });
+    renderAdminCalendar();
+};
+
+const CALENDAR_TYPE_CONFIG = {
+    announcement: {
+        label: 'Анонс',
+        icon: '📢',
+        colorClass: 'bg-sky-500/15 text-sky-300 border-sky-500/40',
+        badgeBorder: 'border-sky-500/30'
+    },
+    contest: {
+        label: 'Конкурс / Шоу',
+        icon: '🏆',
+        colorClass: 'bg-amber-500/20 text-amber-300 border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.2)]',
+        badgeBorder: 'border-amber-400/50'
+    },
+    event: {
+        label: 'Ивент',
+        icon: '🎪',
+        colorClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+        badgeBorder: 'border-emerald-500/30'
+    },
+    holiday: {
+        label: 'Праздник',
+        icon: '🎉',
+        colorClass: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
+        badgeBorder: 'border-rose-500/30'
+    }
+};
+
+window.renderAdminCalendar = function() {
+    const listEl = document.getElementById('admin-calendar-list');
+    if (!listEl) return;
+
+    const notes = Array.isArray(appState.calendarNotes) ? appState.calendarNotes : [];
+
+    // Обновление счетчиков статистики
+    const totalEl = document.getElementById('admin-cal-total-count');
+    const annEl = document.getElementById('admin-cal-announcements-count');
+    const conEl = document.getElementById('admin-cal-contests-count');
+    const eveEl = document.getElementById('admin-cal-events-count');
+    const holEl = document.getElementById('admin-cal-holidays-count');
+
+    if (totalEl) totalEl.innerText = notes.length;
+    if (annEl) annEl.innerText = notes.filter(n => n.type === 'announcement').length;
+    if (conEl) conEl.innerText = notes.filter(n => n.type === 'contest').length;
+    if (eveEl) eveEl.innerText = notes.filter(n => n.type === 'event').length;
+    if (holEl) holEl.innerText = notes.filter(n => n.type === 'holiday').length;
+
+    const searchInput = document.getElementById('admin-cal-search-input');
+    const searchTerm = (searchInput ? searchInput.value : '').trim().toLowerCase();
+
+    // Фильтрация
+    let filtered = notes.filter(n => {
+        if (adminCalendarFilter !== 'all' && n.type !== adminCalendarFilter) return false;
+        if (searchTerm) {
+            const inDate = (n.date || '').toLowerCase().includes(searchTerm);
+            const inTitle = (n.title || '').toLowerCase().includes(searchTerm);
+            const inText = (n.text || '').toLowerCase().includes(searchTerm);
+            if (!inDate && !inTitle && !inText) return false;
+        }
+        return true;
+    });
+
+    // Сортировка по дате по возрастанию
+    filtered.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    if (filtered.length === 0) {
+        listEl.innerHTML = `
+            <div class="p-8 text-center bg-[#16070b] border border-dashed border-amber-500/20 rounded-2xl">
+                <span class="text-3xl block mb-2">📅</span>
+                <p class="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                    ${searchTerm ? 'Ничего не найдено по вашему запросу' : 'События в календаре еще не добавлены'}
+                </p>
+                <button type="button" onclick="openCalendarEditorModal()" class="mt-4 px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl border border-amber-500/30 transition">
+                    + Добавить первое событие
+                </button>
+            </div>
+        `;
+        return;
+    }
+
+    listEl.innerHTML = filtered.map(note => {
+        const typeCfg = CALENDAR_TYPE_CONFIG[note.type] || CALENDAR_TYPE_CONFIG.announcement;
+        const hasPhoto = Boolean(note.photoUrl);
+        const hasVideo = Boolean(note.videoUrl);
+
+        // Парсинг читаемой даты
+        let formattedDate = note.date;
+        try {
+            const parts = note.date.split('-');
+            if (parts.length === 3) {
+                const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                formattedDate = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'short' });
+            }
+        } catch (e) {}
+
+        return `
+            <div class="bg-[#16070b] border ${typeCfg.badgeBorder} p-4 sm:p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 transition hover:border-amber-400/50">
+                <div class="flex items-start gap-3.5 flex-1 min-w-0">
+                    <div class="w-12 h-12 rounded-xl flex flex-col items-center justify-center shrink-0 border ${typeCfg.colorClass}">
+                        <span class="text-lg">${typeCfg.icon}</span>
+                    </div>
+
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap mb-1">
+                            <span class="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${typeCfg.colorClass}">
+                                ${typeCfg.icon} ${typeCfg.label}
+                            </span>
+                            <span class="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-lg border border-amber-500/20">
+                                🗓️ ${formattedDate}
+                            </span>
+                            ${hasPhoto ? `<span class="text-[10px] font-bold text-slate-300 bg-black/40 px-2 py-0.5 rounded border border-white/10">📷 Фото</span>` : ''}
+                            ${hasVideo ? `<span class="text-[10px] font-bold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">🎬 Видео</span>` : ''}
+                        </div>
+
+                        <h4 class="text-sm font-black text-white uppercase tracking-wide truncate mb-1">
+                            ${note.title || 'Без названия'}
+                        </h4>
+
+                        <p class="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                            ${note.text || ''}
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2 self-end md:self-center shrink-0">
+                    <button type="button" onclick="openCalendarEditorModal('${note.id}')" class="px-3.5 py-2 bg-[#0a0305] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl transition flex items-center gap-1.5">
+                        <span>✏️</span>
+                        <span>Изменить</span>
+                    </button>
+                    <button type="button" onclick="deleteCalendarNoteFromAdmin('${note.id}')" class="px-3.5 py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-bold text-xs uppercase rounded-xl transition flex items-center gap-1.5">
+                        <span>🗑️</span>
+                        <span>Удалить</span>
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+};
+
+window.openCalendarEditorModal = function(id = null) {
+    const modal = document.getElementById('calendar-editor-modal');
+    const form = document.getElementById('calendar-note-form');
+    if (!modal || !form) return;
+
+    form.reset();
+    clearCalendarPhoto();
+
+    const titleEl = document.getElementById('calendar-editor-title');
+    const editIdInput = document.getElementById('calendar-edit-id');
+    const dateInput = document.getElementById('calendar-input-date');
+    const typeInput = document.getElementById('calendar-input-type');
+    const titleInput = document.getElementById('calendar-input-title');
+    const textInput = document.getElementById('calendar-input-text');
+    const photoUrlInput = document.getElementById('calendar-input-photo-url');
+    const videoUrlInput = document.getElementById('calendar-input-video-url');
+    const notifyInput = document.getElementById('calendar-input-notify');
+
+    if (id) {
+        const notes = Array.isArray(appState.calendarNotes) ? appState.calendarNotes : [];
+        const note = notes.find(n => n.id === id);
+        if (note) {
+            if (titleEl) titleEl.innerHTML = '<span>✏️</span><span>Редактирование события</span>';
+            if (editIdInput) editIdInput.value = note.id;
+            if (dateInput) dateInput.value = note.date || '';
+            if (typeInput) typeInput.value = note.type || 'announcement';
+            if (titleInput) titleInput.value = note.title || '';
+            if (textInput) textInput.value = note.text || '';
+            if (photoUrlInput) photoUrlInput.value = note.photoUrl || '';
+            if (videoUrlInput) videoUrlInput.value = note.videoUrl || '';
+            if (notifyInput) notifyInput.checked = false;
+
+            if (note.photoUrl) {
+                const previewContainer = document.getElementById('calendar-photo-preview-container');
+                const previewImg = document.getElementById('calendar-photo-preview-img');
+                if (previewContainer && previewImg) {
+                    previewImg.src = note.photoUrl;
+                    previewContainer.classList.remove('hidden');
+                }
+            }
+        }
+    } else {
+        if (titleEl) titleEl.innerHTML = '<span>＋</span><span>Добавить событие в календарь</span>';
+        if (editIdInput) editIdInput.value = '';
+        // Установка даты по умолчанию (сегодня в формате YYYY-MM-DD)
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (dateInput) dateInput.value = todayStr;
+        if (typeInput) typeInput.value = 'announcement';
+        if (notifyInput) notifyInput.checked = false;
+    }
+
+    modal.classList.remove('hidden');
+};
+
+window.closeCalendarEditorModal = function() {
+    const modal = document.getElementById('calendar-editor-modal');
+    if (modal) modal.classList.add('hidden');
+};
+
+window.handleCalendarImageFileUpload = function(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+        showToast('Пожалуйста, выберите файл изображения');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const base64 = e.target.result;
+        const photoUrlInput = document.getElementById('calendar-input-photo-url');
+        if (photoUrlInput) photoUrlInput.value = base64;
+
+        const previewContainer = document.getElementById('calendar-photo-preview-container');
+        const previewImg = document.getElementById('calendar-photo-preview-img');
+        if (previewContainer && previewImg) {
+            previewImg.src = base64;
+            previewContainer.classList.remove('hidden');
+        }
+    };
+    reader.readAsDataURL(file);
+};
+
+window.updateCalendarPhotoPreview = function() {
+    const photoUrlInput = document.getElementById('calendar-input-photo-url');
+    const previewContainer = document.getElementById('calendar-photo-preview-container');
+    const previewImg = document.getElementById('calendar-photo-preview-img');
+    if (!photoUrlInput || !previewContainer || !previewImg) return;
+
+    const url = photoUrlInput.value.trim();
+    if (url) {
+        previewImg.src = url;
+        previewContainer.classList.remove('hidden');
+    } else {
+        previewContainer.classList.add('hidden');
+        previewImg.src = '';
+    }
+};
+
+window.clearCalendarPhoto = function() {
+    const fileInput = document.getElementById('calendar-input-file');
+    const photoUrlInput = document.getElementById('calendar-input-photo-url');
+    const previewContainer = document.getElementById('calendar-photo-preview-container');
+    const previewImg = document.getElementById('calendar-photo-preview-img');
+
+    if (fileInput) fileInput.value = '';
+    if (photoUrlInput) photoUrlInput.value = '';
+    if (previewContainer) previewContainer.classList.add('hidden');
+    if (previewImg) previewImg.src = '';
+};
+
+window.saveCalendarNoteFromAdmin = async function(event) {
+    if (event) event.preventDefault();
+
+    const submitBtn = document.getElementById('calendar-submit-btn');
+    const editId = (document.getElementById('calendar-edit-id')?.value || '').trim();
+    const date = (document.getElementById('calendar-input-date')?.value || '').trim();
+    const type = document.getElementById('calendar-input-type')?.value || 'announcement';
+    const title = (document.getElementById('calendar-input-title')?.value || '').trim();
+    const text = (document.getElementById('calendar-input-text')?.value || '').trim();
+    const photoUrl = (document.getElementById('calendar-input-photo-url')?.value || '').trim();
+    const videoUrl = (document.getElementById('calendar-input-video-url')?.value || '').trim();
+    const notifySubscribers = Boolean(document.getElementById('calendar-input-notify')?.checked);
+
+    if (!date) {
+        showToast('Пожалуйста, выберите дату');
+        return;
+    }
+    if (!title) {
+        showToast('Пожалуйста, укажите заголовок события');
+        return;
+    }
+
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span>⏳</span><span>Сохранение...</span>';
+    }
+
+    try {
+        const noteData = {
+            id: editId || ('cal-' + Date.now()),
+            date,
+            type,
+            title,
+            text,
+            photoUrl,
+            videoUrl,
+            notifySubscribers
+        };
+
+        await saveAdminCalendarNote(noteData);
+        showToast(editId ? '✓ Событие в календаре успешно обновлено' : '✓ Событие успешно добавлено в календарь');
+        closeCalendarEditorModal();
+        renderAdminCalendar();
+    } catch (err) {
+        console.error('Error saving calendar note:', err);
+        showToast('✕ Ошибка: ' + err.message);
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span>💾</span><span>Сохранить событие</span>';
+        }
+    }
+};
+
+window.deleteCalendarNoteFromAdmin = async function(id) {
+    if (!confirm('Вы уверены, что хотите удалить это событие из календаря?')) {
+        return;
+    }
+    try {
+        await deleteAdminCalendarNote(id);
+        showToast('✓ Событие удалено из календаря');
+        renderAdminCalendar();
+    } catch (err) {
+        showToast('✕ Ошибка при удалении: ' + err.message);
     }
 };

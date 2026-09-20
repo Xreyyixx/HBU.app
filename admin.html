@@ -129,6 +129,10 @@
                 <span>🏆</span>
                 <span>Contests (Конкурсы)</span>
             </button>
+            <button id="tab-btn-calendar" onclick="switchAdminTab('calendar')" class="px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2">
+                <span>📅</span>
+                <span>Calendar (Календарь)</span>
+            </button>
             <button id="tab-btn-notifications" onclick="switchAdminTab('notifications')" class="px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2">
                 <span>🔔</span>
                 <span>Notifications (Оповещения)</span>
@@ -482,6 +486,83 @@
                 </div>
             </div>
         </div>
+
+        <!-- ============================================================== -->
+        <!-- РАЗДЕЛ 5: CALENDAR (УПРАВЛЕНИЕ СОБЫТИЯМИ И ЗАМЕТКАМИ) -->
+        <!-- ============================================================== -->
+        <div id="section-calendar" class="hidden flex flex-col gap-6">
+            <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 rounded-3xl backdrop-blur-xl flex flex-col gap-5">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-amber-500/20 pb-4">
+                    <div>
+                        <h2 class="text-base sm:text-lg font-black text-white uppercase tracking-wider flex items-center gap-2">
+                            <span>📅</span>
+                            <span>Календарь событий HariVision</span>
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-1">
+                            Управление событиями на 3 месяца вперед: анонсы, дни конкурсов, ивенты, праздники с медиафайлами.
+                        </p>
+                    </div>
+                    <button type="button" onclick="openCalendarEditorModal()" class="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg flex items-center gap-2 shrink-0">
+                        <span>＋</span>
+                        <span>Добавить событие</span>
+                    </button>
+                </div>
+
+                <!-- Карточки статистики календаря -->
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 sm:gap-4">
+                    <div class="bg-[#16070b] border border-amber-500/15 p-4 rounded-2xl flex flex-col gap-1">
+                        <span class="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider">Всего событий</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <span id="admin-cal-total-count" class="text-base font-black text-amber-400 font-mono">0</span>
+                            <span class="text-[10px] text-slate-400">в календаре</span>
+                        </div>
+                    </div>
+                    <div class="bg-[#16070b] border border-sky-500/25 p-4 rounded-2xl flex flex-col gap-1">
+                        <span class="text-[10px] font-bold text-sky-400/80 uppercase tracking-wider">📢 Анонсы</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <span id="admin-cal-announcements-count" class="text-base font-black text-sky-300 font-mono">0</span>
+                        </div>
+                    </div>
+                    <div class="bg-[#16070b] border border-amber-400/40 p-4 rounded-2xl flex flex-col gap-1">
+                        <span class="text-[10px] font-bold text-amber-300/80 uppercase tracking-wider">🏆 Конкурсы</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <span id="admin-cal-contests-count" class="text-base font-black text-amber-300 font-mono">0</span>
+                        </div>
+                    </div>
+                    <div class="bg-[#16070b] border border-emerald-500/25 p-4 rounded-2xl flex flex-col gap-1">
+                        <span class="text-[10px] font-bold text-emerald-400/80 uppercase tracking-wider">🎪 Ивенты</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <span id="admin-cal-events-count" class="text-base font-black text-emerald-300 font-mono">0</span>
+                        </div>
+                    </div>
+                    <div class="bg-[#16070b] border border-rose-500/25 p-4 rounded-2xl flex flex-col gap-1">
+                        <span class="text-[10px] font-bold text-rose-400/80 uppercase tracking-wider">🎉 Праздники</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <span id="admin-cal-holidays-count" class="text-base font-black text-rose-300 font-mono">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Фильтр и поиск по событиям -->
+                <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+                    <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
+                        <button onclick="setAdminCalendarFilter('all')" id="admin-cal-filter-all" class="px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-amber-500 text-slate-950 transition">Все</button>
+                        <button onclick="setAdminCalendarFilter('announcement')" id="admin-cal-filter-announcement" class="px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-[#16070b] text-sky-400 hover:bg-sky-500/10 border border-sky-500/20 transition">📢 Анонсы</button>
+                        <button onclick="setAdminCalendarFilter('contest')" id="admin-cal-filter-contest" class="px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-[#16070b] text-amber-300 hover:bg-amber-500/10 border border-amber-500/20 transition">🏆 Конкурсы</button>
+                        <button onclick="setAdminCalendarFilter('event')" id="admin-cal-filter-event" class="px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-[#16070b] text-emerald-400 hover:bg-emerald-500/10 border border-emerald-500/20 transition">🎪 Ивенты</button>
+                        <button onclick="setAdminCalendarFilter('holiday')" id="admin-cal-filter-holiday" class="px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-[#16070b] text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition">🎉 Праздники</button>
+                    </div>
+                    <div class="relative w-full sm:w-64">
+                        <input type="text" id="admin-cal-search-input" oninput="renderAdminCalendar()" placeholder="Поиск по дате или названию..." class="w-full bg-[#16070b] border border-amber-500/25 px-3.5 py-2 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                </div>
+
+                <!-- Список запланированных событий -->
+                <div id="admin-calendar-list" class="flex flex-col gap-3">
+                    <!-- Dynamic rendering -->
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ============================================================== -->
@@ -615,6 +696,91 @@
                 <div class="flex justify-end gap-3 pt-3 border-t border-amber-500/20">
                     <button type="button" onclick="closeNewsEditorModal()" class="px-5 py-2.5 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl">Отмена</button>
                     <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg">Сохранить новость</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Модальное окно создания / редактирования события в календаре -->
+    <div id="calendar-editor-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 flex flex-col gap-4 rounded-3xl shadow-2xl">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <h3 id="calendar-editor-title" class="text-base sm:text-lg font-bold text-white uppercase flex items-center gap-2">
+                    <span>📅</span>
+                    <span>Редактирование события</span>
+                </h3>
+                <button type="button" onclick="closeCalendarEditorModal()" class="text-slate-400 hover:text-white font-bold text-base w-8 h-8 flex items-center justify-center rounded-xl bg-[#16070b] border border-amber-500/20">✕</button>
+            </div>
+
+            <form id="calendar-note-form" onsubmit="saveCalendarNoteFromAdmin(event)" class="flex flex-col gap-4">
+                <input type="hidden" id="calendar-edit-id" />
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Дата события *</label>
+                        <input type="date" id="calendar-input-date" required class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 font-mono" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Вид заметки / События *</label>
+                        <select id="calendar-input-type" required class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400">
+                            <option value="announcement">📢 Анонс (информационное объявление)</option>
+                            <option value="contest">🏆 Конкурс (день проведения шоу / голосования)</option>
+                            <option value="event">🎪 Ивент (встреча, пре-пати, трансляция)</option>
+                            <option value="holiday">🎉 Праздник (памятная дата, юбилей)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Заголовок события *</label>
+                    <input type="text" id="calendar-input-title" required placeholder="Например: Гранд-финал HariVision 2026" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Подробное описание события *</label>
+                    <textarea id="calendar-input-text" rows="4" required placeholder="Опишите мероприятие, программу, время начала, участников..." class="w-full bg-[#16070b] border border-amber-500/25 p-4 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 leading-relaxed"></textarea>
+                </div>
+
+                <!-- Фотография к событию -->
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Фотография / Афиша события (опционально)</label>
+                    <div class="bg-[#16070b] border border-amber-500/25 p-3.5 rounded-2xl flex flex-col gap-3">
+                        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <label class="cursor-pointer bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow shrink-0">
+                                <span>📁 Загрузить файл / фото</span>
+                                <input type="file" id="calendar-input-file" accept="image/*" class="hidden" onchange="handleCalendarImageFileUpload(event)" />
+                            </label>
+                            <input type="text" id="calendar-input-photo-url" placeholder="Или укажите прямую ссылку на фото (https://...)" class="flex-1 bg-[#0a0305] border border-amber-500/20 px-3.5 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 font-mono" oninput="updateCalendarPhotoPreview()" />
+                        </div>
+                        <div id="calendar-photo-preview-container" class="hidden relative rounded-xl overflow-hidden max-h-48 border border-amber-500/20 bg-black/40">
+                            <img id="calendar-photo-preview-img" src="" alt="Предпросмотр" class="w-full h-48 object-cover" />
+                            <button type="button" onclick="clearCalendarPhoto()" class="absolute top-2 right-2 px-2.5 py-1 bg-black/80 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-[10px] font-bold uppercase rounded-lg">Удалить фото</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Видео к событию -->
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Ссылка на видео (YouTube / Rutube / MP4, опционально)</label>
+                    <input type="text" id="calendar-input-video-url" placeholder="https://rutube.ru/video/... или https://youtube.com/watch?v=..." class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 font-mono" />
+                </div>
+
+                <!-- Опция Web Push рассылки -->
+                <div class="bg-[#16070b] border border-amber-500/20 p-4 rounded-2xl flex items-center gap-3">
+                    <input type="checkbox" id="calendar-input-notify" class="w-4 h-4 rounded text-amber-500 focus:ring-amber-400 bg-black border-amber-500/40 cursor-pointer" />
+                    <label for="calendar-input-notify" class="text-xs text-amber-200 cursor-pointer select-none">
+                        <span class="font-bold">Отправить Web Push уведомление</span> подписчикам при сохранении этого события
+                    </label>
+                </div>
+
+                <div class="flex gap-3 pt-3 border-t border-amber-500/20">
+                    <button type="submit" id="calendar-submit-btn" class="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase py-3 rounded-xl transition shadow-lg flex items-center justify-center gap-2">
+                        <span>💾</span>
+                        <span>Сохранить событие</span>
+                    </button>
+                    <button type="button" onclick="closeCalendarEditorModal()" class="bg-[#16070b] hover:bg-amber-500/10 text-slate-300 font-bold text-xs uppercase py-3 px-6 rounded-xl border border-amber-500/20 transition">
+                        Отмена
+                    </button>
                 </div>
             </form>
         </div>

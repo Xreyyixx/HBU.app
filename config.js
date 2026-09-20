@@ -34,8 +34,12 @@ if (typeof JSON !== 'undefined' && typeof JSON.stringify === 'function' && !JSON
 
 // Firebase Web SDK v10 (Modular)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, initializeFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, initializeFirestore, setLogLevel } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+try {
+    setLogLevel('silent');
+} catch (e) {}
 
 // Fetch Firebase config from server or window fallback (no hardcoded production credentials)
 let remoteConfig = null;
