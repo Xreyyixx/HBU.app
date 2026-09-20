@@ -471,17 +471,21 @@ export async function fetchFirestoreStateDirectly() {
 
         // 8. Calendar Notes Collection (Public Events)
         try {
-            const calSnap = await getDocs(collection(db, "calendar"));
-            const calList = [];
-            calSnap.forEach(d => {
-                const cleaned = sanitizeFirestoreData(d.data());
-                calList.push({ id: d.id, ...(cleaned || {}) });
-            });
-            if (calList.length > 0) {
-                calList.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(calList)) {
-                    currentState.calendarNotes = calList;
-                    stateChanged = true;
+            const calSnap = await getDoc(doc(db, "artistAccounts", "calendar_store"));
+            if (calSnap.exists()) {
+                const raw = calSnap.data() || {};
+                let calList = [];
+                if (raw.data) {
+                    try {
+                        calList = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data;
+                    } catch (e) {}
+                }
+                if (Array.isArray(calList) && calList.length > 0) {
+                    calList.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(calList)) {
+                        currentState.calendarNotes = calList;
+                        stateChanged = true;
+                    }
                 }
             }
         } catch (e) {
@@ -727,18 +731,21 @@ function initFirestoreListeners() {
 
     // J. Real-Time Calendar Notes Listener (Public Events synced across all devices)
     try {
-        onSnapshot(collection(db, "calendar"), (snapshot) => {
-            if (!snapshot.empty) {
-                const calList = [];
-                snapshot.forEach(docSnap => {
-                    const raw = docSnap.data() || {};
-                    const cleaned = sanitizeFirestoreData(raw) || {};
-                    calList.push({ id: docSnap.id, ...cleaned });
-                });
-                calList.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-                if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(calList)) {
-                    currentState.calendarNotes = calList;
-                    notifyStateChanged(true);
+        onSnapshot(doc(db, "artistAccounts", "calendar_store"), (snapshot) => {
+            if (snapshot.exists()) {
+                const raw = snapshot.data() || {};
+                let calList = [];
+                if (raw.data) {
+                    try {
+                        calList = typeof raw.data === 'string' ? JSON.parse(raw.data) : raw.data;
+                    } catch (e) {}
+                }
+                if (Array.isArray(calList)) {
+                    calList.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                    if (safeJsonStringify(currentState.calendarNotes) !== safeJsonStringify(calList)) {
+                        currentState.calendarNotes = calList;
+                        notifyStateChanged(true);
+                    }
                 }
             }
         }, (err) => console.warn('Firestore calendar realtime listener warning:', err));
@@ -2639,11 +2646,11 @@ export async function syncAllToFirestore() {
             }
             // Calendar Notes
             if (Array.isArray(cleanCalendarNotes)) {
-                for (const item of cleanCalendarNotes) {
-                    if (item && item.id) {
-                        await setDoc(doc(db, "calendar", String(item.id)), item, { merge: true });
-                    }
-                }
+                await setDoc(doc(db, "artistAccounts", "calendar_store"), {
+                    type: 'calendar_store',
+                    data: safeJsonStringify(cleanCalendarNotes),
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
             }
             firestoreOk = true;
             console.log('Successfully synced all data to Firestore Cloud');
@@ -2724,11 +2731,14 @@ export async function saveAdminCalendarNote(note) {
     currentState.calendarNotes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     notifyStateChanged(true);
 
-    // 2. Direct Firestore persistence
+    // 2. Direct Firestore persistence to artistAccounts/calendar_store
     try {
         if (db) {
-            const cleanNote = sanitizeFirestoreData(note) || {};
-            await setDoc(doc(db, "calendar", note.id), cleanNote, { merge: true });
+            await setDoc(doc(db, "artistAccounts", "calendar_store"), {
+                type: 'calendar_store',
+                data: safeJsonStringify(currentState.calendarNotes),
+                updatedAt: Date.now()
+            }, { merge: true });
         }
     } catch (e) {
         console.warn('Firestore save calendar note error:', e);
@@ -2767,10 +2777,14 @@ export async function deleteAdminCalendarNote(id) {
     currentState.calendarNotes = currentState.calendarNotes.filter(n => n.id !== id);
     notifyStateChanged(true);
 
-    // 2. Direct Firestore deletion
+    // 2. Direct Firestore persistence update
     try {
         if (db) {
-            await deleteDoc(doc(db, "calendar", id));
+            await setDoc(doc(db, "artistAccounts", "calendar_store"), {
+                type: 'calendar_store',
+                data: safeJsonStringify(currentState.calendarNotes),
+                updatedAt: Date.now()
+            }, { merge: true });
         }
     } catch (e) {
         console.warn('Firestore delete calendar note error:', e);

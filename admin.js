@@ -2068,7 +2068,393 @@ const CALENDAR_TYPE_CONFIG = {
     }
 };
 
+const RUSSIAN_MONTH_NAMES = [
+    'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+];
+
+let adminCalendarYear = 2026;
+let adminCalendarMonth = 8; // Сентябрь 2026
+let adminSelectedDate = '2026-09-25';
+let adminQuickFormOpen = false;
+
+window.selectAdminCalendarDate = function(dateStr) {
+    adminSelectedDate = dateStr;
+    adminQuickFormOpen = false;
+    renderAdminCalendarGrid();
+    renderAdminSelectedDateCard();
+};
+
+window.prevAdminCalendarMonth = function() {
+    adminCalendarMonth--;
+    if (adminCalendarMonth < 0) {
+        adminCalendarMonth = 11;
+        adminCalendarYear--;
+    }
+    renderAdminCalendarGrid();
+    renderAdminSelectedDateCard();
+};
+
+window.nextAdminCalendarMonth = function() {
+    adminCalendarMonth++;
+    if (adminCalendarMonth > 11) {
+        adminCalendarMonth = 0;
+        adminCalendarYear++;
+    }
+    renderAdminCalendarGrid();
+    renderAdminSelectedDateCard();
+};
+
+window.goToTodayAdminCalendar = function() {
+    const today = new Date();
+    adminCalendarYear = today.getFullYear();
+    adminCalendarMonth = today.getMonth();
+    adminSelectedDate = today.toISOString().split('T')[0];
+    adminQuickFormOpen = false;
+    renderAdminCalendarGrid();
+    renderAdminSelectedDateCard();
+};
+
+window.toggleAdminQuickNoteForm = function(forceState = null) {
+    adminQuickFormOpen = (forceState !== null) ? forceState : !adminQuickFormOpen;
+    renderAdminSelectedDateCard();
+    if (adminQuickFormOpen) {
+        setTimeout(() => {
+            const titleInp = document.getElementById('admin-quick-note-title');
+            if (titleInp) titleInp.focus();
+        }, 50);
+    }
+};
+
+window.renderAdminCalendarGrid = function() {
+    const gridEl = document.getElementById('admin-calendar-grid');
+    const monthTitleEl = document.getElementById('admin-calendar-month-title');
+    if (!gridEl) return;
+
+    if (monthTitleEl) {
+        monthTitleEl.innerText = `${RUSSIAN_MONTH_NAMES[adminCalendarMonth]} ${adminCalendarYear}`;
+    }
+
+    const notes = Array.isArray(appState.calendarNotes) ? appState.calendarNotes : [];
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Если дата не выбрана, выберем сегодня или первую дату с событием
+    if (!adminSelectedDate) {
+        const firstInMonth = notes.find(n => n.date && n.date.startsWith(`${adminCalendarYear}-${String(adminCalendarMonth + 1).padStart(2, '0')}`));
+        adminSelectedDate = firstInMonth ? firstInMonth.date : todayStr;
+    }
+
+    const firstDay = new Date(adminCalendarYear, adminCalendarMonth, 1);
+    const startDayOffset = (firstDay.getDay() + 6) % 7; // Понедельник = 0
+    const daysInMonth = new Date(adminCalendarYear, adminCalendarMonth + 1, 0).getDate();
+    const daysInPrevMonth = new Date(adminCalendarYear, adminCalendarMonth, 0).getDate();
+
+    let cellsHtml = '';
+
+    // Дни предыдущего месяца (приглушенные)
+    for (let i = startDayOffset - 1; i >= 0; i--) {
+        const prevDayNum = daysInPrevMonth - i;
+        const prevMonthNum = adminCalendarMonth === 0 ? 12 : adminCalendarMonth;
+        const prevYearNum = adminCalendarMonth === 0 ? adminCalendarYear - 1 : adminCalendarYear;
+        const prevDateStr = `${prevYearNum}-${String(prevMonthNum).padStart(2, '0')}-${String(prevDayNum).padStart(2, '0')}`;
+        cellsHtml += `
+            <div onclick="selectAdminCalendarDate('${prevDateStr}')" class="min-h-[68px] sm:min-h-[82px] p-2 rounded-xl bg-[#0e0407]/40 border border-white/5 opacity-35 hover:opacity-75 transition cursor-pointer flex flex-col justify-between">
+                <span class="text-[11px] font-mono font-bold text-slate-500">${prevDayNum}</span>
+            </div>
+        `;
+    }
+
+    // Дни текущего месяца
+    for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${adminCalendarYear}-${String(adminCalendarMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const dayEvents = notes.filter(n => n.date === dateStr);
+        const isSelected = (dateStr === adminSelectedDate);
+        const isToday = (dateStr === todayStr);
+
+        let cellClass = 'bg-[#16070b]/80 border-amber-500/15 hover:border-amber-400/60 hover:bg-[#200a11]';
+        if (isSelected) {
+            cellClass = 'bg-amber-500/20 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)] ring-2 ring-amber-400/80';
+        } else if (dayEvents.length > 0) {
+            cellClass = 'bg-[#220a11] border-amber-500/40 hover:border-amber-400';
+        }
+
+        cellsHtml += `
+            <div onclick="selectAdminCalendarDate('${dateStr}')" class="min-h-[68px] sm:min-h-[82px] p-2 rounded-xl border ${cellClass} transition cursor-pointer flex flex-col justify-between gap-1 group">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-mono font-black ${isSelected ? 'text-amber-300 scale-110' : (isToday ? 'text-amber-400' : 'text-slate-200')} transition-transform">
+                        ${d}
+                    </span>
+                    ${isToday ? `
+                        <span class="text-[9px] font-black uppercase px-1.5 py-0.2 rounded bg-amber-500 text-slate-950">Сегодня</span>
+                    ` : (dayEvents.length > 0 ? `
+                        <span class="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_6px_rgba(245,158,11,0.8)]"></span>
+                    ` : '')}
+                </div>
+
+                <div class="flex flex-col gap-1 overflow-hidden">
+                    ${dayEvents.slice(0, 2).map(ev => {
+                        const cfg = CALENDAR_TYPE_CONFIG[ev.type] || CALENDAR_TYPE_CONFIG.announcement;
+                        return `
+                            <div class="text-[9px] font-bold px-1.5 py-0.5 rounded truncate border ${cfg.colorClass}">
+                                ${cfg.icon} ${ev.title || 'Событие'}
+                            </div>
+                        `;
+                    }).join('')}
+                    ${dayEvents.length > 2 ? `
+                        <span class="text-[8px] font-black text-amber-400/80 text-right">+${dayEvents.length - 2} ещё</span>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    // Дни следующего месяца для завершения сетки
+    const totalFilled = startDayOffset + daysInMonth;
+    const remainingCells = (totalFilled % 7 === 0) ? 0 : (7 - (totalFilled % 7));
+    for (let nextD = 1; nextD <= remainingCells; nextD++) {
+        const nextMonthNum = adminCalendarMonth === 11 ? 1 : adminCalendarMonth + 2;
+        const nextYearNum = adminCalendarMonth === 11 ? adminCalendarYear + 1 : adminCalendarYear;
+        const nextDateStr = `${nextYearNum}-${String(nextMonthNum).padStart(2, '0')}-${String(nextD).padStart(2, '0')}`;
+        cellsHtml += `
+            <div onclick="selectAdminCalendarDate('${nextDateStr}')" class="min-h-[68px] sm:min-h-[82px] p-2 rounded-xl bg-[#0e0407]/40 border border-white/5 opacity-35 hover:opacity-75 transition cursor-pointer flex flex-col justify-between">
+                <span class="text-[11px] font-mono font-bold text-slate-500">${nextD}</span>
+            </div>
+        `;
+    }
+
+    gridEl.innerHTML = cellsHtml;
+};
+
+window.renderAdminSelectedDateCard = function() {
+    const cardEl = document.getElementById('admin-selected-date-card');
+    if (!cardEl) return;
+
+    const notes = Array.isArray(appState.calendarNotes) ? appState.calendarNotes : [];
+    const selectedDate = adminSelectedDate || new Date().toISOString().split('T')[0];
+
+    // Форматирование даты
+    let formattedDate = selectedDate;
+    try {
+        const p = selectedDate.split('-');
+        if (p.length === 3) {
+            const d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+            formattedDate = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' });
+        }
+    } catch (e) {}
+
+    const dayNotes = notes.filter(n => n.date === selectedDate);
+    const countLabel = dayNotes.length === 1 ? '1 событие' : (dayNotes.length > 1 && dayNotes.length < 5 ? `${dayNotes.length} события` : `${dayNotes.length} событий`);
+
+    cardEl.innerHTML = `
+        <!-- Заголовок выбранной даты -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-500/20 pb-3">
+            <div class="flex items-center gap-3">
+                <span class="text-2xl">📅</span>
+                <div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <h4 class="text-sm sm:text-base font-black text-amber-300 uppercase tracking-wide capitalize">
+                            ${formattedDate}
+                        </h4>
+                        <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                            ${selectedDate}
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                        ${dayNotes.length > 0 ? `Запланировано: ${countLabel}` : 'На эту дату пока нет запланированных заметок или событий'}
+                    </p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 flex-wrap">
+                <button type="button" onclick="toggleAdminQuickNoteForm()" class="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg flex items-center gap-1.5">
+                    <span>${adminQuickFormOpen ? '✕' : '＋'}</span>
+                    <span>${adminQuickFormOpen ? 'Скрыть форму' : 'Добавить заметку'}</span>
+                </button>
+                <button type="button" onclick="openCalendarEditorModal(null, '${selectedDate}')" class="px-3.5 py-2 bg-[#0a0305] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl transition flex items-center gap-1.5" title="Добавить фото, видео и настроить Web Push">
+                    <span>🎨</span>
+                    <span class="hidden sm:inline">Расширенный редактор</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Форма быстрого добавления заметки на выбранную дату -->
+        ${(adminQuickFormOpen || dayNotes.length === 0) ? `
+            <div class="bg-[#120509] border border-amber-500/40 p-4 sm:p-5 rounded-2xl flex flex-col gap-3.5 shadow-inner animate-fade-in">
+                <div class="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                    <span class="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <span>✍️</span>
+                        <span>Быстрая заметка на ${selectedDate}</span>
+                    </span>
+                    <span class="text-[10px] text-emerald-400 flex items-center gap-1">
+                        <span>🌐</span>
+                        <span>Сохраняется для всех пользователей и устройств</span>
+                    </span>
+                </div>
+
+                <form onsubmit="quickSaveAdminCalendarNote(event)" class="flex flex-col gap-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div class="sm:col-span-2">
+                            <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Заголовок заметки / события *</label>
+                            <input type="text" id="admin-quick-note-title" required placeholder="Например: Старт голосования полуфинала" class="w-full bg-[#0a0305] border border-amber-500/25 px-3.5 py-2 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Вид события *</label>
+                            <select id="admin-quick-note-type" required class="w-full bg-[#0a0305] border border-amber-500/25 px-3 py-2 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400">
+                                <option value="announcement">📢 Анонс</option>
+                                <option value="contest">🏆 Конкурс / Шоу</option>
+                                <option value="event">🎪 Ивент / Встреча</option>
+                                <option value="holiday">🎉 Праздник</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Текст заметки / Подробности события *</label>
+                        <textarea id="admin-quick-note-text" rows="2" required placeholder="Напишите текст заметки, который увидят пользователи..." class="w-full bg-[#0a0305] border border-amber-500/25 p-3 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 leading-relaxed"></textarea>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                        <label class="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" id="admin-quick-note-notify" class="w-4 h-4 rounded text-amber-500 focus:ring-amber-400 bg-black border-amber-500/40 cursor-pointer" />
+                            <span class="text-xs text-slate-300">Отправить Push-уведомление подписчикам</span>
+                        </label>
+
+                        <div class="flex items-center gap-2">
+                            ${dayNotes.length > 0 ? `
+                                <button type="button" onclick="toggleAdminQuickNoteForm(false)" class="px-3 py-2 bg-[#16070b] text-slate-400 hover:text-white text-xs font-bold uppercase rounded-xl border border-white/10 transition">
+                                    Отмена
+                                </button>
+                            ` : ''}
+                            <button type="submit" id="admin-quick-note-submit-btn" class="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition flex items-center gap-1.5">
+                                <span>💾</span>
+                                <span>Опубликовать заметку</span>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        ` : ''}
+
+        <!-- Список заметок и событий на выбранную дату -->
+        ${dayNotes.length > 0 ? `
+            <div class="flex flex-col gap-3 pt-1">
+                <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    События на эту дату (${dayNotes.length}):
+                </span>
+                <div class="grid grid-cols-1 gap-3">
+                    ${dayNotes.map(note => {
+                        const typeCfg = CALENDAR_TYPE_CONFIG[note.type] || CALENDAR_TYPE_CONFIG.announcement;
+                        const hasPhoto = Boolean(note.photoUrl);
+                        const hasVideo = Boolean(note.videoUrl);
+                        return `
+                            <div class="bg-[#120509] border ${typeCfg.badgeBorder} p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 hover:border-amber-400/50 transition shadow">
+                                <div class="flex items-start gap-3 flex-1 min-w-0">
+                                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${typeCfg.colorClass}">
+                                        <span class="text-base">${typeCfg.icon}</span>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2 flex-wrap mb-1">
+                                            <span class="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${typeCfg.colorClass}">
+                                                ${typeCfg.icon} ${typeCfg.label}
+                                            </span>
+                                            ${hasPhoto ? `<span class="text-[10px] font-bold text-slate-300 bg-black/40 px-2 py-0.5 rounded border border-white/10">📷 Фото</span>` : ''}
+                                            ${hasVideo ? `<span class="text-[10px] font-bold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">🎬 Видео</span>` : ''}
+                                        </div>
+                                        <h5 class="text-sm font-black text-white uppercase tracking-wide truncate mb-1">
+                                            ${note.title || 'Без названия'}
+                                        </h5>
+                                        <p class="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                                            ${note.text || ''}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center gap-2 self-end md:self-center shrink-0">
+                                    <button type="button" onclick="openCalendarEditorModal('${note.id}')" class="px-3 py-1.5 bg-[#0a0305] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl transition flex items-center gap-1">
+                                        <span>✏️</span>
+                                        <span>Изменить</span>
+                                    </button>
+                                    <button type="button" onclick="deleteCalendarNoteFromAdmin('${note.id}')" class="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-bold text-xs uppercase rounded-xl transition flex items-center gap-1">
+                                        <span>🗑️</span>
+                                        <span>Удалить</span>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        ` : ''}
+    `;
+};
+
+window.quickSaveAdminCalendarNote = async function(event) {
+    if (event) event.preventDefault();
+
+    const titleInput = document.getElementById('admin-quick-note-title');
+    const typeSelect = document.getElementById('admin-quick-note-type');
+    const textInput = document.getElementById('admin-quick-note-text');
+    const notifyInput = document.getElementById('admin-quick-note-notify');
+    const submitBtn = document.getElementById('admin-quick-note-submit-btn');
+
+    const title = (titleInput?.value || '').trim();
+    const type = typeSelect?.value || 'announcement';
+    const text = (textInput?.value || '').trim();
+    const notifySubscribers = Boolean(notifyInput?.checked);
+    const date = adminSelectedDate || new Date().toISOString().split('T')[0];
+
+    if (!title) {
+        showToast('Пожалуйста, укажите заголовок заметки');
+        return;
+    }
+    if (!text) {
+        showToast('Пожалуйста, напишите текст заметки');
+        return;
+    }
+
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span>⏳</span><span>Сохранение...</span>';
+    }
+
+    try {
+        const noteData = {
+            id: 'cal-' + Date.now(),
+            date,
+            type,
+            title,
+            text,
+            photoUrl: '',
+            videoUrl: '',
+            notifySubscribers
+        };
+
+        await saveAdminCalendarNote(noteData);
+        if (!Array.isArray(appState.calendarNotes)) appState.calendarNotes = [];
+        const idx = appState.calendarNotes.findIndex(n => n.id === noteData.id);
+        if (idx >= 0) appState.calendarNotes[idx] = { ...noteData };
+        else appState.calendarNotes.push({ ...noteData });
+        appState.calendarNotes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+        showToast('✓ Заметка успешно сохранена и опубликована на всех устройствах!');
+        adminQuickFormOpen = false;
+        renderAdminCalendar();
+    } catch (err) {
+        console.error('Error saving quick calendar note:', err);
+        showToast('✕ Ошибка: ' + err.message);
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span>💾</span><span>Опубликовать заметку</span>';
+        }
+    }
+};
+
 window.renderAdminCalendar = function() {
+    // 1. Рендерим интерактивный календарь-сетку и панель выбранной даты
+    renderAdminCalendarGrid();
+    renderAdminSelectedDateCard();
+
     const listEl = document.getElementById('admin-calendar-list');
     if (!listEl) return;
 
@@ -2112,7 +2498,7 @@ window.renderAdminCalendar = function() {
                 <p class="text-xs text-slate-400 font-bold uppercase tracking-wider">
                     ${searchTerm ? 'Ничего не найдено по вашему запросу' : 'События в календаре еще не добавлены'}
                 </p>
-                <button type="button" onclick="openCalendarEditorModal()" class="mt-4 px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl border border-amber-500/30 transition">
+                <button type="button" onclick="openCalendarEditorModal(null, '${adminSelectedDate || ''}')" class="mt-4 px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl border border-amber-500/30 transition">
                     + Добавить первое событие
                 </button>
             </div>
@@ -2179,7 +2565,7 @@ window.renderAdminCalendar = function() {
     }).join('');
 };
 
-window.openCalendarEditorModal = function(id = null) {
+window.openCalendarEditorModal = function(id = null, prefillDate = null) {
     const modal = document.getElementById('calendar-editor-modal');
     const form = document.getElementById('calendar-note-form');
     if (!modal || !form) return;
@@ -2223,9 +2609,9 @@ window.openCalendarEditorModal = function(id = null) {
     } else {
         if (titleEl) titleEl.innerHTML = '<span>＋</span><span>Добавить событие в календарь</span>';
         if (editIdInput) editIdInput.value = '';
-        // Установка даты по умолчанию (сегодня в формате YYYY-MM-DD)
-        const todayStr = new Date().toISOString().split('T')[0];
-        if (dateInput) dateInput.value = todayStr;
+        // Установка даты по умолчанию (prefillDate, adminSelectedDate или сегодня в формате YYYY-MM-DD)
+        const defaultDate = prefillDate || adminSelectedDate || (new Date().toISOString().split('T')[0]);
+        if (dateInput) dateInput.value = defaultDate;
         if (typeInput) typeInput.value = 'announcement';
         if (notifyInput) notifyInput.checked = false;
     }
@@ -2336,6 +2722,16 @@ window.saveCalendarNoteFromAdmin = async function(event) {
         if (idx >= 0) appState.calendarNotes[idx] = { ...noteData };
         else appState.calendarNotes.push({ ...noteData });
         appState.calendarNotes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+        // Фокусируемся на сохраненной дате
+        adminSelectedDate = noteData.date;
+        try {
+            const dp = noteData.date.split('-');
+            if (dp.length === 3) {
+                adminCalendarYear = parseInt(dp[0]);
+                adminCalendarMonth = parseInt(dp[1]) - 1;
+            }
+        } catch (e) {}
 
         showToast(editId ? '✓ Событие в календаре успешно обновлено' : '✓ Событие успешно добавлено в календарь');
         closeCalendarEditorModal();

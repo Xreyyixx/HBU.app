@@ -543,6 +543,76 @@
                     </div>
                 </div>
 
+                <!-- Интерактивный Календарь для Администратора -->
+                <div class="bg-[#120509] border border-amber-500/25 p-5 sm:p-6 rounded-3xl flex flex-col gap-4 shadow-xl">
+                    <!-- Заголовок и переключение месяцев -->
+                    <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b border-amber-500/20 pb-4">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">🗓️</span>
+                            <div>
+                                <h3 id="admin-calendar-month-title" class="text-base sm:text-lg font-black text-white uppercase tracking-wider">
+                                    Сентябрь 2026
+                                </h3>
+                                <p class="text-[11px] text-slate-400">
+                                    Нажмите на любую дату, чтобы просмотреть события или добавить новую заметку
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-2 self-start sm:self-auto">
+                            <button type="button" onclick="prevAdminCalendarMonth()" class="px-3 py-1.5 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-black text-xs rounded-xl transition flex items-center gap-1 shadow">
+                                <span>‹</span>
+                                <span class="hidden sm:inline">Пред.</span>
+                            </button>
+                            <button type="button" onclick="goToTodayAdminCalendar()" class="px-3 py-1.5 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-xs rounded-xl transition shadow">
+                                Сегодня
+                            </button>
+                            <button type="button" onclick="nextAdminCalendarMonth()" class="px-3 py-1.5 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-black text-xs rounded-xl transition flex items-center gap-1 shadow">
+                                <span class="hidden sm:inline">След.</span>
+                                <span>›</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Сетка календаря -->
+                    <div class="overflow-x-auto">
+                        <div class="min-w-[500px]">
+                            <!-- Дни недели -->
+                            <div class="grid grid-cols-7 gap-1.5 mb-2 text-center text-[11px] font-black uppercase tracking-wider text-amber-400/80">
+                                <div class="py-1">Пн</div>
+                                <div class="py-1">Вт</div>
+                                <div class="py-1">Ср</div>
+                                <div class="py-1">Чт</div>
+                                <div class="py-1">Пт</div>
+                                <div class="py-1 text-rose-400">Сб</div>
+                                <div class="py-1 text-rose-400">Вс</div>
+                            </div>
+                            <!-- Ячейки дней месяца -->
+                            <div id="admin-calendar-grid" class="grid grid-cols-7 gap-1.5">
+                                <!-- Рендерится динамически -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Панель выбранной даты -->
+                    <div id="admin-selected-date-card" class="mt-2 bg-[#16070b] border border-amber-500/30 p-5 rounded-2xl flex flex-col gap-4">
+                        <!-- Рендерится динамически -->
+                    </div>
+                </div>
+
+                <!-- Разделитель и заголовок общего списка -->
+                <div class="flex items-center justify-between gap-4 pt-3 border-t border-amber-500/20">
+                    <div>
+                        <h3 class="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                            <span>📋</span>
+                            <span>Все запланированные события списком</span>
+                        </h3>
+                        <p class="text-[11px] text-slate-400">
+                            Быстрый фильтр и поиск по всей базе официальных событий
+                        </p>
+                    </div>
+                </div>
+
                 <!-- Фильтр и поиск по событиям -->
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
                     <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
