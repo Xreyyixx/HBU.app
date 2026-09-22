@@ -85,6 +85,40 @@ window.manualCloudSync = async function() {
 // -------------------------------------------------------------
 let isAuthenticated = false;
 
+async function registerCurrentAdminSession(token, identifier, uid = null) {
+    if (!token) return;
+    try {
+        await fetch('/api/admin/register-session', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                email: identifier || (auth?.currentUser?.email) || 'admin@harivision.org',
+                username: identifier ? identifier.split('@')[0] : 'Admin',
+                uid: uid || auth?.currentUser?.uid || null
+            })
+        });
+    } catch (e) {
+        console.warn('Session registration note:', e.message);
+    }
+}
+
+function handleSessionRevokedNotice() {
+    localStorage.removeItem('harivision_admin_token');
+    if (auth) {
+        try { signOut(auth); } catch (e) {}
+    }
+    setAdminAuthenticated(false);
+    const errEl = document.getElementById('auth-error');
+    if (errEl) {
+        errEl.innerHTML = `<div class="font-bold text-rose-300">Доступ к панели администратора был отозван.</div><div class="text-[11px] text-slate-300 mt-1">Ваша сессия завершена администратором. Для повторного входа пройдите авторизацию заново.</div>`;
+        errEl.classList.remove('hidden');
+    }
+    showToast('Доступ к панели управления был отозван', true);
+}
+
 function setAdminAuthenticated(authenticated) {
     isAuthenticated = authenticated;
     const authPanel = document.getElementById('auth-panel');
@@ -101,21 +135,59 @@ function setAdminAuthenticated(authenticated) {
         renderAdminContests();
         renderAdminCalendar();
         updateBannerSelectUI();
+        if (activeAdminTab === 'admins') {
+            loadAdminSessions();
+        }
     } else {
         authPanel.classList.remove('hidden');
         dashboard.classList.add('hidden');
     }
 }
 
+// Периодическая проверка статуса сессии (выявление отзыва доступа)
+setInterval(async () => {
+    if (!isAuthenticated) return;
+    const token = localStorage.getItem('harivision_admin_token');
+    if (!token) {
+        setAdminAuthenticated(false);
+        return;
+    }
+    try {
+        const res = await fetch('/api/admin/verify', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data && data.revoked) {
+            handleSessionRevokedNotice();
+        } else if (!res.ok || !data.valid) {
+            setAdminAuthenticated(false);
+        }
+    } catch (e) {
+        // network transient error, ignore
+    }
+}, 15000);
+
 // Проверка сохраненной сессии при старте
 (async function initAdminAuthSession() {
-    const hasServerSession = await verifyAdminSession();
-    if (hasServerSession) {
-        setAdminAuthenticated(true);
+    const token = localStorage.getItem('harivision_admin_token');
+    if (token) {
         try {
-            await fetchFirestoreStateDirectly();
+            const res = await fetch('/api/admin/verify', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (data && data.revoked) {
+                handleSessionRevokedNotice();
+                return;
+            }
+            if (data && data.valid) {
+                setAdminAuthenticated(true);
+                try {
+                    await fetchFirestoreStateDirectly();
+                } catch (e) {}
+                return;
+            }
         } catch (e) {}
-        return;
     }
 
     // Отслеживание сессии Firebase Auth
@@ -160,7 +232,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     let authSuccess = false;
     let srvErrorMessage = '';
 
-    // 1. Попытка входа через серверный API (проверяет локальный пароль и Firebase REST API)
+    // 1. Попытка входа через серверный API (проверяет пароль и Firebase REST API)
     try {
         const srvRes = await loginAdminServer(loginInput, password);
         if (srvRes && srvRes.token) {
@@ -168,6 +240,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
             setAdminAuthenticated(true);
             showToast('Вход в панель администратора выполнен');
             authSuccess = true;
+            await registerCurrentAdminSession(srvRes.token, loginInput);
         }
     } catch (srvErr) {
         srvErrorMessage = srvErr.message || '';
@@ -183,6 +256,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
             setAdminAuthenticated(true);
             showToast('Вход через Firebase Auth выполнен');
             authSuccess = true;
+            await registerCurrentAdminSession(token, loginInput, userCred?.user?.uid);
         } catch (firebaseErr) {
             console.error('Firebase Auth Error:', firebaseErr);
             let msg = "Неверный логин или пароль администратора";
@@ -196,21 +270,14 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
                 msg = firebaseErr.message;
             }
             if (errEl) {
-                errEl.innerHTML = `<div class="font-bold text-rose-300">${msg}</div><div class="text-[11px] text-amber-200/80 mt-1.5 leading-relaxed">Мастер-вход: логин <b>admin</b>, пароль <b>admin</b></div>`;
+                errEl.innerHTML = `<div class="font-bold text-rose-300">${msg}</div>`;
                 errEl.classList.remove('hidden');
             }
         }
     } else if (!authSuccess && !auth) {
         if (errEl) {
             const msg = srvErrorMessage || 'Неверный логин или пароль администратора.';
-            errEl.innerHTML = `
-                <div class="font-bold text-rose-300">${msg}</div>
-                <div class="text-[11px] text-amber-200/80 mt-2 leading-relaxed text-left border-t border-amber-500/15 pt-2">
-                    💡 <b>Почему не срабатывает аккаунт Firebase?</b><br/>
-                    Для проверки паролей через Firebase проекту необходим Web API ключ (переменная <code>FIREBASE_API_KEY</code> в настройках переменных окружения).<br/>
-                    Сейчас вы можете войти, используя мастер-логин: <b>admin</b>, пароль: <b>admin</b> (или ваш email с паролем <b>admin</b>).
-                </div>
-            `;
+            errEl.innerHTML = `<div class="font-bold text-rose-300">${msg}</div>`;
             errEl.classList.remove('hidden');
         }
     }
@@ -295,23 +362,25 @@ function showToast(message, isError = false) {
 // -------------------------------------------------------------
 window.switchAdminTab = function(tabName) {
     activeAdminTab = tabName;
-    const tabs = ['voting', 'news', 'contests', 'calendar', 'notifications'];
+    const tabs = ['voting', 'news', 'contests', 'calendar', 'notifications', 'admins'];
 
     tabs.forEach(tab => {
         const btn = document.getElementById(`tab-btn-${tab}`);
         const sec = document.getElementById(`section-${tab}`);
 
         if (tab === tabName) {
-            btn.className = "px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition flex items-center gap-2";
+            if (btn) btn.className = "px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider bg-amber-500 text-slate-950 shadow-md transition flex items-center gap-2";
             if (sec) sec.classList.remove('hidden');
         } else {
-            btn.className = "px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2";
+            if (btn) btn.className = "px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2";
             if (sec) sec.classList.add('hidden');
         }
     });
 
     if (tabName === 'calendar') {
         renderAdminCalendar();
+    } else if (tabName === 'admins') {
+        loadAdminSessions();
     }
 };
 
@@ -2760,5 +2829,294 @@ window.deleteCalendarNoteFromAdmin = async function(id) {
         renderAdminCalendar();
     } catch (err) {
         showToast('✕ Ошибка при удалении: ' + err.message);
+    }
+};
+
+// -------------------------------------------------------------
+// РАЗДЕЛ 6: ADMINS & SESSIONS (РЕЕСТР АДМИНИСТРАТОРОВ И ОТЗЫВ ДОСТУПА)
+// -------------------------------------------------------------
+let targetRevokeSessionId = null;
+
+function parseUserAgentDevice(ua) {
+    if (!ua) return 'Неизвестный браузер';
+    let os = 'Неизвестная ОС';
+    if (ua.includes('Windows')) os = 'Windows';
+    else if (ua.includes('Macintosh') || ua.includes('Mac OS')) os = 'macOS';
+    else if (ua.includes('iPhone')) os = 'iOS (iPhone)';
+    else if (ua.includes('iPad')) os = 'iOS (iPad)';
+    else if (ua.includes('Android')) os = 'Android';
+    else if (ua.includes('Linux')) os = 'Linux';
+
+    let browser = 'Браузер';
+    if (ua.includes('Edg/')) browser = 'Microsoft Edge';
+    else if (ua.includes('Chrome/')) browser = 'Google Chrome';
+    else if (ua.includes('Safari/') && !ua.includes('Chrome')) browser = 'Apple Safari';
+    else if (ua.includes('Firefox/')) browser = 'Mozilla Firefox';
+    else if (ua.includes('OPR/') || ua.includes('Opera/')) browser = 'Opera';
+
+    return `${browser} (${os})`;
+}
+
+function formatSessionDate(isoStr) {
+    if (!isoStr) return '—';
+    try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        return d.toLocaleString('ru-RU', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        });
+    } catch (e) {
+        return isoStr;
+    }
+}
+
+window.loadAdminSessions = async function() {
+    const listEl = document.getElementById('admin-sessions-list');
+    const totalCountEl = document.getElementById('sessions-total-count');
+    const activeCountEl = document.getElementById('sessions-active-count');
+    const currentInfoEl = document.getElementById('sessions-current-info');
+    if (!listEl) return;
+
+    const token = localStorage.getItem('harivision_admin_token');
+    if (!token) {
+        listEl.innerHTML = '<div class="p-8 text-center text-xs text-rose-400">Требуется повторная авторизация в панели администратора</div>';
+        return;
+    }
+
+    try {
+        listEl.innerHTML = '<div class="p-8 text-center text-xs text-slate-400">Загрузка активных сессий администраторов...</div>';
+        const res = await fetch('/api/admin/sessions', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (res.status === 401) {
+            handleSessionRevokedNotice();
+            return;
+        }
+
+        if (!res.ok) {
+            throw new Error(`Ошибка загрузки: статус ${res.status}`);
+        }
+
+        const data = await res.json();
+        const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+        const currentSessionId = data.currentSessionId;
+
+        if (totalCountEl) totalCountEl.textContent = sessions.length;
+        const activeSessions = sessions.filter(s => s.status === 'active');
+        if (activeCountEl) activeCountEl.textContent = activeSessions.length;
+
+        const currentSession = sessions.find(s => s.id === currentSessionId || s.isCurrent);
+        if (currentInfoEl) {
+            if (currentSession) {
+                currentInfoEl.textContent = `${currentSession.ip || 'Localhost'} • ${parseUserAgentDevice(currentSession.userAgent)}`;
+                currentInfoEl.title = currentSession.userAgent || '';
+            } else {
+                currentInfoEl.textContent = 'Текущий браузер';
+            }
+        }
+
+        if (sessions.length === 0) {
+            listEl.innerHTML = `
+                <div class="p-8 text-center bg-[#16070b] border border-amber-500/20 rounded-2xl">
+                    <p class="text-xs text-slate-400">Нет активных записей в реестре сессий.</p>
+                </div>
+            `;
+            return;
+        }
+
+        listEl.innerHTML = sessions.map(session => {
+            const isCurrent = Boolean(session.isCurrent || (session.id && session.id === currentSessionId));
+            const isRevoked = session.status === 'revoked';
+            const deviceFormatted = parseUserAgentDevice(session.userAgent);
+            const userIdentifier = session.email || session.username || 'Администратор';
+            const escapedIdentifier = userIdentifier.replace(/'/g, "\\'");
+
+            let borderClass = 'border-amber-500/15 bg-[#120509]';
+            if (isRevoked) {
+                borderClass = 'border-rose-500/20 bg-[#0a0205] opacity-60';
+            } else if (isCurrent) {
+                borderClass = 'border-amber-500/40 bg-[#19090e] shadow-lg shadow-amber-500/5';
+            }
+
+            let statusBadge = '';
+            if (isRevoked) {
+                statusBadge = '<span class="px-2.5 py-1 text-[10px] uppercase font-bold rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/30">Отозвана</span>';
+            } else if (isCurrent) {
+                statusBadge = '<span class="px-2.5 py-1 text-[10px] uppercase font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40">Ваше устройство</span>';
+            } else {
+                statusBadge = '<span class="px-2.5 py-1 text-[10px] uppercase font-bold rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Активна</span>';
+            }
+
+            let actionButton = '';
+            if (isRevoked) {
+                actionButton = '<span class="text-[11px] text-rose-400 font-bold uppercase tracking-wider py-2 px-3">Доступ заблокирован</span>';
+            } else if (isCurrent) {
+                actionButton = '<span class="text-[11px] text-amber-400/80 font-bold uppercase tracking-wider py-2 px-3">Текущая сессия</span>';
+            } else {
+                actionButton = `
+                    <button onclick="openRevokeSessionModal('${session.id}', '${escapedIdentifier}')" class="px-4 py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 hover:text-white font-bold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0">
+                        <span>🚫</span>
+                        <span>Отозвать доступ</span>
+                    </button>
+                `;
+            }
+
+            return `
+                <div class="border ${borderClass} p-4 sm:p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 transition">
+                    <div class="flex items-start gap-3.5">
+                        <div class="w-10 h-10 rounded-xl ${isRevoked ? 'bg-rose-950/40 border border-rose-500/20 text-rose-400' : isCurrent ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300' : 'bg-[#16070b] border border-amber-500/20 text-slate-300'} flex items-center justify-center text-lg shrink-0 mt-0.5">
+                            ${session.userAgent && (session.userAgent.includes('Mobile') || session.userAgent.includes('iPhone') || session.userAgent.includes('Android')) ? '📱' : '💻'}
+                        </div>
+                        <div class="flex flex-col gap-1.5">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="font-bold text-sm text-white">${userIdentifier}</span>
+                                ${statusBadge}
+                                <span class="text-[10px] text-slate-400 font-mono bg-white/5 px-2 py-0.5 rounded">ID: ${session.id ? session.id.slice(-8) : '—'}</span>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-300 pt-1">
+                                <div><span class="text-slate-500">Устройство:</span> <span class="font-medium text-slate-200">${deviceFormatted}</span></div>
+                                <div><span class="text-slate-500">IP адрес:</span> <span class="font-mono text-amber-300/90">${session.ip || 'Localhost'}</span></div>
+                                <div><span class="text-slate-500">Вход:</span> <span class="text-slate-300">${formatSessionDate(session.loginAt)}</span></div>
+                                <div><span class="text-slate-500">Активность:</span> <span class="text-slate-300">${formatSessionDate(session.lastActiveAt)}</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-end md:self-center pt-2 md:pt-0 border-t md:border-t-0 border-amber-500/10">
+                        ${actionButton}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (err) {
+        console.error('Error loading admin sessions:', err);
+        listEl.innerHTML = `<div class="p-8 text-center text-xs text-rose-400 bg-rose-950/20 border border-rose-500/30 rounded-2xl">Не удалось загрузить реестр сессий: ${err.message}</div>`;
+    }
+};
+
+window.openRevokeSessionModal = function(sessionId, desc) {
+    targetRevokeSessionId = sessionId;
+    const modal = document.getElementById('revoke-session-modal');
+    const descEl = document.getElementById('revoke-modal-target-desc');
+    const keyInput = document.getElementById('revoke-modal-key-input');
+    const errorEl = document.getElementById('revoke-modal-error');
+    const titleEl = document.getElementById('revoke-modal-title');
+
+    if (titleEl) titleEl.textContent = 'Подтверждение безопасности';
+    if (descEl) {
+        descEl.textContent = desc ? `${desc} (Сессия: ${sessionId})` : `Сессия ID: ${sessionId}`;
+    }
+    if (keyInput) keyInput.value = '';
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('hidden');
+    }
+    if (modal) {
+        modal.classList.remove('hidden');
+        setTimeout(() => keyInput && keyInput.focus(), 50);
+    }
+};
+
+window.openRevokeAllSessionsModal = function() {
+    targetRevokeSessionId = '__ALL__';
+    const modal = document.getElementById('revoke-session-modal');
+    const descEl = document.getElementById('revoke-modal-target-desc');
+    const keyInput = document.getElementById('revoke-modal-key-input');
+    const errorEl = document.getElementById('revoke-modal-error');
+    const titleEl = document.getElementById('revoke-modal-title');
+
+    if (titleEl) titleEl.textContent = 'Завершить все остальные сессии';
+    if (descEl) {
+        descEl.textContent = 'Все другие активные сессии администраторов на всех устройствах (ваша текущая сессия останется активной)';
+    }
+    if (keyInput) keyInput.value = '';
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('hidden');
+    }
+    if (modal) {
+        modal.classList.remove('hidden');
+        setTimeout(() => keyInput && keyInput.focus(), 50);
+    }
+};
+
+window.closeRevokeSessionModal = function() {
+    const modal = document.getElementById('revoke-session-modal');
+    if (modal) modal.classList.add('hidden');
+    targetRevokeSessionId = null;
+};
+
+window.submitRevokeSession = async function() {
+    const keyInput = document.getElementById('revoke-modal-key-input');
+    const errorEl = document.getElementById('revoke-modal-error');
+    const submitBtn = document.getElementById('revoke-modal-submit-btn');
+    const key = keyInput ? keyInput.value.trim() : '';
+
+    if (!key) {
+        if (errorEl) {
+            errorEl.textContent = 'Введите ключ безопасности для подтверждения операции';
+            errorEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    const token = localStorage.getItem('harivision_admin_token');
+    if (!token) {
+        if (errorEl) {
+            errorEl.textContent = 'Требуется авторизация в панели администратора';
+            errorEl.classList.remove('hidden');
+        }
+        return;
+    }
+
+    try {
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-70');
+        }
+
+        const endpoint = targetRevokeSessionId === '__ALL__' ? '/api/admin/revoke-all-sessions' : '/api/admin/revoke-session';
+        const bodyPayload = targetRevokeSessionId === '__ALL__' ? { masterKey: key } : { sessionId: targetRevokeSessionId, masterKey: key };
+
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(bodyPayload)
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            if (errorEl) {
+                errorEl.textContent = data.error || 'Ошибка проверки ключа безопасности';
+                errorEl.classList.remove('hidden');
+            }
+            return;
+        }
+
+        closeRevokeSessionModal();
+        showToast(data.message || '✓ Доступ успешно отозван');
+        await loadAdminSessions();
+    } catch (err) {
+        if (errorEl) {
+            errorEl.textContent = 'Ошибка выполнения запроса: ' + err.message;
+            errorEl.classList.remove('hidden');
+        }
+    } finally {
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-70');
+        }
     }
 };

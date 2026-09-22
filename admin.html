@@ -137,6 +137,10 @@
                 <span>🔔</span>
                 <span>Notifications (Оповещения)</span>
             </button>
+            <button id="tab-btn-admins" onclick="switchAdminTab('admins')" class="px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2">
+                <span>🛡️</span>
+                <span>Admins & Sessions (Сессии)</span>
+            </button>
         </div>
 
         <!-- ============================================================== -->
@@ -633,6 +637,61 @@
                 </div>
             </div>
         </div>
+
+        <!-- ============================================================== -->
+        <!-- РАЗДЕЛ 6: ADMINS & SESSIONS (АКТИВНЫЕ СЕССИИ И УПРАВЛЕНИЕ ДОСТУПОМ) -->
+        <!-- ============================================================== -->
+        <div id="section-admins" class="hidden flex flex-col gap-6">
+            <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 rounded-3xl backdrop-blur-xl flex flex-col gap-5">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-amber-500/20 pb-4">
+                    <div>
+                        <h2 class="text-base sm:text-lg font-black text-white uppercase tracking-wider flex items-center gap-2">
+                            <span>🛡️</span>
+                            <span>Активные администраторы и сессии</span>
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-1">
+                            Реальный реестр всех авторизованных аккаунтов и активных сессий в панели управления HariVision
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="loadAdminSessions()" class="px-3.5 py-2 bg-[#16070b] hover:bg-amber-500/10 border border-amber-500/25 text-amber-300 font-bold text-xs uppercase tracking-wider rounded-xl transition flex items-center gap-1.5 cursor-pointer">
+                            <span>🔄</span>
+                            <span>Обновить</span>
+                        </button>
+                        <button onclick="openRevokeAllSessionsModal()" class="px-3.5 py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-bold text-xs uppercase tracking-wider rounded-xl transition flex items-center gap-1.5 cursor-pointer">
+                            <span>🚫</span>
+                            <span>Завершить другие сессии</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Карточки статистики -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div class="bg-[#16070b] border border-amber-500/15 p-4 rounded-2xl flex flex-col gap-1">
+                        <span class="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Всего сессий в реестре</span>
+                        <span id="sessions-total-count" class="text-2xl font-black text-white font-mono">0</span>
+                    </div>
+                    <div class="bg-[#16070b] border border-green-500/20 p-4 rounded-2xl flex flex-col gap-1">
+                        <span class="text-[10px] uppercase font-bold text-green-400 tracking-wider">Активных сессий</span>
+                        <span id="sessions-active-count" class="text-2xl font-black text-green-400 font-mono">0</span>
+                    </div>
+                    <div class="bg-[#16070b] border border-amber-500/15 p-4 rounded-2xl flex flex-col gap-1">
+                        <span class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Текущее устройство</span>
+                        <span id="sessions-current-info" class="text-xs font-mono text-amber-200/90 truncate">Определение...</span>
+                    </div>
+                </div>
+
+                <!-- Список активных администраторов -->
+                <div class="flex flex-col gap-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">Список авторизованных сессий:</span>
+                    </div>
+                    <div id="admin-sessions-list" class="flex flex-col gap-3">
+                        <div class="p-8 text-center text-xs text-slate-400">Загрузка активных сессий...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ============================================================== -->
@@ -1013,6 +1072,47 @@
                 </button>
                 <button type="button" id="admin-confirm-submit-btn" class="px-6 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase rounded-xl transition shadow-lg">
                     Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно подтверждения отзыва доступа администратора -->
+    <div id="revoke-session-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#0d0408] border border-rose-500/30 w-full max-w-md p-6 sm:p-7 flex flex-col gap-4 rounded-3xl shadow-2xl page-fade">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-2xl bg-rose-950/60 border border-rose-500/30 flex items-center justify-center text-lg shrink-0">
+                    🛡️
+                </div>
+                <div>
+                    <h3 id="revoke-modal-title" class="text-base font-black text-white uppercase tracking-wide">Подтверждение безопасности</h3>
+                    <p class="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                        Отзыв доступа к панели администратора
+                    </p>
+                </div>
+            </div>
+
+            <div class="bg-[#16070b] border border-amber-500/15 p-3.5 rounded-2xl">
+                <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Целевая сессия:</span>
+                <div id="revoke-modal-target-desc" class="text-xs font-mono text-amber-300 break-all"></div>
+            </div>
+
+            <p class="text-xs text-slate-300 leading-relaxed">
+                Для завершения сессии и отзыва доступа администратора подтвердите действие ключом безопасности:
+            </p>
+
+            <div>
+                <label class="text-[10px] uppercase font-bold text-amber-400 tracking-wider block mb-1.5">Ключ безопасности</label>
+                <input type="password" id="revoke-modal-key-input" placeholder="••••••••••••" autocomplete="off" class="w-full bg-[#060204] border border-amber-500/25 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl" />
+                <p id="revoke-modal-error" class="text-xs text-rose-400 hidden mt-2 bg-rose-950/40 p-2.5 rounded-xl border border-rose-500/20"></p>
+            </div>
+
+            <div class="flex justify-end gap-3 pt-3 border-t border-amber-500/20">
+                <button type="button" onclick="closeRevokeSessionModal()" class="px-5 py-2.5 bg-[#16070b] hover:bg-white/5 text-slate-300 font-bold text-xs uppercase rounded-xl transition">
+                    Отмена
+                </button>
+                <button type="button" id="revoke-modal-submit-btn" onclick="submitRevokeSession()" class="px-6 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase rounded-xl transition shadow-lg flex items-center gap-2">
+                    <span>Отозвать доступ</span>
                 </button>
             </div>
         </div>

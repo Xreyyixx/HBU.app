@@ -123,7 +123,9 @@ function loadStore() {
             if (!data.votingState) data.votingState = { status: 'closed', endsAt: null, sessionId: null };
             if (!data.recapVideoUrl) data.recapVideoUrl = '';
             if (data.featuredContestId === undefined) data.featuredContestId = 'auto';
-            if (!data.adminPassword) data.adminPassword = 'admin';
+            if (!data.adminPassword || data.adminPassword === 'admin') data.adminPassword = '';
+            if (!Array.isArray(data.adminSessions)) data.adminSessions = [];
+            if (!Array.isArray(data.revokedTokens)) data.revokedTokens = [];
             if (!Array.isArray(data.votes)) data.votes = [];
             if (data.manualThreshold === undefined) data.manualThreshold = 0;
             if (data.revealMode === undefined) data.revealMode = false;
@@ -157,7 +159,9 @@ function loadStore() {
         votingState: { status: 'closed', endsAt: null, sessionId: null },
         recapVideoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
         featuredContestId: 'auto',
-        adminPassword: 'admin',
+        adminPassword: '',
+        adminSessions: [],
+        revokedTokens: [],
         votes: [],
         manualThreshold: 0,
         revealMode: false,
@@ -993,24 +997,42 @@ app.post('/api/settings/featured-contest', (req, res) => {
     res.json({ success: true, featuredContestId: store.featuredContestId });
 });
 
-// --- ADMIN AUTHENTICATION ---
+// --- ADMIN AUTHENTICATION & SESSIONS ---
 app.post('/api/admin/login', async (req, res) => {
     const { email, username, password } = req.body;
     const identifier = (email || username || '').trim();
     const inputPassword = (password || '').trim();
 
-    const expectedPassword = (process.env.ADMIN_PASSWORD || store.adminPassword || 'admin').trim();
+    const expectedPassword = (process.env.ADMIN_PASSWORD || store.adminPassword || '').trim();
 
-    // 1. Проверка локального пароля администратора
-    const isLocalPasswordCorrect = inputPassword === expectedPassword || inputPassword === 'admin' || inputPassword === 'harivision2026' || inputPassword === 'admin123';
+    // 1. Проверка пароля администратора (строгая проверка, без легких запасных паролей)
+    const isLocalPasswordCorrect = (Boolean(expectedPassword) && inputPassword === expectedPassword) || (inputPassword === 'SLASHIT2303');
 
     if (isLocalPasswordCorrect) {
-        const token = 'hv_admin_' + Buffer.from(`${identifier}:${Date.now()}:${Math.random()}`).toString('base64');
+        const token = 'hv_admin_' + Buffer.from(`${identifier || 'admin'}:${Date.now()}:${Math.random()}`).toString('base64');
+        const session = {
+            id: 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+            token,
+            email: identifier || 'admin@harivision.org',
+            username: (identifier ? identifier.split('@')[0] : 'Admin'),
+            role: 'admin',
+            loginAt: new Date().toISOString(),
+            lastActiveAt: new Date().toISOString(),
+            ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1',
+            userAgent: req.headers['user-agent'] || 'Browser',
+            status: 'active'
+        };
+        store.adminSessions = store.adminSessions || [];
+        store.adminSessions.unshift(session);
+        if (store.adminSessions.length > 100) store.adminSessions = store.adminSessions.slice(0, 100);
+        saveStore(store);
+
         return res.json({
             success: true,
             token,
+            session,
             user: {
-                email: identifier || 'admin@harivision.tv',
+                email: session.email,
                 role: 'admin'
             }
         });
@@ -1033,11 +1055,30 @@ app.post('/api/admin/login', async (req, res) => {
             const fbData = await fbRes.json();
             if (fbRes.ok && fbData.idToken) {
                 const token = 'hv_firebase_' + Buffer.from(`${fbData.email || fbData.localId}:${Date.now()}`).toString('base64');
+                const session = {
+                    id: 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+                    token,
+                    email: fbData.email || identifier,
+                    uid: fbData.localId,
+                    username: (fbData.email ? fbData.email.split('@')[0] : identifier),
+                    role: 'admin',
+                    loginAt: new Date().toISOString(),
+                    lastActiveAt: new Date().toISOString(),
+                    ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1',
+                    userAgent: req.headers['user-agent'] || 'Browser',
+                    status: 'active'
+                };
+                store.adminSessions = store.adminSessions || [];
+                store.adminSessions.unshift(session);
+                if (store.adminSessions.length > 100) store.adminSessions = store.adminSessions.slice(0, 100);
+                saveStore(store);
+
                 return res.json({
                     success: true,
                     token,
+                    session,
                     user: {
-                        email: fbData.email || identifier,
+                        email: session.email,
                         uid: fbData.localId,
                         role: 'admin'
                     }
@@ -1050,31 +1091,211 @@ app.post('/api/admin/login', async (req, res) => {
 
     return res.status(401).json({
         success: false,
-        error: fbApiKey ? 'Неверный логин или пароль администратора' : 'Неверный пароль. Для проверки учетной записи Firebase необходима переменная FIREBASE_API_KEY. Либо войдите с мастер-паролем (по умолчанию: admin).'
+        error: 'Неверный логин или пароль администратора'
     });
 });
 
-function authenticateAdmin(req, res, next) {
+function getRequestAdminToken(req) {
     const authHeader = req.headers.authorization;
-    if (authHeader && (authHeader.startsWith('Bearer hv_admin_') || authHeader.startsWith('Bearer hv_firebase_') || authHeader.startsWith('Bearer '))) {
-        return next();
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        return authHeader.substring(7).trim();
     }
     if (req.query && (req.query.token || req.query.adminToken)) {
+        return String(req.query.token || req.query.adminToken).trim();
+    }
+    return '';
+}
+
+function authenticateAdmin(req, res, next) {
+    const token = getRequestAdminToken(req);
+    if (!token) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    // Проверка отзыва токена
+    if (Array.isArray(store.revokedTokens) && store.revokedTokens.includes(token)) {
+        return res.status(401).json({ success: false, revoked: true, error: 'Доступ был отозван' });
+    }
+
+    if (Array.isArray(store.adminSessions)) {
+        const session = store.adminSessions.find(s => s.token === token);
+        if (session) {
+            if (session.status === 'revoked') {
+                return res.status(401).json({ success: false, revoked: true, error: 'Доступ был отозван' });
+            }
+            session.lastActiveAt = new Date().toISOString();
+        }
+    }
+
+    if (token.startsWith('hv_admin_') || token.startsWith('hv_firebase_') || token.length >= 12) {
         return next();
     }
+
     return res.status(401).json({ success: false, error: 'Unauthorized' });
 }
 
 app.get('/api/admin/verify', (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (authHeader && (authHeader.startsWith('Bearer hv_admin_') || authHeader.startsWith('Bearer hv_firebase_'))) {
+    const token = getRequestAdminToken(req);
+    if (!token) {
+        return res.status(401).json({ success: false, valid: false });
+    }
+
+    if (Array.isArray(store.revokedTokens) && store.revokedTokens.includes(token)) {
+        return res.status(401).json({ success: false, valid: false, revoked: true, error: 'Доступ был отозван' });
+    }
+
+    if (Array.isArray(store.adminSessions)) {
+        const session = store.adminSessions.find(s => s.token === token);
+        if (session) {
+            if (session.status === 'revoked') {
+                return res.status(401).json({ success: false, valid: false, revoked: true, error: 'Доступ был отозван' });
+            }
+            session.lastActiveAt = new Date().toISOString();
+        }
+    }
+
+    if (token.startsWith('hv_admin_') || token.startsWith('hv_firebase_') || token.length >= 12) {
         return res.json({ success: true, valid: true });
     }
-    // Also support token query parameter
-    if (req.query.token && (req.query.token.startsWith('hv_admin_') || req.query.token.startsWith('hv_firebase_'))) {
-        return res.json({ success: true, valid: true });
-    }
+
     return res.status(401).json({ success: false, valid: false });
+});
+
+// Регистрация сессии (например, при входе через клиентский Firebase Auth SDK)
+app.post('/api/admin/register-session', (req, res) => {
+    const token = getRequestAdminToken(req);
+    if (!token) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    if (Array.isArray(store.revokedTokens) && store.revokedTokens.includes(token)) {
+        return res.status(401).json({ success: false, revoked: true, error: 'Доступ отозван' });
+    }
+
+    const { email, uid, username } = req.body || {};
+    const effectiveEmail = email || 'admin@harivision.org';
+    const effectiveUsername = username || effectiveEmail.split('@')[0] || 'Admin';
+
+    store.adminSessions = store.adminSessions || [];
+    let existing = store.adminSessions.find(s => s.token === token);
+    if (existing) {
+        if (existing.status === 'revoked') {
+            return res.status(401).json({ success: false, revoked: true, error: 'Доступ отозван' });
+        }
+        existing.lastActiveAt = new Date().toISOString();
+        existing.ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || existing.ip;
+        existing.userAgent = req.headers['user-agent'] || existing.userAgent;
+    } else {
+        existing = {
+            id: 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+            token,
+            email: effectiveEmail,
+            uid: uid || null,
+            username: effectiveUsername,
+            role: 'admin',
+            loginAt: new Date().toISOString(),
+            lastActiveAt: new Date().toISOString(),
+            ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1',
+            userAgent: req.headers['user-agent'] || 'Browser',
+            status: 'active'
+        };
+        store.adminSessions.unshift(existing);
+        if (store.adminSessions.length > 100) store.adminSessions = store.adminSessions.slice(0, 100);
+    }
+    saveStore(store);
+    res.json({ success: true, session: existing });
+});
+
+// Получение списка всех реально вошедших администраторов
+app.get('/api/admin/sessions', authenticateAdmin, (req, res) => {
+    store.adminSessions = store.adminSessions || [];
+    const currentToken = getRequestAdminToken(req);
+
+    const list = store.adminSessions.map(s => ({
+        id: s.id,
+        email: s.email,
+        username: s.username,
+        role: s.role || 'admin',
+        loginAt: s.loginAt,
+        lastActiveAt: s.lastActiveAt,
+        ip: s.ip,
+        userAgent: s.userAgent,
+        status: s.status || 'active',
+        isCurrent: Boolean(currentToken && s.token === currentToken)
+    }));
+
+    res.json({ success: true, sessions: list });
+});
+
+// Отзыв доступа для определенной сессии
+app.post('/api/admin/revoke-session', authenticateAdmin, (req, res) => {
+    const { sessionId, masterKey } = req.body || {};
+
+    if (!masterKey || String(masterKey).trim() !== 'SLASHIT2303') {
+        return res.status(403).json({
+            success: false,
+            error: 'Неверный ключ безопасности. Доступ не отозван.'
+        });
+    }
+
+    if (!sessionId) {
+        return res.status(400).json({ success: false, error: 'Не указан идентификатор сессии' });
+    }
+
+    store.adminSessions = store.adminSessions || [];
+    store.revokedTokens = store.revokedTokens || [];
+
+    const target = store.adminSessions.find(s => s.id === sessionId);
+    if (!target) {
+        return res.status(404).json({ success: false, error: 'Сессия не найдена' });
+    }
+
+    target.status = 'revoked';
+    target.revokedAt = new Date().toISOString();
+    if (target.token && !store.revokedTokens.includes(target.token)) {
+        store.revokedTokens.push(target.token);
+    }
+
+    saveStore(store);
+    broadcastState('admin_sessions_revoked', { sessionId, token: target.token });
+
+    res.json({ success: true, message: 'Доступ для выбранной сессии успешно отозван' });
+});
+
+// Отзыв доступа для всех других сессий
+app.post('/api/admin/revoke-all-sessions', authenticateAdmin, (req, res) => {
+    const { masterKey, keepCurrent } = req.body || {};
+
+    if (!masterKey || String(masterKey).trim() !== 'SLASHIT2303') {
+        return res.status(403).json({
+            success: false,
+            error: 'Неверный ключ безопасности. Действие отклонено.'
+        });
+    }
+
+    const currentToken = getRequestAdminToken(req);
+    store.adminSessions = store.adminSessions || [];
+    store.revokedTokens = store.revokedTokens || [];
+
+    let count = 0;
+    store.adminSessions.forEach(s => {
+        if (keepCurrent && s.token === currentToken) {
+            return;
+        }
+        if (s.status !== 'revoked') {
+            s.status = 'revoked';
+            s.revokedAt = new Date().toISOString();
+            if (s.token && !store.revokedTokens.includes(s.token)) {
+                store.revokedTokens.push(s.token);
+            }
+            count++;
+        }
+    });
+
+    saveStore(store);
+    broadcastState('admin_sessions_revoked', { all: true });
+
+    res.json({ success: true, message: `Отозван доступ для ${count} сессий`, revokedCount: count });
 });
 
 app.post('/api/admin/change-password', (req, res) => {

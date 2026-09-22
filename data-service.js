@@ -341,23 +341,61 @@ export function mergeVotes(current = [], incoming = []) {
     return Array.from(map.values());
 }
 
-export const deletedCalendarNoteIds = new Set();
+const DELETED_CALENDAR_IDS_KEY = 'harivision_deleted_cal_notes';
+function loadDeletedCalendarNoteIds() {
+    try {
+        const raw = localStorage.getItem(DELETED_CALENDAR_IDS_KEY);
+        return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch (e) {
+        return new Set();
+    }
+}
+
+export const deletedCalendarNoteIds = loadDeletedCalendarNoteIds();
+
+export function markCalendarNoteDeleted(id) {
+    if (!id) return;
+    const strId = String(id);
+    deletedCalendarNoteIds.add(strId);
+    try {
+        localStorage.setItem(DELETED_CALENDAR_IDS_KEY, JSON.stringify(Array.from(deletedCalendarNoteIds)));
+    } catch (e) {}
+}
+
+export function unmarkCalendarNoteDeleted(id) {
+    if (!id) return;
+    const strId = String(id);
+    deletedCalendarNoteIds.delete(strId);
+    try {
+        localStorage.setItem(DELETED_CALENDAR_IDS_KEY, JSON.stringify(Array.from(deletedCalendarNoteIds)));
+    } catch (e) {}
+}
 
 export function mergeCalendarNotes(current = [], incoming = []) {
     const curArr = Array.isArray(current) ? current : [];
     const inArr = Array.isArray(incoming) ? incoming : [];
     const map = new Map();
 
-    curArr.forEach(item => {
-        if (item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id)) {
+    // 1. Authoritative incoming notes from server / Firestore
+    inArr.forEach(item => {
+        if (item && item.id && !deletedCalendarNoteIds.has(String(item.id)) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(String(item.id))) {
             map.set(String(item.id), { ...item });
         }
     });
 
-    inArr.forEach(item => {
-        if (item && item.id && !deletedCalendarNoteIds.has(item.id) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(item.id)) {
-            const existing = map.get(String(item.id)) || {};
-            map.set(String(item.id), { ...existing, ...item });
+    // 2. Keep local un-synced notes from current state (only if not deleted)
+    curArr.forEach(item => {
+        if (item && item.id && !deletedCalendarNoteIds.has(String(item.id)) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(String(item.id))) {
+            if (!map.has(String(item.id))) {
+                map.set(String(item.id), { ...item });
+            } else {
+                const existing = map.get(String(item.id));
+                const itemTime = Number(item.updatedAt || item.createdAt || 0);
+                const existTime = Number(existing.updatedAt || existing.createdAt || 0);
+                if (itemTime > existTime) {
+                    map.set(String(item.id), { ...existing, ...item });
+                }
+            }
         }
     });
 
@@ -2531,6 +2569,10 @@ export async function verifyAdminSession() {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
+        if (data.revoked) {
+            localStorage.removeItem('harivision_admin_token');
+            return false;
+        }
         return Boolean(data.valid);
     } catch (e) {
         return false;
@@ -2638,8 +2680,10 @@ export async function syncAllToFirestore(localStateOverride = null) {
     let firestoreError = null;
 
     if (localStateOverride && typeof localStateOverride === 'object') {
-        if (Array.isArray(localStateOverride.calendarNotes) && localStateOverride.calendarNotes.length > 0) {
-            currentState.calendarNotes = mergeCalendarNotes(currentState.calendarNotes, localStateOverride.calendarNotes);
+        if (Array.isArray(localStateOverride.calendarNotes)) {
+            currentState.calendarNotes = localStateOverride.calendarNotes
+                .filter(n => n && n.id && !deletedCalendarNoteIds.has(String(n.id)) && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(String(n.id)))
+                .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         }
         if (Array.isArray(localStateOverride.news) && localStateOverride.news.length > 0) {
             currentState.news = localStateOverride.news;
@@ -2740,6 +2784,13 @@ export async function syncAllToFirestore(localStateOverride = null) {
                         updatedAt: Date.now()
                     }, { merge: true }).catch(() => {});
                 }
+            }
+
+            // Also clean up any deleted note documents from Firestore
+            for (const delId of deletedCalendarNoteIds) {
+                deleteDoc(doc(db, "calendar", String(delId))).catch(() => {});
+                deleteDoc(doc(db, "artistAccounts", "cal_" + delId)).catch(() => {});
+                deleteDoc(doc(db, "artistAccounts", "calendar_" + delId)).catch(() => {});
             }
             firestoreOk = true;
         } catch (e) {
@@ -2848,7 +2899,7 @@ export async function saveAdminCalendarNote(note) {
     if (!note.createdAt) note.createdAt = Date.now();
     note.updatedAt = Date.now();
 
-    deletedCalendarNoteIds.delete(note.id);
+    unmarkCalendarNoteDeleted(note.id);
 
     // 1. Immediate local state update (clean out any legacy sample notes)
     if (!Array.isArray(currentState.calendarNotes)) currentState.calendarNotes = [];
@@ -2917,7 +2968,7 @@ export async function saveAdminCalendarNote(note) {
 export async function deleteAdminCalendarNote(id) {
     if (!id) return { success: false };
 
-    deletedCalendarNoteIds.add(id);
+    markCalendarNoteDeleted(id);
 
     // 1. Immediate local state update
     if (!Array.isArray(currentState.calendarNotes)) currentState.calendarNotes = [];
