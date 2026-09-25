@@ -27,7 +27,8 @@ import {
     sanitizeFirestoreData,
     safeJsonStringify,
     renderVideoPlayerHTML,
-    sortNewsDescending 
+    sortNewsDescending,
+    checkIsAdmin 
 } from './data-service.js';
 
 let appState = {
@@ -85,24 +86,40 @@ window.manualCloudSync = async function() {
 // -------------------------------------------------------------
 let isAuthenticated = false;
 
-async function registerCurrentAdminSession(token, identifier, uid = null) {
-    if (!token) return;
+// Экранирование пользовательских строк перед вставкой в HTML (защита от XSS)
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// Получение серверной сессии админа (нужна только для функций сервера: push-рассылки, список сессий).
+// Сервер сам проверяет ID-токен Firebase и права администратора и выдаёт случайный токен сессии.
+async function registerCurrentAdminSession() {
+    if (!auth || !auth.currentUser || auth.currentUser.isAnonymous) return null;
     try {
-        await fetch('/api/admin/register-session', {
+        const idToken = await auth.currentUser.getIdToken();
+        const res = await fetch('/api/admin/register-session', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
+                'Authorization': `Bearer ${idToken}`
             },
-            body: JSON.stringify({
-                email: identifier || (auth?.currentUser?.email) || 'admin@harivision.org',
-                username: identifier ? identifier.split('@')[0] : 'Admin',
-                uid: uid || auth?.currentUser?.uid || null
-            })
+            body: JSON.stringify({})
         });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data && data.success && data.token) {
+            localStorage.setItem('harivision_admin_token', data.token);
+            return data.token;
+        }
     } catch (e) {
-        console.warn('Session registration note:', e.message);
+        // Сервер недоступен (например, статический хостинг) — работаем только через Firestore
     }
+    return null;
 }
 
 function handleSessionRevokedNotice() {
@@ -147,11 +164,12 @@ function setAdminAuthenticated(authenticated) {
 // Периодическая проверка статуса сессии (выявление отзыва доступа)
 setInterval(async () => {
     if (!isAuthenticated) return;
-    const token = localStorage.getItem('harivision_admin_token');
-    if (!token) {
+    if (!auth || !auth.currentUser || auth.currentUser.isAnonymous) {
         setAdminAuthenticated(false);
         return;
     }
+    const token = localStorage.getItem('harivision_admin_token');
+    if (!token) return;
     try {
         const res = await fetch('/api/admin/verify', {
             headers: { 'Authorization': `Bearer ${token}` }
@@ -160,7 +178,7 @@ setInterval(async () => {
         if (data && data.revoked) {
             handleSessionRevokedNotice();
         } else if (!res.ok || !data.valid) {
-            setAdminAuthenticated(false);
+            localStorage.removeItem('harivision_admin_token');
         }
     } catch (e) {
         // network transient error, ignore
@@ -180,29 +198,26 @@ setInterval(async () => {
                 handleSessionRevokedNotice();
                 return;
             }
-            if (data && data.valid) {
-                setAdminAuthenticated(true);
-                try {
-                    await fetchFirestoreStateDirectly();
-                } catch (e) {}
-                return;
+            if (!data || !data.valid) {
+                localStorage.removeItem('harivision_admin_token');
             }
         } catch (e) {}
     }
 
-    // Отслеживание сессии Firebase Auth
+    // Доступ к панели только для вошедшего пользователя Firebase, у которого есть документ admins/{uid}.
+    // Анонимные зрители и обычные пользователи панель не получают.
     if (auth) {
         onAuthStateChanged(auth, async (user) => {
-            if (user) {
+            if (user && !user.isAnonymous && await checkIsAdmin(user)) {
                 setAdminAuthenticated(true);
+                if (!localStorage.getItem('harivision_admin_token')) {
+                    await registerCurrentAdminSession();
+                }
                 try {
                     await fetchFirestoreStateDirectly();
                 } catch (e) {}
             } else {
-                const token = localStorage.getItem('harivision_admin_token');
-                if (!token) {
-                    setAdminAuthenticated(false);
-                }
+                setAdminAuthenticated(false);
             }
         });
     }
@@ -229,56 +244,43 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
         submitBtn.classList.add('opacity-70');
     }
 
-    let authSuccess = false;
-    let srvErrorMessage = '';
-
-    // 1. Попытка входа через серверный API (проверяет пароль и Firebase REST API)
-    try {
-        const srvRes = await loginAdminServer(loginInput, password);
-        if (srvRes && srvRes.token) {
-            localStorage.setItem('harivision_admin_token', srvRes.token);
-            setAdminAuthenticated(true);
-            showToast('Вход в панель администратора выполнен');
-            authSuccess = true;
-            await registerCurrentAdminSession(srvRes.token, loginInput);
+    // Вход только через Firebase Authentication + проверка прав (документ admins/{uid}).
+    // Именно эти права проверяют правила Firestore при записи данных.
+    if (!auth) {
+        if (errEl) {
+            errEl.innerHTML = `<div class="font-bold text-rose-300">Firebase не инициализирован. Вход невозможен.</div>`;
+            errEl.classList.remove('hidden');
         }
-    } catch (srvErr) {
-        srvErrorMessage = srvErr.message || '';
-    }
-
-    // 2. Если серверный вход не сработал, пробуем клиентский Firebase Auth SDK
-    if (!authSuccess && auth) {
+    } else {
         try {
             const firebaseEmail = loginInput.includes('@') ? loginInput : `${loginInput}@harivision.org`;
             const userCred = await signInWithEmailAndPassword(auth, firebaseEmail, password);
-            const token = 'hv_firebase_' + btoa((userCred?.user?.email || loginInput) + ':' + Date.now());
-            localStorage.setItem('harivision_admin_token', token);
-            setAdminAuthenticated(true);
-            showToast('Вход через Firebase Auth выполнен');
-            authSuccess = true;
-            await registerCurrentAdminSession(token, loginInput, userCred?.user?.uid);
+            const isAdmin = await checkIsAdmin(userCred.user);
+            if (!isAdmin) {
+                try { await signOut(auth); } catch (e) {}
+                if (errEl) {
+                    errEl.innerHTML = `<div class="font-bold text-rose-300">У этого аккаунта нет прав администратора.</div>`;
+                    errEl.classList.remove('hidden');
+                }
+            } else {
+                setAdminAuthenticated(true);
+                showToast('Вход в панель администратора выполнен');
+                await registerCurrentAdminSession();
+            }
         } catch (firebaseErr) {
             console.error('Firebase Auth Error:', firebaseErr);
             let msg = "Неверный логин или пароль администратора";
             if (firebaseErr.code === 'auth/invalid-credential' || firebaseErr.code === 'auth/wrong-password' || firebaseErr.code === 'auth/user-not-found') {
-                msg = "Неверный email или пароль в Firebase. Проверьте правильность введенных данных.";
+                msg = "Неверный email или пароль. Проверьте правильность введенных данных.";
             } else if (firebaseErr.code === 'auth/invalid-email') {
                 msg = "Некорректный формат email";
             } else if (firebaseErr.code === 'auth/too-many-requests') {
                 msg = "Слишком много неудачных попыток входа. Попробуйте позже.";
-            } else if (firebaseErr.message) {
-                msg = firebaseErr.message;
             }
             if (errEl) {
-                errEl.innerHTML = `<div class="font-bold text-rose-300">${msg}</div>`;
+                errEl.innerHTML = `<div class="font-bold text-rose-300">${escapeHtml(msg)}</div>`;
                 errEl.classList.remove('hidden');
             }
-        }
-    } else if (!authSuccess && !auth) {
-        if (errEl) {
-            const msg = srvErrorMessage || 'Неверный логин или пароль администратора.';
-            errEl.innerHTML = `<div class="font-bold text-rose-300">${msg}</div>`;
-            errEl.classList.remove('hidden');
         }
     }
 
@@ -495,7 +497,7 @@ window.inspectVote = function(voteId) {
                 });
 
                 const pNumber = participant ? (participant.number !== undefined ? participant.number : '') : '';
-                const name = participant ? `${participant.flag || '🏳️'} #${pNumber} ${participant.name || ('Number ' + pNumber)}` : `Номер ${pId}`;
+                const name = participant ? `${participant.flag || '🏳️'} #${pNumber} ${participant.name || ('Number ' + pNumber)}` : `Номер ${escapeHtml(pId)}`;
                 const countryArtist = participant ? `${participant.country ? participant.country + ' • ' : ''}${participant.artist || ''}` : '';
                 const songInfo = participant && participant.song ? ` «${participant.song}»` : '';
 
@@ -532,7 +534,7 @@ window.deleteVote = function(voteId) {
         confirmText: 'Аннулировать голос',
         onConfirm: async () => {
             await deleteVoteFromService(voteId);
-            showToast(`Голос ${voterLabel} аннулирован`);
+            showToast(`Голос ${escapeHtml(voterLabel)} аннулирован`);
         }
     });
 };
@@ -853,7 +855,7 @@ function calculateAndRenderPublicPoints() {
                 return `
                     <button onclick="inspectVote('${v.id}')" class="bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/20 text-slate-200 text-[11px] font-medium px-2.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer">
                         <span>${roleIcon}</span>
-                        <span class="truncate max-w-[120px] font-bold">${roleBadge}${v.voterName || 'Зритель'}</span>
+                        <span class="truncate max-w-[120px] font-bold">${roleBadge}${escapeHtml(v.voterName || 'Зритель')}</span>
                         <span class="text-[10px] font-mono text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-lg">(${totalGiven})</span>
                     </button>
                 `;
@@ -885,9 +887,9 @@ function calculateAndRenderPublicPoints() {
 
                 let roleBadgeHtml = '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">👤 Зритель</span>';
                 if (isArtist) {
-                    roleBadgeHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">⭐ Артист (${v.artistName || v.voterName})</span>`;
+                    roleBadgeHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">⭐ Артист (${escapeHtml(v.artistName || v.voterName)})</span>`;
                 } else if (isNational) {
-                    roleBadgeHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">🌍 Национальное (${v.representative || 'Жюри'})</span>`;
+                    roleBadgeHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">🌍 Национальное (${escapeHtml(v.representative || 'Жюри')})</span>`;
                 }
 
                 // Форматирование распределения
@@ -915,7 +917,7 @@ function calculateAndRenderPublicPoints() {
                         <td class="py-3 font-mono text-slate-500">#${idx + 1}</td>
                         <td class="py-3 font-bold text-white">
                             <div class="flex flex-col">
-                                <span class="text-slate-100">${v.voterName || 'Анонимный зритель'}</span>
+                                <span class="text-slate-100">${escapeHtml(v.voterName || 'Анонимный зритель')}</span>
                                 ${v.voterEmail ? `<span class="text-[10px] font-mono text-slate-500">${v.voterEmail}</span>` : ''}
                             </div>
                         </td>
@@ -1845,15 +1847,7 @@ window.refreshAdminPushSubscribers = async function() {
 };
 
 window.testAdminPushNotification = async function() {
-    let token = localStorage.getItem('harivision_admin_token');
-    if (!token && typeof auth !== 'undefined' && auth?.currentUser) {
-        token = 'hv_firebase_' + btoa((auth.currentUser.email || auth.currentUser.uid || 'admin') + ':' + Date.now());
-        localStorage.setItem('harivision_admin_token', token);
-    }
-    if (!token) {
-        token = 'hv_admin_' + btoa('admin:' + Date.now());
-        localStorage.setItem('harivision_admin_token', token);
-    }
+    let token = localStorage.getItem('harivision_admin_token') || await registerCurrentAdminSession() || '';
     try {
         showAdminNotification('Отправка тестового Web Push...', 'info');
         let pushed = false;
@@ -1994,15 +1988,7 @@ window.handleAdminBroadcastSubmit = async function(event) {
         return;
     }
 
-    let token = localStorage.getItem('harivision_admin_token');
-    if (!token && typeof auth !== 'undefined' && auth?.currentUser) {
-        token = 'hv_firebase_' + btoa((auth.currentUser.email || auth.currentUser.uid || 'admin') + ':' + Date.now());
-        localStorage.setItem('harivision_admin_token', token);
-    }
-    if (!token) {
-        token = 'hv_admin_' + btoa('admin:' + Date.now());
-        localStorage.setItem('harivision_admin_token', token);
-    }
+    let token = localStorage.getItem('harivision_admin_token') || await registerCurrentAdminSession() || '';
 
     if (submitBtn) {
         submitBtn.disabled = true;

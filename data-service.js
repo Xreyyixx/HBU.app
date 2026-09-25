@@ -2265,20 +2265,9 @@ export async function loginUser(emailOrLogin, password) {
 
     const resolvedArtist = resolveArtistInfo(raw, currentState.participants, allArtists);
 
-    // 2. Если в документе артиста в Firestore хранится явный пароль и он совпадает
-    if (resolvedArtist && resolvedArtist.artistData && resolvedArtist.artistData.password && String(resolvedArtist.artistData.password).trim() === pass) {
-        const userObj = {
-            uid: resolvedArtist.artistData.id || 'artist_' + cleanLogin,
-            email: resolvedArtist.artistData.email || `${cleanLogin}@harivision.app`,
-            login: resolvedArtist.artistData.login || cleanLogin,
-            displayName: resolvedArtist.displayName || cleanLogin,
-            role: 'artist',
-            artistData: resolvedArtist.artistData,
-            blockedParticipantIds: resolvedArtist.blockedParticipantIds
-        };
-        notifyAuthChanged(userObj);
-        return userObj;
-    }
+    // 2. (Удалено из соображений безопасности) Раньше пароль артиста хранился в Firestore
+    //    открытым текстом и сверялся в браузере. Теперь артисты входят только через
+    //    Firebase Authentication (см. tools/migrate-artist-passwords.mjs).
 
     // 3. Пробуем найти реальный email пользователя в Firestore коллекции "users"
     let userFirestoreEmail = null;
@@ -2374,21 +2363,7 @@ export async function loginUser(emailOrLogin, password) {
         return userObj;
     }
 
-    // 5. Если у артиста нет пароля в Firebase, но это известный артист из резолвера
-    if (resolvedArtist) {
-        const blockedIds = resolvedArtist.blockedParticipantIds;
-        const userObj = {
-            uid: resolvedArtist.artistData?.id || 'artist_' + cleanLogin,
-            email: resolvedArtist.artistData?.email || `${cleanLogin}@harivision.app`,
-            login: cleanLogin,
-            displayName: resolvedArtist.displayName || cleanLogin,
-            role: 'artist',
-            artistData: resolvedArtist.artistData,
-            blockedParticipantIds: blockedIds
-        };
-        notifyAuthChanged(userObj);
-        return userObj;
-    }
+    // 5. (Удалено из соображений безопасности) Раньше известный артист входил с ЛЮБЫМ паролем.
 
     // Если ничего не подошло
     let errMsg = 'Неверный логин или пароль';
@@ -2585,12 +2560,18 @@ export async function verifyAdminSession() {
 export async function submitVote(voteData) {
     await ensureFirebaseAuth();
     const currentUid = (auth && auth.currentUser) ? auth.currentUser.uid : null;
-    const voteId = voteData.id || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
+    // ID голоса должен совпадать с форматом, который проверяют правила Firestore:
+    // vote_<sessionId>_<uid> (зрительский) или vote_<sessionId>_<uid>_nat (национальный)
+    const sessionId = voteData.sessionId || currentState?.votingState?.sessionId || null;
+    const voteId = (currentUid && sessionId)
+        ? `vote_${sessionId}_${currentUid}${voteData.isNational ? '_nat' : ''}`
+        : (voteData.id || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)));
     const votePayload = { 
         ...voteData, 
         id: voteId, 
-        voterUid: voteData.voterUid || currentUid || voteData.userId || null,
-        userId: voteData.userId || currentUid || null,
+        sessionId,
+        voterUid: currentUid || voteData.voterUid || voteData.userId || null,
+        userId: currentUid || voteData.userId || null,
         createdAt: voteData.createdAt || new Date().toISOString() 
     };
 
@@ -3018,9 +2999,63 @@ export async function deleteAdminCalendarNote(id) {
     return { success: true, calendarNotes: currentState.calendarNotes };
 }
 
+// Админ = вошедший (не анонимный) пользователь Firebase, для которого есть документ admins/{uid}.
+// Это же условие проверяют правила Firestore, поэтому интерфейс и права совпадают.
+let _isVerifiedAdmin = false;
+let _adminCheckedUid = null;
+
+export async function checkIsAdmin(user = auth ? auth.currentUser : null) {
+    if (!db || !user || user.isAnonymous) {
+        _isVerifiedAdmin = false;
+        _adminCheckedUid = user ? user.uid : null;
+        return false;
+    }
+    try {
+        const snap = await getDoc(doc(db, "admins", user.uid));
+        _isVerifiedAdmin = snap.exists();
+    } catch (e) {
+        _isVerifiedAdmin = false;
+    }
+    _adminCheckedUid = user.uid;
+    return _isVerifiedAdmin;
+}
+
+if (auth) {
+    onAuthStateChanged(auth, (user) => {
+        checkIsAdmin(user).catch(() => {});
+    });
+}
+
+// Вход администратора через Firebase Auth (используется на публичном сайте, например в календаре)
+export async function loginAdminFirebase(emailOrLogin, password) {
+    if (!auth) throw new Error('Firebase не инициализирован');
+    const raw = String(emailOrLogin || '').trim();
+    const email = raw.includes('@') ? raw : `${raw}@harivision.org`;
+    const cred = await signInWithEmailAndPassword(auth, email, String(password || ''));
+    const ok = await checkIsAdmin(cred.user);
+    if (!ok) {
+        try { await signOut(auth); } catch (e) {}
+        await ensureFirebaseAuth();
+        throw new Error('У этого аккаунта нет прав администратора');
+    }
+    // Необязательная серверная сессия (если сервер доступен)
+    try {
+        const idToken = await cred.user.getIdToken();
+        const res = await fetch('/api/admin/register-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+            body: '{}'
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.token) localStorage.setItem('harivision_admin_token', data.token);
+        }
+    } catch (e) {}
+    return true;
+}
+
 export function isAdminUser() {
-    if (typeof localStorage === 'undefined') return false;
-    const token = localStorage.getItem('harivision_admin_token') || localStorage.getItem('hv_admin_token');
-    return Boolean(token || (auth && auth.currentUser && (auth.currentUser.email === 'admin@harivision.org' || auth.currentUser.email === 'admin')));
+    const user = auth ? auth.currentUser : null;
+    return Boolean(_isVerifiedAdmin && user && !user.isAnonymous && user.uid === _adminCheckedUid);
 }
 

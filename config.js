@@ -83,15 +83,61 @@ if (firebaseConfig.apiKey) {
 
 export { db, auth };
 
-// Анонимная авторизация для обычных зрителей и PWA ярлыков
+// Анонимная авторизация для обычных зрителей и PWA ярлыков.
+// ВАЖНО: сначала дожидаемся восстановления сохранённой сессии (authStateReady),
+// иначе анонимный вход затирает уже вошедшего пользователя/админа.
+let _anonSignInPromise = null;
 export async function ensureFirebaseAuth() {
     try {
-        if (auth && !auth.currentUser) {
-            await signInAnonymously(auth);
+        if (!auth) return;
+        if (typeof auth.authStateReady === 'function') {
+            await auth.authStateReady();
+        }
+        if (!auth.currentUser) {
+            if (!_anonSignInPromise) {
+                _anonSignInPromise = signInAnonymously(auth).finally(() => { _anonSignInPromise = null; });
+            }
+            await _anonSignInPromise;
         }
     } catch (e) {
         console.warn('Anonymous auth note:', e);
     }
+}
+
+// -------------------------------------------------------------
+// Автоматическая подстановка авторизации в сетевые запросы:
+//  • запросы к нашему серверу (/api/...) получают токен сессии администратора (если он есть);
+//  • REST-запросы к Firestore получают ID-токен текущего пользователя Firebase,
+//    чтобы их проверяли правила безопасности Firestore.
+// Уже указанный заголовок Authorization не перезаписывается.
+// -------------------------------------------------------------
+if (typeof window !== 'undefined' && typeof window.fetch === 'function' && !window.fetch.__hvAuthPatched) {
+    const _origFetch = window.fetch.bind(window);
+    const patchedFetch = async function(input, init = {}) {
+        try {
+            const url = typeof input === 'string' ? input : (input && input.url) || '';
+            const isApi = url.startsWith('/api/') || url.startsWith(window.location.origin + '/api/');
+            const isFirestoreRest = url.startsWith('https://firestore.googleapis.com/');
+            if (isApi || isFirestoreRest) {
+                const headers = new Headers((init && init.headers) || (typeof input !== 'string' && input.headers) || {});
+                if (!headers.has('Authorization')) {
+                    let bearer = '';
+                    if (isApi) {
+                        bearer = localStorage.getItem('harivision_admin_token') || '';
+                    } else if (auth && auth.currentUser) {
+                        bearer = await auth.currentUser.getIdToken();
+                    }
+                    if (bearer) {
+                        headers.set('Authorization', 'Bearer ' + bearer);
+                        init = { ...(init || {}), headers };
+                    }
+                }
+            }
+        } catch (e) {}
+        return _origFetch(input, init);
+    };
+    patchedFetch.__hvAuthPatched = true;
+    window.fetch = patchedFetch;
 }
 if (auth) {
     ensureFirebaseAuth();

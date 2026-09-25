@@ -1,9 +1,13 @@
+import { ensureFirebaseAuth } from './config.js';
 // =============================================================
 // HARIVISION NOTIFICATIONS SERVICE
 // Web Notifications API & Service Worker Push Integration
 // =============================================================
 
 const STORAGE_KEY = 'harivision_notifications_enabled';
+// ПУБЛИЧНЫЙ VAPID-ключ (его можно хранить в коде). После перевыпуска ключей
+// (npx web-push generate-vapid-keys) вставьте сюда новый VAPID_PUBLIC_KEY из .env сервера.
+// Старый ключ скомпрометирован: его приватная часть лежала в открытом репозитории.
 export const PERMANENT_VAPID_PUBLIC_KEY = 'BPZuY8-gjysoqNyqec1Rqdz2iPd1gNRiwiP0kSOnAxWaSuVGsRvKafnY75wGl5vSsExJGAnC3RPkmzjhMo42wRw';
 
 export function isNotificationSupported() {
@@ -69,6 +73,8 @@ const FIREBASE_PROJECT_ID = "voting-91412";
 async function savePushSubscriptionDirectlyToFirestore(subData) {
     if (!subData || !subData.endpoint || !subData.keys) return false;
     try {
+        // Запись проверяется правилами Firestore — нужен вошедший (хотя бы анонимно) пользователь
+        await ensureFirebaseAuth();
         const docId = getSubscriptionDocId(subData.endpoint);
         const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/artistAccounts/${docId}?key=${FIREBASE_API_KEY}`;
         const body = {
@@ -101,6 +107,7 @@ async function savePushSubscriptionDirectlyToFirestore(subData) {
 async function removePushSubscriptionDirectlyFromFirestore(endpoint) {
     if (!endpoint) return false;
     try {
+        await ensureFirebaseAuth();
         const docId = getSubscriptionDocId(endpoint);
         const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/artistAccounts/${docId}?key=${FIREBASE_API_KEY}`;
         const res = await fetch(url, { method: 'DELETE' });

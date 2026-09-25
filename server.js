@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import webpush from 'web-push';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,7 +13,33 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(__dirname));
+// Доверять заголовку X-Forwarded-For только от прокси (задайте TRUST_PROXY=1 за Cloud Run / nginx)
+const TRUST_PROXY = process.env.TRUST_PROXY;
+app.set('trust proxy', TRUST_PROXY ? (isNaN(Number(TRUST_PROXY)) ? TRUST_PROXY : Number(TRUST_PROXY)) : 'loopback');
+
+// Статические файлы: наружу отдаём только файлы сайта.
+// Служебные файлы (данные сервера, код сервера, конфиги, .env) закрыты.
+const BLOCKED_STATIC = [
+    /^\/data(\/|$)/i,
+    /^\/tools(\/|$)/i,
+    /^\/node_modules(\/|$)/i,
+    /^\/\./,
+    /^\/server\.js$/i,
+    /^\/package(-lock)?\.json$/i,
+    /^\/store\.json$/i,
+    /^\/firestore\.rules$/i,
+    /^\/metadata\.json$/i,
+    /\.(env|md|log|bak)$/i
+];
+app.use((req, res, next) => {
+    let p = req.path || '/';
+    try { p = decodeURIComponent(p); } catch (e) {}
+    if (BLOCKED_STATIC.some(rx => rx.test(p))) {
+        return res.status(404).send('Not found');
+    }
+    next();
+});
+app.use(express.static(__dirname, { dotfiles: 'deny', index: 'index.html' }));
 
 // Хранилище данных
 const DATA_DIR = path.join(__dirname, 'data');
@@ -101,10 +128,16 @@ function sortNewsDescending(list = []) {
     });
 }
 
-const PERMANENT_VAPID_KEYS = {
-    publicKey: process.env.VAPID_PUBLIC_KEY || 'BPZuY8-gjysoqNyqec1Rqdz2iPd1gNRiwiP0kSOnAxWaSuVGsRvKafnY75wGl5vSsExJGAnC3RPkmzjhMo42wRw',
-    privateKey: process.env.VAPID_PRIVATE_KEY || 'BKUXgpRE6_RibzMPaed4crervZfo1YuLEr12ahNIs8c'
+// VAPID-ключи берутся ТОЛЬКО из переменных окружения (.env).
+// Сгенерировать новую пару: npx web-push generate-vapid-keys
+const VAPID_KEYS = {
+    publicKey: process.env.VAPID_PUBLIC_KEY || '',
+    privateKey: process.env.VAPID_PRIVATE_KEY || ''
 };
+const PUSH_ENABLED = Boolean(VAPID_KEYS.publicKey && VAPID_KEYS.privateKey);
+if (!PUSH_ENABLED) {
+    console.warn('[WebPush] VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY не заданы — push-уведомления отключены.');
+}
 
 const INITIAL_CALENDAR_NOTES = [];
 
@@ -123,13 +156,13 @@ function loadStore() {
             if (!data.votingState) data.votingState = { status: 'closed', endsAt: null, sessionId: null };
             if (!data.recapVideoUrl) data.recapVideoUrl = '';
             if (data.featuredContestId === undefined) data.featuredContestId = 'auto';
-            if (!data.adminPassword || data.adminPassword === 'admin') data.adminPassword = '';
+            delete data.adminPassword; // пароль админа больше не хранится в store
             if (!Array.isArray(data.adminSessions)) data.adminSessions = [];
             if (!Array.isArray(data.revokedTokens)) data.revokedTokens = [];
             if (!Array.isArray(data.votes)) data.votes = [];
             if (data.manualThreshold === undefined) data.manualThreshold = 0;
             if (data.revealMode === undefined) data.revealMode = false;
-            data.vapidKeys = PERMANENT_VAPID_KEYS;
+            delete data.vapidKeys; // ключи VAPID не хранятся в store
             if (!Array.isArray(data.pushSubscriptions)) {
                 data.pushSubscriptions = [];
             }
@@ -159,13 +192,11 @@ function loadStore() {
         votingState: { status: 'closed', endsAt: null, sessionId: null },
         recapVideoUrl: 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA',
         featuredContestId: 'auto',
-        adminPassword: '',
         adminSessions: [],
         revokedTokens: [],
         votes: [],
         manualThreshold: 0,
         revealMode: false,
-        vapidKeys: PERMANENT_VAPID_KEYS,
         pushSubscriptions: []
     };
     saveStore(defaultData);
@@ -188,19 +219,123 @@ if (!Array.isArray(store.news)) store.news = [];
 if (!Array.isArray(store.contests)) store.contests = [];
 if (!Array.isArray(store.calendarNotes)) store.calendarNotes = [];
 if (!Array.isArray(store.participants) || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
-store.vapidKeys = PERMANENT_VAPID_KEYS;
+delete store.vapidKeys;
+delete store.adminPassword;
 if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
 saveStore(store);
 
 // Настройка Web Push VAPID
 try {
-    webpush.setVapidDetails(
-        'mailto:support@harivision.org',
-        store.vapidKeys.publicKey,
-        store.vapidKeys.privateKey
-    );
+    if (PUSH_ENABLED) {
+        webpush.setVapidDetails(
+            'mailto:support@harivision.org',
+            VAPID_KEYS.publicKey,
+            VAPID_KEYS.privateKey
+        );
+    }
 } catch (e) {
     console.error('Error setting VAPID details:', e);
+}
+
+// -------------------------------------------------------------
+// Firebase: конфиг, проверка ID-токенов и служебный вход сервера
+// -------------------------------------------------------------
+function getFirebaseServerConfig() {
+    let apiKey = process.env.FIREBASE_API_KEY || '';
+    let projectId = process.env.FIREBASE_PROJECT_ID || 'voting-91412';
+    try {
+        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
+        if (fs.existsSync(appletConfigPath)) {
+            const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
+            if (!apiKey && cfg.apiKey) apiKey = cfg.apiKey;
+            if (!process.env.FIREBASE_PROJECT_ID && cfg.projectId) projectId = cfg.projectId;
+        }
+    } catch (e) {}
+    return { apiKey, projectId };
+}
+
+// Сервер входит в Firebase под отдельным аккаунтом, у которого есть документ admins/{uid}.
+// Без него сервер может читать только публичные данные (push-рассылки работать не будут).
+let serverIdToken = null;
+let serverIdTokenExpiresAt = 0;
+let serverAuthWarned = false;
+
+async function getServerIdToken() {
+    const email = process.env.FIREBASE_SERVER_EMAIL;
+    const password = process.env.FIREBASE_SERVER_PASSWORD;
+    const { apiKey } = getFirebaseServerConfig();
+    if (!email || !password || !apiKey) {
+        if (!serverAuthWarned) {
+            console.warn('[Firebase] FIREBASE_SERVER_EMAIL / FIREBASE_SERVER_PASSWORD не заданы — сервер работает без служебного доступа к Firestore.');
+            serverAuthWarned = true;
+        }
+        return null;
+    }
+    if (serverIdToken && Date.now() < serverIdTokenExpiresAt - 60000) {
+        return serverIdToken;
+    }
+    try {
+        const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, returnSecureToken: true })
+        });
+        const data = await r.json();
+        if (r.ok && data.idToken) {
+            serverIdToken = data.idToken;
+            serverIdTokenExpiresAt = Date.now() + (Number(data.expiresIn) || 3600) * 1000;
+            return serverIdToken;
+        }
+        console.warn('[Firebase] Служебный вход сервера не удался:', data?.error?.message || r.status);
+    } catch (e) {
+        console.warn('[Firebase] Служебный вход сервера: ошибка сети', e.message);
+    }
+    return null;
+}
+
+// fetch к Firestore REST с авторизацией служебного аккаунта
+async function fsFetch(url, options = {}) {
+    const token = await getServerIdToken();
+    const headers = { ...(options.headers || {}) };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return fetch(url, { ...options, headers });
+}
+
+// Проверка ID-токена Firebase (подпись проверяет сам Google) + наличие admins/{uid}
+async function verifyFirebaseAdminToken(idToken) {
+    const { apiKey, projectId } = getFirebaseServerConfig();
+    if (!idToken || !apiKey) return null;
+    try {
+        const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken })
+        });
+        const data = await r.json();
+        const user = r.ok && Array.isArray(data.users) ? data.users[0] : null;
+        if (!user || !user.localId) return null;
+        // Читаем admins/{uid} от имени самого пользователя: правила разрешают читать только свой документ
+        const adminRes = await fetch(`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/admins/${encodeURIComponent(user.localId)}`, {
+            headers: { 'Authorization': `Bearer ${idToken}` }
+        });
+        if (!adminRes.ok) return null;
+        return { uid: user.localId, email: user.email || '' };
+    } catch (e) {
+        console.warn('[Admin] Ошибка проверки токена Firebase:', e.message);
+        return null;
+    }
+}
+
+// Публичное состояние для клиентов: без сессий, токенов, подписок и IP
+function publicState() {
+    const {
+        adminSessions, revokedTokens, pushSubscriptions, vapidKeys, adminPassword,
+        ...rest
+    } = store;
+    return {
+        ...rest,
+        votes: (store.votes || []).map(({ ip, ...v }) => v)
+    };
 }
 
 let isInitialSyncDone = false;
@@ -215,16 +350,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
     if (!isSubSyncOnly) isSyncInProgress = true;
 
     try {
-        let apiKey = process.env.FIREBASE_API_KEY;
-        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
-        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
-        if (fs.existsSync(appletConfigPath)) {
-            try {
-                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
-                if (cfg.apiKey) apiKey = cfg.apiKey;
-                if (cfg.projectId) projectId = cfg.projectId;
-            } catch (e) {}
-        }
+        const { apiKey, projectId } = getFirebaseServerConfig();
         if (!apiKey) return;
 
         const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
@@ -255,7 +381,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
         // 1. Sync contests directly from Firestore collection "contests"
         try {
-            const res = await fetch(`${base}/contests?key=${apiKey}`);
+            const res = await fsFetch(`${base}/contests?key=${apiKey}`);
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || []).map(d => ({
@@ -285,7 +411,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
         // 2. Sync voting_state from Firestore "system/voting_state"
         try {
-            const res = await fetch(`${base}/system/voting_state?key=${apiKey}`);
+            const res = await fsFetch(`${base}/system/voting_state?key=${apiKey}`);
             if (res.ok) {
                 const doc = await res.json();
                 const fsState = parseFirestoreFields(doc.fields);
@@ -327,7 +453,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
         // 3. Sync news directly from Firestore collection "news"
         try {
-            const res = await fetch(`${base}/news?key=${apiKey}`);
+            const res = await fsFetch(`${base}/news?key=${apiKey}`);
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || []).map(d => ({
@@ -358,14 +484,14 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
         // 4. Check broadcast queue in Firestore "artistAccounts/broadcast_queue"
         try {
-            const res = await fetch(`${base}/artistAccounts/broadcast_queue?key=${apiKey}`);
+            const res = await fsFetch(`${base}/artistAccounts/broadcast_queue?key=${apiKey}`);
             if (res.ok) {
                 const doc = await res.json();
                 const item = parseFirestoreFields(doc.fields);
                 if (item && item.title && !item.processed && (Date.now() - (item.createdAt || 0) < 600000)) {
                     console.log('[Firestore Sync] Found pending broadcast in queue:', item.title);
                     // Mark as processed in artistAccounts/broadcast_queue
-                    await fetch(`${base}/artistAccounts/broadcast_queue?key=${apiKey}`, {
+                    await fsFetch(`${base}/artistAccounts/broadcast_queue?key=${apiKey}`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -389,7 +515,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
         // 5. Sync calendar notes directly from Firestore "artistAccounts/calendar_store"
         try {
-            const res = await fetch(`${base}/artistAccounts/calendar_store?key=${apiKey}`);
+            const res = await fsFetch(`${base}/artistAccounts/calendar_store?key=${apiKey}`);
             if (res.ok) {
                 const doc = await res.json();
                 const fields = parseFirestoreFields(doc.fields);
@@ -423,7 +549,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
         // 6. Sync push subscriptions from Firestore collection "artistAccounts" (with type === 'push_sub')
         try {
-            const res = await fetch(`${base}/artistAccounts?key=${apiKey}&pageSize=300`);
+            const res = await fsFetch(`${base}/artistAccounts?key=${apiKey}&pageSize=300`);
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || [])
@@ -468,22 +594,13 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
 async function saveCalendarToFirestore(calendarNotes) {
     try {
-        let apiKey = process.env.FIREBASE_API_KEY;
-        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
-        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
-        if (fs.existsSync(appletConfigPath)) {
-            try {
-                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
-                if (cfg.apiKey) apiKey = cfg.apiKey;
-                if (cfg.projectId) projectId = cfg.projectId;
-            } catch (e) {}
-        }
+        const { apiKey, projectId } = getFirebaseServerConfig();
         if (!apiKey || !Array.isArray(calendarNotes)) return;
 
         const cleanNotes = calendarNotes.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
 
         const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/calendar_store?key=${apiKey}`;
-        await fetch(url, {
+        await fsFetch(url, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -506,7 +623,7 @@ async function saveCalendarToFirestore(calendarNotes) {
                 else if (typeof v === 'number') fsFields[k] = { integerValue: String(v) };
                 else if (typeof v === 'boolean') fsFields[k] = { booleanValue: v };
             }
-            fetch(docUrl, {
+            fsFetch(docUrl, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields: fsFields })
@@ -521,21 +638,12 @@ async function saveCalendarToFirestore(calendarNotes) {
 
 async function savePushSubscriptionToFirestore(subscription) {
     try {
-        let apiKey = process.env.FIREBASE_API_KEY;
-        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
-        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
-        if (fs.existsSync(appletConfigPath)) {
-            try {
-                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
-                if (cfg.apiKey) apiKey = cfg.apiKey;
-                if (cfg.projectId) projectId = cfg.projectId;
-            } catch (e) {}
-        }
+        const { apiKey, projectId } = getFirebaseServerConfig();
         if (!apiKey || !subscription || !subscription.endpoint) return;
         const hash = Buffer.from(subscription.endpoint.slice(-60)).toString('hex');
         const docId = 'push_sub_' + hash.slice(0, 32);
         const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/${docId}?key=${apiKey}`;
-        const res = await fetch(url, {
+        const res = await fsFetch(url, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -566,21 +674,12 @@ async function savePushSubscriptionToFirestore(subscription) {
 
 async function removePushSubscriptionFromFirestore(endpoint) {
     try {
-        let apiKey = process.env.FIREBASE_API_KEY;
-        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
-        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
-        if (fs.existsSync(appletConfigPath)) {
-            try {
-                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
-                if (cfg.apiKey) apiKey = cfg.apiKey;
-                if (cfg.projectId) projectId = cfg.projectId;
-            } catch (e) {}
-        }
+        const { apiKey, projectId } = getFirebaseServerConfig();
         if (!apiKey || !endpoint) return;
         const hash = Buffer.from(endpoint.slice(-60)).toString('hex');
         const docId = 'push_sub_' + hash.slice(0, 32);
         const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/${docId}?key=${apiKey}`;
-        await fetch(url, { method: 'DELETE' });
+        await fsFetch(url, { method: 'DELETE' });
     } catch (e) {}
 }
 
@@ -592,7 +691,7 @@ setInterval(syncWithFirestore, 3000);
 let sseClients = [];
 
 function broadcastState(type = 'update') {
-    const payload = JSON.stringify({ type, data: store });
+    const payload = JSON.stringify({ type, data: publicState() });
     sseClients.forEach(client => {
         try {
             client.res.write(`data: ${payload}\n\n`);
@@ -604,6 +703,9 @@ function broadcastState(type = 'update') {
 
 // Отправка Web Push уведомлений всем подписчикам (доставляется даже при закрытом сайте/приложении)
 async function sendPushNotificationToAll({ title, body, url = '/', tag = null }, skipSync = false) {
+    if (!PUSH_ENABLED) {
+        return { total: (store.pushSubscriptions || []).length, sent: 0 };
+    }
     if (tag && sentPushTags.has(tag)) {
         const lastSent = sentPushTags.get(tag);
         if (Date.now() - lastSent < 300000) {
@@ -684,7 +786,7 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
 
 // Web Push API: получение публичного VAPID ключа
 app.get('/api/push/vapid-public-key', (req, res) => {
-    res.json({ publicKey: store.vapidKeys ? store.vapidKeys.publicKey : PERMANENT_VAPID_KEYS.publicKey });
+    res.json({ publicKey: VAPID_KEYS.publicKey });
 });
 
 // Web Push API: регистрация подписки устройства
@@ -696,7 +798,7 @@ app.post('/api/push/subscribe', (req, res) => {
         hasP256dh: Boolean(subscription?.keys?.p256dh),
         hasAuth: Boolean(subscription?.keys?.auth)
     });
-    if (!subscription || !subscription.endpoint) {
+    if (!subscription || typeof subscription.endpoint !== 'string' || !subscription.endpoint.startsWith('https://') || subscription.endpoint.length > 1000) {
         return res.status(400).json({ success: false, error: 'Subscription object required' });
     }
     if (!subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
@@ -705,14 +807,20 @@ app.post('/api/push/subscribe', (req, res) => {
     if (!Array.isArray(store.pushSubscriptions)) {
         store.pushSubscriptions = [];
     }
-    const idx = store.pushSubscriptions.findIndex(s => s.endpoint === subscription.endpoint);
+    // Сохраняем только нужные поля подписки
+    const cleanSub = {
+        endpoint: subscription.endpoint,
+        keys: { p256dh: String(subscription.keys.p256dh).slice(0, 200), auth: String(subscription.keys.auth).slice(0, 100) },
+        expirationTime: subscription.expirationTime || null
+    };
+    const idx = store.pushSubscriptions.findIndex(s => s.endpoint === cleanSub.endpoint);
     if (idx >= 0) {
-        store.pushSubscriptions[idx] = subscription;
+        store.pushSubscriptions[idx] = cleanSub;
     } else {
-        store.pushSubscriptions.push(subscription);
+        store.pushSubscriptions.push(cleanSub);
     }
     saveStore(store);
-    savePushSubscriptionToFirestore(subscription);
+    savePushSubscriptionToFirestore(cleanSub);
     console.log(`[WebPush] Device registered. Total subscribers: ${store.pushSubscriptions.length}`);
     res.json({ success: true, subscribersCount: store.pushSubscriptions.length });
 });
@@ -764,7 +872,7 @@ app.get('/api/events', (req, res) => {
     res.flushHeaders();
 
     // Отправляем текущее состояние сразу
-    res.write(`data: ${JSON.stringify({ type: 'init', data: store })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'init', data: publicState() })}\n\n`);
 
     const clientId = Date.now() + Math.random();
     const newClient = { id: clientId, res };
@@ -777,7 +885,7 @@ app.get('/api/events', (req, res) => {
 
 // API Routes
 app.get('/api/state', (req, res) => {
-    res.json(store);
+    res.json(publicState());
 });
 
 // Firebase configuration for client SDK
@@ -803,7 +911,7 @@ app.get('/api/firebase-config', (req, res) => {
 });
 
 // --- NEWS CRUD ---
-app.post('/api/news', (req, res) => {
+app.post('/api/news', authenticateAdmin, (req, res) => {
     const article = req.body;
     if (!article.id) {
         article.id = 'news-' + Date.now();
@@ -838,7 +946,7 @@ app.post('/api/news', (req, res) => {
     res.json({ success: true, article, news: store.news });
 });
 
-app.delete('/api/news/:id', (req, res) => {
+app.delete('/api/news/:id', authenticateAdmin, (req, res) => {
     const { id } = req.params;
     store.news = sortNewsDescending(store.news.filter(n => n.id !== id));
     saveStore(store);
@@ -852,7 +960,7 @@ app.get('/api/calendar', (req, res) => {
     res.json(store.calendarNotes);
 });
 
-app.post('/api/calendar', (req, res) => {
+app.post('/api/calendar', authenticateAdmin, (req, res) => {
     const note = (req.body && req.body.note) ? req.body.note : req.body;
     if (!note || !note.date) {
         return res.status(400).json({ success: false, error: 'Дата события обязательна' });
@@ -880,16 +988,7 @@ app.post('/api/calendar', (req, res) => {
     // Dual-write to Firestore artistAccounts/calendar_store (and legacy calendar doc)
     saveCalendarToFirestore(store.calendarNotes).catch(() => {});
     try {
-        let apiKey = process.env.FIREBASE_API_KEY;
-        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
-        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
-        if (fs.existsSync(appletConfigPath)) {
-            try {
-                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
-                if (cfg.apiKey) apiKey = cfg.apiKey;
-                if (cfg.projectId) projectId = cfg.projectId;
-            } catch (e) {}
-        }
+        const { apiKey, projectId } = getFirebaseServerConfig();
         if (apiKey) {
             const docUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/calendar_${note.id}?key=${apiKey}`;
             const fsFields = {};
@@ -899,7 +998,7 @@ app.post('/api/calendar', (req, res) => {
                 else if (typeof v === 'number') fsFields[k] = { integerValue: String(v) };
                 else if (typeof v === 'boolean') fsFields[k] = { booleanValue: v };
             }
-            fetch(docUrl, {
+            fsFetch(docUrl, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields: fsFields })
@@ -926,7 +1025,7 @@ app.post('/api/calendar', (req, res) => {
     res.json({ success: true, note, calendarNotes: store.calendarNotes });
 });
 
-app.delete('/api/calendar/:id', (req, res) => {
+app.delete('/api/calendar/:id', authenticateAdmin, (req, res) => {
     const { id } = req.params;
     if (!Array.isArray(store.calendarNotes)) store.calendarNotes = [];
     store.calendarNotes = store.calendarNotes.filter(n => n.id !== id);
@@ -936,23 +1035,14 @@ app.delete('/api/calendar/:id', (req, res) => {
     // Delete and update Firestore
     saveCalendarToFirestore(store.calendarNotes).catch(() => {});
     try {
-        let apiKey = process.env.FIREBASE_API_KEY;
-        let projectId = process.env.FIREBASE_PROJECT_ID || "voting-91412";
-        const appletConfigPath = path.join(__dirname, 'firebase-applet-config.json');
-        if (fs.existsSync(appletConfigPath)) {
-            try {
-                const cfg = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
-                if (cfg.apiKey) apiKey = cfg.apiKey;
-                if (cfg.projectId) projectId = cfg.projectId;
-            } catch (e) {}
-        }
+        const { apiKey, projectId } = getFirebaseServerConfig();
         if (apiKey) {
             const docUrl1 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/cal_${id}?key=${apiKey}`;
             const docUrl2 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/artistAccounts/calendar_${id}?key=${apiKey}`;
             const docUrl3 = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/calendar/${id}?key=${apiKey}`;
-            fetch(docUrl1, { method: 'DELETE' }).catch(() => {});
-            fetch(docUrl2, { method: 'DELETE' }).catch(() => {});
-            fetch(docUrl3, { method: 'DELETE' }).catch(() => {});
+            fsFetch(docUrl1, { method: 'DELETE' }).catch(() => {});
+            fsFetch(docUrl2, { method: 'DELETE' }).catch(() => {});
+            fsFetch(docUrl3, { method: 'DELETE' }).catch(() => {});
         }
     } catch (e) {}
 
@@ -962,8 +1052,8 @@ app.delete('/api/calendar/:id', (req, res) => {
 // --- NEWS REACTIONS ---
 app.post('/api/news/:id/react', (req, res) => {
     const { id } = req.params;
-    const { emoji, action } = req.body;
-    if (!emoji) {
+    const { emoji, action } = req.body || {};
+    if (!emoji || typeof emoji !== 'string' || emoji.length > 16 || /[<>]/.test(emoji)) {
         return res.status(400).json({ success: false, error: 'Emoji is required' });
     }
 
@@ -989,7 +1079,7 @@ app.post('/api/news/:id/react', (req, res) => {
 });
 
 // --- SETTINGS (FEATURED BANNER) ---
-app.post('/api/settings/featured-contest', (req, res) => {
+app.post('/api/settings/featured-contest', authenticateAdmin, (req, res) => {
     const { featuredContestId } = req.body;
     store.featuredContestId = featuredContestId || 'auto';
     saveStore(store);
@@ -998,94 +1088,106 @@ app.post('/api/settings/featured-contest', (req, res) => {
 });
 
 // --- ADMIN AUTHENTICATION & SESSIONS ---
-app.post('/api/admin/login', async (req, res) => {
-    const { email, username, password } = req.body;
-    const identifier = (email || username || '').trim();
-    const inputPassword = (password || '').trim();
+// Администратор = пользователь Firebase Auth с документом admins/{uid}.
+// Сервер выдаёт собственный случайный токен сессии только после проверки этого условия.
+const ADMIN_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 дней
 
-    const expectedPassword = (process.env.ADMIN_PASSWORD || store.adminPassword || '').trim();
+function newAdminToken() {
+    return 'hv_admin_' + crypto.randomBytes(32).toString('hex');
+}
 
-    // 1. Проверка пароля администратора (строгая проверка, без легких запасных паролей)
-    const isLocalPasswordCorrect = (Boolean(expectedPassword) && inputPassword === expectedPassword) || (inputPassword === 'SLASHIT2303');
+function getClientIp(req) {
+    return req.ip || req.socket?.remoteAddress || '';
+}
 
-    if (isLocalPasswordCorrect) {
-        const token = 'hv_admin_' + Buffer.from(`${identifier || 'admin'}:${Date.now()}:${Math.random()}`).toString('base64');
-        const session = {
-            id: 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-            token,
-            email: identifier || 'admin@harivision.org',
-            username: (identifier ? identifier.split('@')[0] : 'Admin'),
-            role: 'admin',
-            loginAt: new Date().toISOString(),
-            lastActiveAt: new Date().toISOString(),
-            ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1',
-            userAgent: req.headers['user-agent'] || 'Browser',
-            status: 'active'
-        };
-        store.adminSessions = store.adminSessions || [];
-        store.adminSessions.unshift(session);
-        if (store.adminSessions.length > 100) store.adminSessions = store.adminSessions.slice(0, 100);
-        saveStore(store);
+function createAdminSession(req, { uid, email }) {
+    const session = {
+        id: 'session_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex'),
+        token: newAdminToken(),
+        email: email || '',
+        uid: uid || null,
+        username: (email ? email.split('@')[0] : 'Admin'),
+        role: 'admin',
+        loginAt: new Date().toISOString(),
+        lastActiveAt: new Date().toISOString(),
+        ip: getClientIp(req),
+        userAgent: String(req.headers['user-agent'] || 'Browser').slice(0, 300),
+        status: 'active'
+    };
+    store.adminSessions = store.adminSessions || [];
+    store.adminSessions.unshift(session);
+    if (store.adminSessions.length > 100) store.adminSessions = store.adminSessions.slice(0, 100);
+    saveStore(store);
+    return session;
+}
 
-        return res.json({
-            success: true,
-            token,
-            session,
-            user: {
-                email: session.email,
-                role: 'admin'
-            }
-        });
+function publicSessionView(s) {
+    const { token, ...rest } = s;
+    return rest;
+}
+
+// Простое ограничение числа попыток входа: 10 попыток за 15 минут с одного IP
+const loginAttempts = new Map();
+function isLoginRateLimited(req) {
+    const ip = getClientIp(req);
+    const now = Date.now();
+    const windowMs = 15 * 60 * 1000;
+    const list = (loginAttempts.get(ip) || []).filter(t => now - t < windowMs);
+    list.push(now);
+    loginAttempts.set(ip, list);
+    if (loginAttempts.size > 5000) loginAttempts.clear();
+    return list.length > 10;
+}
+
+function safeEqual(a, b) {
+    const ba = Buffer.from(String(a || ''));
+    const bb = Buffer.from(String(b || ''));
+    if (ba.length !== bb.length || ba.length === 0) return false;
+    return crypto.timingSafeEqual(ba, bb);
+}
+
+// Проверка мастер-ключа для отзыва сессий (задаётся в .env как ADMIN_MASTER_KEY)
+function checkMasterKey(masterKey) {
+    const expected = process.env.ADMIN_MASTER_KEY || '';
+    if (!expected) return { ok: false, error: 'Мастер-ключ не настроен на сервере (ADMIN_MASTER_KEY).' };
+    if (!safeEqual(String(masterKey || '').trim(), expected.trim())) {
+        return { ok: false, error: 'Неверный ключ безопасности.' };
     }
+    return { ok: true };
+}
 
-    // 2. Если указан FIREBASE_API_KEY, пробуем аутентифицировать через REST API Google Identity Platform
-    const fbApiKey = process.env.FIREBASE_API_KEY;
-    if (fbApiKey && identifier && inputPassword) {
+app.post('/api/admin/login', async (req, res) => {
+    if (isLoginRateLimited(req)) {
+        return res.status(429).json({ success: false, error: 'Слишком много попыток входа. Попробуйте позже.' });
+    }
+    const { email, username, password } = req.body || {};
+    const identifier = String(email || username || '').trim();
+    const inputPassword = String(password || '');
+    const { apiKey } = getFirebaseServerConfig();
+
+    if (apiKey && identifier && inputPassword) {
         try {
             const firebaseEmail = identifier.includes('@') ? identifier : `${identifier}@harivision.org`;
-            const fbRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${fbApiKey}`, {
+            const fbRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: firebaseEmail,
-                    password: inputPassword,
-                    returnSecureToken: true
-                })
+                body: JSON.stringify({ email: firebaseEmail, password: inputPassword, returnSecureToken: true })
             });
             const fbData = await fbRes.json();
             if (fbRes.ok && fbData.idToken) {
-                const token = 'hv_firebase_' + Buffer.from(`${fbData.email || fbData.localId}:${Date.now()}`).toString('base64');
-                const session = {
-                    id: 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-                    token,
-                    email: fbData.email || identifier,
-                    uid: fbData.localId,
-                    username: (fbData.email ? fbData.email.split('@')[0] : identifier),
-                    role: 'admin',
-                    loginAt: new Date().toISOString(),
-                    lastActiveAt: new Date().toISOString(),
-                    ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1',
-                    userAgent: req.headers['user-agent'] || 'Browser',
-                    status: 'active'
-                };
-                store.adminSessions = store.adminSessions || [];
-                store.adminSessions.unshift(session);
-                if (store.adminSessions.length > 100) store.adminSessions = store.adminSessions.slice(0, 100);
-                saveStore(store);
-
-                return res.json({
-                    success: true,
-                    token,
-                    session,
-                    user: {
-                        email: session.email,
-                        uid: fbData.localId,
-                        role: 'admin'
-                    }
-                });
+                const admin = await verifyFirebaseAdminToken(fbData.idToken);
+                if (admin) {
+                    const session = createAdminSession(req, admin);
+                    return res.json({
+                        success: true,
+                        token: session.token,
+                        session: publicSessionView(session),
+                        user: { email: admin.email, uid: admin.uid, role: 'admin' }
+                    });
+                }
             }
         } catch (fbErr) {
-            console.warn('[Admin Login] Firebase verification attempt error:', fbErr.message);
+            console.warn('[Admin Login] Firebase verification error:', fbErr.message);
         }
     }
 
@@ -1100,110 +1202,60 @@ function getRequestAdminToken(req) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
         return authHeader.substring(7).trim();
     }
-    if (req.query && (req.query.token || req.query.adminToken)) {
-        return String(req.query.token || req.query.adminToken).trim();
-    }
     return '';
 }
 
-function authenticateAdmin(req, res, next) {
-    const token = getRequestAdminToken(req);
-    if (!token) {
-        return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
-
-    // Проверка отзыва токена
+// Возвращает { session } для действующей сессии или { revoked: true } / null
+function findActiveSession(token) {
+    if (!token) return null;
     if (Array.isArray(store.revokedTokens) && store.revokedTokens.includes(token)) {
+        return { revoked: true };
+    }
+    const session = (store.adminSessions || []).find(s => s.token && safeEqual(s.token, token));
+    if (!session) return null;
+    if (session.status === 'revoked') return { revoked: true };
+    const loginAt = new Date(session.loginAt).getTime();
+    if (!loginAt || Date.now() - loginAt > ADMIN_SESSION_TTL_MS) return null;
+    return { session };
+}
+
+function authenticateAdmin(req, res, next) {
+    const result = findActiveSession(getRequestAdminToken(req));
+    if (result && result.revoked) {
         return res.status(401).json({ success: false, revoked: true, error: 'Доступ был отозван' });
     }
-
-    if (Array.isArray(store.adminSessions)) {
-        const session = store.adminSessions.find(s => s.token === token);
-        if (session) {
-            if (session.status === 'revoked') {
-                return res.status(401).json({ success: false, revoked: true, error: 'Доступ был отозван' });
-            }
-            session.lastActiveAt = new Date().toISOString();
-        }
+    if (!result || !result.session) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
-
-    if (token.startsWith('hv_admin_') || token.startsWith('hv_firebase_') || token.length >= 12) {
-        return next();
-    }
-
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
+    result.session.lastActiveAt = new Date().toISOString();
+    req.adminSession = result.session;
+    next();
 }
 
 app.get('/api/admin/verify', (req, res) => {
-    const token = getRequestAdminToken(req);
-    if (!token) {
-        return res.status(401).json({ success: false, valid: false });
-    }
-
-    if (Array.isArray(store.revokedTokens) && store.revokedTokens.includes(token)) {
+    const result = findActiveSession(getRequestAdminToken(req));
+    if (result && result.revoked) {
         return res.status(401).json({ success: false, valid: false, revoked: true, error: 'Доступ был отозван' });
     }
-
-    if (Array.isArray(store.adminSessions)) {
-        const session = store.adminSessions.find(s => s.token === token);
-        if (session) {
-            if (session.status === 'revoked') {
-                return res.status(401).json({ success: false, valid: false, revoked: true, error: 'Доступ был отозван' });
-            }
-            session.lastActiveAt = new Date().toISOString();
-        }
+    if (!result || !result.session) {
+        return res.status(401).json({ success: false, valid: false });
     }
-
-    if (token.startsWith('hv_admin_') || token.startsWith('hv_firebase_') || token.length >= 12) {
-        return res.json({ success: true, valid: true });
-    }
-
-    return res.status(401).json({ success: false, valid: false });
+    result.session.lastActiveAt = new Date().toISOString();
+    return res.json({ success: true, valid: true });
 });
 
-// Регистрация сессии (например, при входе через клиентский Firebase Auth SDK)
-app.post('/api/admin/register-session', (req, res) => {
-    const token = getRequestAdminToken(req);
-    if (!token) {
+// Выдача серверной сессии по ID-токену Firebase (после входа через Firebase Auth в браузере)
+app.post('/api/admin/register-session', async (req, res) => {
+    if (isLoginRateLimited(req)) {
+        return res.status(429).json({ success: false, error: 'Слишком много попыток. Попробуйте позже.' });
+    }
+    const idToken = getRequestAdminToken(req);
+    const admin = await verifyFirebaseAdminToken(idToken);
+    if (!admin) {
         return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
-
-    if (Array.isArray(store.revokedTokens) && store.revokedTokens.includes(token)) {
-        return res.status(401).json({ success: false, revoked: true, error: 'Доступ отозван' });
-    }
-
-    const { email, uid, username } = req.body || {};
-    const effectiveEmail = email || 'admin@harivision.org';
-    const effectiveUsername = username || effectiveEmail.split('@')[0] || 'Admin';
-
-    store.adminSessions = store.adminSessions || [];
-    let existing = store.adminSessions.find(s => s.token === token);
-    if (existing) {
-        if (existing.status === 'revoked') {
-            return res.status(401).json({ success: false, revoked: true, error: 'Доступ отозван' });
-        }
-        existing.lastActiveAt = new Date().toISOString();
-        existing.ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || existing.ip;
-        existing.userAgent = req.headers['user-agent'] || existing.userAgent;
-    } else {
-        existing = {
-            id: 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-            token,
-            email: effectiveEmail,
-            uid: uid || null,
-            username: effectiveUsername,
-            role: 'admin',
-            loginAt: new Date().toISOString(),
-            lastActiveAt: new Date().toISOString(),
-            ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1',
-            userAgent: req.headers['user-agent'] || 'Browser',
-            status: 'active'
-        };
-        store.adminSessions.unshift(existing);
-        if (store.adminSessions.length > 100) store.adminSessions = store.adminSessions.slice(0, 100);
-    }
-    saveStore(store);
-    res.json({ success: true, session: existing });
+    const session = createAdminSession(req, admin);
+    res.json({ success: true, token: session.token, session: publicSessionView(session) });
 });
 
 // Получение списка всех реально вошедших администраторов
@@ -1231,11 +1283,9 @@ app.get('/api/admin/sessions', authenticateAdmin, (req, res) => {
 app.post('/api/admin/revoke-session', authenticateAdmin, (req, res) => {
     const { sessionId, masterKey } = req.body || {};
 
-    if (!masterKey || String(masterKey).trim() !== 'SLASHIT2303') {
-        return res.status(403).json({
-            success: false,
-            error: 'Неверный ключ безопасности. Доступ не отозван.'
-        });
+    const keyCheck = checkMasterKey(masterKey);
+    if (!keyCheck.ok) {
+        return res.status(403).json({ success: false, error: keyCheck.error + ' Доступ не отозван.' });
     }
 
     if (!sessionId) {
@@ -1254,10 +1304,11 @@ app.post('/api/admin/revoke-session', authenticateAdmin, (req, res) => {
     target.revokedAt = new Date().toISOString();
     if (target.token && !store.revokedTokens.includes(target.token)) {
         store.revokedTokens.push(target.token);
+        if (store.revokedTokens.length > 500) store.revokedTokens = store.revokedTokens.slice(-500);
     }
 
     saveStore(store);
-    broadcastState('admin_sessions_revoked', { sessionId, token: target.token });
+    broadcastState('admin_sessions_revoked');
 
     res.json({ success: true, message: 'Доступ для выбранной сессии успешно отозван' });
 });
@@ -1266,11 +1317,9 @@ app.post('/api/admin/revoke-session', authenticateAdmin, (req, res) => {
 app.post('/api/admin/revoke-all-sessions', authenticateAdmin, (req, res) => {
     const { masterKey, keepCurrent } = req.body || {};
 
-    if (!masterKey || String(masterKey).trim() !== 'SLASHIT2303') {
-        return res.status(403).json({
-            success: false,
-            error: 'Неверный ключ безопасности. Действие отклонено.'
-        });
+    const keyCheck = checkMasterKey(masterKey);
+    if (!keyCheck.ok) {
+        return res.status(403).json({ success: false, error: keyCheck.error + ' Действие отклонено.' });
     }
 
     const currentToken = getRequestAdminToken(req);
@@ -1291,25 +1340,21 @@ app.post('/api/admin/revoke-all-sessions', authenticateAdmin, (req, res) => {
             count++;
         }
     });
+    if (store.revokedTokens.length > 500) store.revokedTokens = store.revokedTokens.slice(-500);
 
     saveStore(store);
-    broadcastState('admin_sessions_revoked', { all: true });
+    broadcastState('admin_sessions_revoked');
 
     res.json({ success: true, message: `Отозван доступ для ${count} сессий`, revokedCount: count });
 });
 
+// Смена пароля администратора теперь выполняется в Firebase Authentication
 app.post('/api/admin/change-password', (req, res) => {
-    const { newPassword } = req.body;
-    if (!newPassword || newPassword.trim().length < 3) {
-        return res.status(400).json({ success: false, error: 'Пароль должен содержать минимум 3 символа' });
-    }
-    store.adminPassword = newPassword.trim();
-    saveStore(store);
-    res.json({ success: true, message: 'Пароль успешно обновлён' });
+    res.status(410).json({ success: false, error: 'Пароль администратора меняется в Firebase Authentication' });
 });
 
 // --- CONTESTS CRUD ---
-app.post('/api/contests', (req, res) => {
+app.post('/api/contests', authenticateAdmin, (req, res) => {
     const contest = req.body;
     if (!contest.id) {
         contest.id = 'contest-' + Date.now();
@@ -1339,7 +1384,7 @@ app.post('/api/contests', (req, res) => {
     res.json({ success: true, contest, contests: store.contests });
 });
 
-app.delete('/api/contests/:id', (req, res) => {
+app.delete('/api/contests/:id', authenticateAdmin, (req, res) => {
     const { id } = req.params;
     store.contests = store.contests.filter(c => c.id !== id);
     saveStore(store);
@@ -1352,7 +1397,7 @@ app.get('/api/participants', (req, res) => {
     res.json(store.participants || []);
 });
 
-app.post('/api/participants', (req, res) => {
+app.post('/api/participants', authenticateAdmin, (req, res) => {
     const participant = req.body;
     if (!participant.id) {
         participant.id = 'p' + (Date.now());
@@ -1374,7 +1419,7 @@ app.post('/api/participants', (req, res) => {
     res.json({ success: true, participant, participants: store.participants });
 });
 
-app.delete('/api/participants/:id', (req, res) => {
+app.delete('/api/participants/:id', authenticateAdmin, (req, res) => {
     const { id } = req.params;
     if (!store.participants) store.participants = [];
     store.participants = store.participants.filter(p => p.id !== id);
@@ -1383,7 +1428,7 @@ app.delete('/api/participants/:id', (req, res) => {
     res.json({ success: true, participants: store.participants });
 });
 
-app.post('/api/participants/reset', (req, res) => {
+app.post('/api/participants/reset', authenticateAdmin, (req, res) => {
     store.participants = JSON.parse(JSON.stringify(DEFAULT_PARTICIPANTS));
     saveStore(store);
     broadcastState('participants_update');
@@ -1391,7 +1436,7 @@ app.post('/api/participants/reset', (req, res) => {
 });
 
 // --- VOTING STATE & CONTROLS ---
-app.post('/api/voting/state', (req, res) => {
+app.post('/api/voting/state', authenticateAdmin, (req, res) => {
     const { status, endsAt, sessionId, openedAt, updatedAt } = req.body || {};
     const previousStatus = store.votingState ? store.votingState.status : 'closed';
     const isNewSession = sessionId && sessionId !== store.votingState.sessionId;
@@ -1432,7 +1477,7 @@ app.post('/api/voting/state', (req, res) => {
     res.json({ success: true, votingState: store.votingState });
 });
 
-app.post('/api/voting/threshold', (req, res) => {
+app.post('/api/voting/threshold', authenticateAdmin, (req, res) => {
     const { manualThreshold, revealMode } = req.body;
     const previousReveal = Boolean(store.revealMode);
     if (manualThreshold !== undefined) store.manualThreshold = Number(manualThreshold) || 0;
@@ -1452,7 +1497,7 @@ app.post('/api/voting/threshold', (req, res) => {
     res.json({ success: true, manualThreshold: store.manualThreshold, revealMode: store.revealMode });
 });
 
-app.post('/api/voting/recap-url', (req, res) => {
+app.post('/api/voting/recap-url', authenticateAdmin, (req, res) => {
     const { recapVideoUrl } = req.body;
     store.recapVideoUrl = recapVideoUrl !== undefined ? recapVideoUrl : (store.recapVideoUrl || '');
     saveStore(store);
@@ -1481,7 +1526,7 @@ app.post('/api/admin/broadcast-notification', authenticateAdmin, async (req, res
             url: resolvedUrl,
             tag: 'custom_' + Date.now()
         },
-        data: store
+        data: publicState()
     });
     sseClients.forEach(client => {
         try {
@@ -1511,21 +1556,58 @@ app.post('/api/admin/broadcast-notification', authenticateAdmin, async (req, res
 });
 
 // --- VOTES SUBMISSION & INSPECTION ---
+// Очистка строки от HTML и ограничение длины
+function cleanText(value, maxLen = 80) {
+    if (value === null || value === undefined) return null;
+    return String(value).replace(/[<>]/g, '').trim().slice(0, maxLen) || null;
+}
+
 app.post('/api/vote', (req, res) => {
-    const { voterName, allocations, sessionId, totalVotesGiven, isNational, representative, userId, userEmail, userRole, artistName, id } = req.body;
-    
-    if (!allocations || typeof allocations !== 'object' || Object.keys(allocations).length === 0) {
+    const body = req.body || {};
+    const { allocations, isNational, id } = body;
+    const voterName = cleanText(body.voterName);
+    const representative = cleanText(body.representative);
+    const userId = cleanText(body.userId, 128);
+    const userEmail = cleanText(body.userEmail, 120);
+    const userRole = body.userRole === 'artist' ? 'artist' : 'user';
+    const artistName = cleanText(body.artistName);
+    const sessionId = body.sessionId;
+
+    if (!store.votingState || store.votingState.status !== 'open') {
+        return res.status(403).json({ success: false, error: 'Голосование закрыто' });
+    }
+    if (sessionId && sessionId !== store.votingState.sessionId) {
+        return res.status(400).json({ success: false, error: 'Неверная сессия голосования' });
+    }
+    if (!allocations || typeof allocations !== 'object' || Array.isArray(allocations) || Object.keys(allocations).length === 0) {
         return res.status(400).json({ success: false, error: 'No vote allocations provided' });
     }
+    // Проверка распределения: не более 10 голосов всего и не более 5 на номер
+    const validIds = new Set((store.participants || []).map(p => String(p.id)));
+    let total = 0;
+    const cleanAllocations = {};
+    for (const [pid, raw] of Object.entries(allocations)) {
+        const n = Number(raw);
+        if (!validIds.has(String(pid)) || !Number.isInteger(n) || n < 0 || n > 5) {
+            return res.status(400).json({ success: false, error: 'Некорректное распределение голосов' });
+        }
+        if (n > 0) cleanAllocations[String(pid)] = n;
+        total += n;
+    }
+    if (total < 1 || total > 10) {
+        return res.status(400).json({ success: false, error: 'Некорректное количество голосов' });
+    }
+    const totalVotesGiven = total;
+    const safeId = (typeof id === 'string' && /^[A-Za-z0-9_\-]{1,200}$/.test(id)) ? id : null;
 
     const voteRecord = {
-        id: id || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)),
+        id: safeId || ('vote_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)),
         voterName: voterName || 'Зритель ' + (((store.votes || []).length) + 1),
-        allocations: allocations || {},
-        totalVotesGiven: totalVotesGiven || Object.values(allocations || {}).reduce((s, v) => s + (Number(v) || 0), 0),
+        allocations: cleanAllocations,
+        totalVotesGiven,
         isNational: Boolean(isNational),
         representative: representative || null,
-        sessionId: sessionId || store.votingState.sessionId,
+        sessionId: store.votingState.sessionId,
         userId: userId || null,
         userEmail: userEmail || null,
         userRole: userRole || 'user',
@@ -1538,17 +1620,18 @@ app.post('/api/vote', (req, res) => {
     
     const existingIdx = store.votes.findIndex(v => v.id === voteRecord.id);
     if (existingIdx >= 0) {
-        store.votes[existingIdx] = voteRecord;
+        // Уже существующий голос не перезаписываем (один голос на ID)
+        return res.status(409).json({ success: false, error: 'Голос уже учтён', voteId: voteRecord.id });
     } else {
         store.votes.push(voteRecord);
     }
 
     saveStore(store);
     broadcastState('vote_received');
-    res.json({ success: true, voteId: voteRecord.id, votes: store.votes });
+    res.json({ success: true, voteId: voteRecord.id, votes: publicState().votes });
 });
 
-app.delete('/api/votes/:id', (req, res) => {
+app.delete('/api/votes/:id', authenticateAdmin, (req, res) => {
     const { id } = req.params;
     if (!store.votes) store.votes = [];
     store.votes = store.votes.filter(v => v.id !== id);
@@ -1557,7 +1640,7 @@ app.delete('/api/votes/:id', (req, res) => {
     res.json({ success: true, votes: store.votes });
 });
 
-app.post('/api/votes/reset-all', (req, res) => {
+app.post('/api/votes/reset-all', authenticateAdmin, (req, res) => {
     store.votes = [];
     store.revealMode = false;
     saveStore(store);
@@ -1566,7 +1649,7 @@ app.post('/api/votes/reset-all', (req, res) => {
 });
 
 // Full state sync endpoint
-app.post('/api/sync', (req, res) => {
+app.post('/api/sync', authenticateAdmin, (req, res) => {
     const { news, contests, participants, calendarNotes, settings, votingState, votes } = req.body || {};
     if (Array.isArray(news) && news.length > 0) store.news = news;
     if (Array.isArray(contests) && contests.length > 0) store.contests = contests;

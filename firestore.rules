@@ -1,54 +1,163 @@
 rules_version = '2';
+
+// =============================================================
+// HariVision — правила доступа Firestore
+// Админ = пользователь Firebase Auth, для которого существует документ
+// /admins/{uid}. Такие документы создаются ВРУЧНУЮ в консоли Firebase.
+// =============================================================
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Votes collection - allow all devices to submit, read and sync votes
-    match /votes/{voteId} {
-      allow read, write: if true;
+
+    function signedIn() {
+      return request.auth != null;
     }
-    
-    // System document configuration and live voting state
-    match /system/{document=**} {
-      allow read, write: if true;
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
-    
-    // News articles and live emoji reactions
-    match /news/{document=**} {
-      allow read, write: if true;
+
+    function votingState() {
+      return get(/databases/$(database)/documents/system/voting_state).data;
     }
-    
-    // Contests archive and active season data
-    match /contests/{document=**} {
-      allow read, write: if true;
+
+    // Строка без HTML-символов (защита от XSS в админ-панели)
+    function safeStr(v, maxLen) {
+      return v == null || (v is string && v.size() <= maxLen && !v.matches('.*[<>].*'));
     }
-    
-    // Participants list
+
+    // ---------- Список администраторов (только чтение своего документа) ----------
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // ---------- Публичный контент: читают все, пишет только админ ----------
+    match /system/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /contests/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /participants/{document=**} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
-    // Calendar events (admin announcements, contests, events, holidays)
-    match /calendar/{document=**} {
-      allow read, write: if true;
+    match /calendar/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
-    // Users and artist accounts
-    match /users/{document=**} {
-      allow read, write: if true;
+    // Артисты: читаются всеми (нужно, чтобы артист не голосовал за свой номер).
+    // В этих документах НЕ должно быть паролей — см. tools/migrate-artist-passwords.mjs
+    match /artists/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
-    match /artists/{document=**} {
-      allow read, write: if true;
+    // ---------- Новости: зрители могут менять только счётчики реакций ----------
+    match /news/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+        && request.resource.data.reactions is map
+        && request.resource.data.reactions.size() <= 12;
     }
 
-    match /artistAccounts/{document=**} {
-      allow read, write: if true;
+    // ---------- Голоса ----------
+    // Один голос на аккаунт (uid) за сессию голосования:
+    //   vote_<sessionId>_<uid>       — зрительский
+    //   vote_<sessionId>_<uid>_nat   — национальный
+    // Изменять и удалять голоса может только админ.
+    function validNewVote(voteId) {
+      let d = request.resource.data;
+      let vs = votingState();
+      let baseId = 'vote_' + vs.sessionId + '_' + request.auth.uid;
+      return signedIn()
+        && vs.status == 'open'
+        && d.sessionId == vs.sessionId
+        && d.voterUid == request.auth.uid
+        && (voteId == baseId || voteId == baseId + '_nat')
+        && d.allocations is map
+        && d.allocations.size() >= 1
+        && d.allocations.size() <= 10
+        && safeStr(d.get('voterName', null), 80)
+        && safeStr(d.get('representative', null), 80)
+        && safeStr(d.get('artistName', null), 80)
+        && safeStr(d.get('userEmail', null), 120)
+        && safeStr(d.get('userRole', null), 20);
     }
 
-    // Web Push Subscriptions for background alerts
+    match /votes/{voteId} {
+      allow read: if true;
+      allow create: if isAdmin() || validNewVote(voteId);
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- Профили пользователей ----------
+    // Пользователь может создать/изменить только свой профиль и не может
+    // сам назначить себе роль артиста или админа.
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if isAdmin() || (
+        signedIn() && request.auth.uid == uid
+        && request.resource.data.get('role', 'user') == 'user'
+        && !request.resource.data.keys().hasAny(['password', 'isArtist', 'artistRole', 'is_artist', 'userType', 'type'])
+        && safeStr(request.resource.data.get('displayName', null), 80)
+        && safeStr(request.resource.data.get('login', null), 80)
+      );
+      allow update: if isAdmin() || (
+        signedIn() && request.auth.uid == uid
+        && !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['role', 'password', 'isArtist', 'artistRole', 'is_artist', 'userType', 'type'])
+        && safeStr(request.resource.data.get('displayName', null), 80)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ---------- artistAccounts: служебная коллекция ----------
+    //   broadcast_queue, calendar_store, cal_*, calendar_* — публичное чтение, запись админом
+    //   push_sub_*  — подписки на уведомления: устройство может записать/удалить свою,
+    //                 читать список может только админ (и сервер под админ-аккаунтом)
+    function isPushSubId(docId) {
+      return docId.matches('^push_sub_[0-9a-f]{32}$');
+    }
+
+    function validPushSub(docId) {
+      let d = request.resource.data;
+      return signedIn()
+        && isPushSubId(docId)
+        && d.type == 'push_sub'
+        && d.endpoint is string
+        && d.endpoint.matches('^https://.*')
+        && d.endpoint.size() < 1000
+        && d.get('keys', null) is map
+        && d.keys().hasOnly(['type', 'endpoint', 'keys', 'expirationTime', 'updatedAt', 'createdAt']);
+    }
+
+    match /artistAccounts/{docId} {
+      allow read: if isAdmin()
+        || docId == 'broadcast_queue'
+        || docId == 'calendar_store'
+        || docId.matches('^(cal_|calendar_).*');
+      allow write: if isAdmin();
+      allow create, update: if validPushSub(docId);
+      allow delete: if signedIn() && isPushSubId(docId);
+    }
+
     match /pushSubscriptions/{document=**} {
-      allow read, write: if true;
+      allow read, write: if isAdmin();
+    }
+
+    // Всё остальное закрыто
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
-

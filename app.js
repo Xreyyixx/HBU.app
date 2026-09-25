@@ -26,7 +26,8 @@ import {
     saveAdminCalendarNote,
     deleteAdminCalendarNote,
     isAdminUser,
-    loginAdminServer
+    loginAdminServer,
+    loginAdminFirebase
 } from './data-service.js';
 
 // Состояние редактирования официальных событий админа
@@ -2492,19 +2493,18 @@ window.promptAdminUnlockForCalendar = async function(dateStr, noteId = null) {
         return;
     }
 
-    const password = prompt('Вход администратора HariVision.\nВведите пароль администратора:');
+    const email = prompt('Вход администратора HariVision.\nВведите email администратора:');
+    if (!email) return;
+    const password = prompt('Введите пароль администратора:');
     if (!password) return;
 
     try {
-        const res = await loginAdminServer('admin', password);
-        if (res && res.token) {
-            localStorage.setItem('harivision_admin_token', res.token);
-            showToast('✓ Вход администратора выполнен');
-            window.startEditAdminEvent(dateStr, noteId);
-            renderMainView();
-        }
+        await loginAdminFirebase(email, password);
+        showToast('✓ Вход администратора выполнен');
+        window.startEditAdminEvent(dateStr, noteId);
+        renderMainView();
     } catch (e) {
-        showToast('✕ Неверный пароль администратора');
+        showToast('✕ Неверный email/пароль или нет прав администратора');
     }
 };
 
