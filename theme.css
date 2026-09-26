@@ -1,8 +1,7 @@
 /* =======================================================================
    HariVision / HBU — общий слой дизайн-токенов поверх Tailwind CDN.
-   Только визуальные усиления: палитра (тёмный винно-чёрный + янтарь/золото)
-   и символика (heart-poly значок) не меняются, только углубляются.
-   Подключается и на index.html, и на admin.html.
+   Палитра (тёмный винно-чёрный + янтарь/золото + акцент розово-бордовый)
+   не меняется — только углубляется. Подключается на index.html и admin.html.
    ======================================================================= */
 
 :root {
@@ -15,17 +14,33 @@
     --hbu-rose-500: #f43f5e;
 }
 
-/* ---------- Типографика: заголовки получают характер "эфирного" бренда ---------- */
-@media (min-width: 0px) {
-    h1, h2, h3,
-    .hbu-display {
-        font-family: 'Bebas Neue', 'Inter', sans-serif;
-        letter-spacing: 0.02em;
-        font-weight: 400 !important;
-    }
+/* ---------- Витринный шрифт: элегантный serif ТОЛЬКО для крупных заголовков ----------
+   Применяем ко всем заголовкам сайта разом (h1–h3 + .hbu-display), чтобы
+   не оставалось "обычных" системных заголовков вперемешку со стильными.
+   ВАЖНО: шрифт обязан поддерживать кириллицу — большинство заголовков на
+   сайте русскоязычные (иначе браузер молча откатывается на Inter). */
+h1, h2, h3,
+.hbu-display {
+    font-family: 'Playfair Display', 'Inter', serif;
+    font-weight: 700;
+    font-style: normal;
+    letter-spacing: -0.005em;
+}
+.hbu-display {
+    font-weight: 700;
+}
+.hbu-display-italic {
+    font-family: 'Playfair Display', 'Inter', serif;
+    font-weight: 600;
+    font-style: italic;
+}
+/* Мелкий "эйнбрау"-лейбл над заголовками: собранный, редкий трекинг */
+.hbu-eyebrow {
+    font-family: 'Inter', sans-serif;
+    letter-spacing: 0.28em;
 }
 
-/* ---------- Глубина фона: мягкий виньетаж + тёплые засветки по углам ---------- */
+/* ---------- Глубина фона: работает там, где нет canvas-подложки (напр. admin.html) ---------- */
 body {
     position: relative;
     background:
@@ -36,20 +51,20 @@ body {
     background-attachment: fixed;
 }
 
-/* ---------- Тонкая киношная зернистость поверх фона (без блокировки кликов) ---------- */
+/* ---------- Тонкая киношная зернистость поверх фона (выше canvas, ниже контента) ---------- */
 body::before {
     content: "";
     position: fixed;
     inset: 0;
     z-index: 1;
     pointer-events: none;
-    opacity: 0.035;
+    opacity: 0.05;
     mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
     background-size: 180px 180px;
 }
 
-/* ---------- Логотип-значок: мягкое пульсирующее свечение вокруг сердца-кристалла ---------- */
+/* ---------- Логотип-значок: мягкое пульсирующее свечение вокруг символа ---------- */
 .logo-badge {
     position: relative;
     isolation: isolate;
@@ -73,7 +88,7 @@ body::before {
     filter: drop-shadow(0 2px 10px rgba(245, 158, 11, 0.55));
 }
 
-/* ---------- Аврора-подложка для героя/акцентных панелей (класс-обёртка) ---------- */
+/* ---------- Аврора-подложка + тонкий градиентный кант для акцентных панелей ---------- */
 .hbu-aurora {
     position: relative;
     isolation: isolate;
@@ -85,9 +100,9 @@ body::before {
     z-index: -1;
     border-radius: inherit;
     background:
-        radial-gradient(480px 280px at 8% 0%, rgba(245, 158, 11, 0.22), transparent 65%),
-        radial-gradient(420px 320px at 100% 100%, rgba(244, 63, 94, 0.16), transparent 60%);
-    opacity: 0.9;
+        radial-gradient(560px 340px at 8% 0%, rgba(245, 158, 11, 0.24), transparent 65%),
+        radial-gradient(480px 360px at 100% 100%, rgba(244, 63, 94, 0.17), transparent 60%);
+    opacity: 0.95;
 }
 .hbu-aurora::after {
     content: "";
@@ -96,10 +111,19 @@ body::before {
     z-index: -1;
     border-radius: inherit;
     padding: 1px;
-    background: linear-gradient(135deg, rgba(251, 191, 36, 0.55), rgba(217, 119, 6, 0.05) 35%, rgba(244, 63, 94, 0.18) 100%);
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.6), rgba(217, 119, 6, 0.05) 35%, rgba(244, 63, 94, 0.2) 100%);
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
+}
+
+/* ---------- Золотой градиентный текст для витринных заголовков ---------- */
+.hbu-gold-text {
+    background: linear-gradient(100deg, #fff7e0 0%, #fde68a 22%, #f59e0b 50%, #fbbf24 68%, #fff2cc 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 2px 30px rgba(245, 158, 11, 0.25);
 }
 
 /* ---------- Кнопки со "световым бликом" на hover ---------- */
@@ -129,7 +153,7 @@ body::before {
     width: 22px;
     height: 22px;
     pointer-events: none;
-    opacity: 0.55;
+    opacity: 0.6;
 }
 .hbu-corner svg { width: 100%; height: 100%; }
 

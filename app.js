@@ -212,19 +212,73 @@ function resetAllocations() {
 }
 resetAllocations();
 
-// Фоновая анимация (Янтарные искры)
+// Фоновая сцена (мягкие прожекторы + янтарные искры + блики-звёзды + шёлковые ленты)
 const canvas = document.getElementById('bg-canvas');
 const ctx = canvas ? canvas.getContext('2d') : null;
+const ctxSupportsFilter = Boolean(ctx && 'filter' in ctx);
 let embers = [];
+let glowOrbs = [];
+let twinkles = [];
+let silkRibbons = [];
+let bgBaseGradient = null;
+let bgTime = 0;
+
+function buildBaseGradient() {
+    if (!ctx || !canvas) return;
+    const w = canvas.width, h = canvas.height;
+    bgBaseGradient = ctx.createRadialGradient(w * 0.5, h * 0.4, 40, w * 0.5, h * 0.5, Math.max(w, h) * 0.85);
+    bgBaseGradient.addColorStop(0, '#0f070a');
+    bgBaseGradient.addColorStop(0.45, '#0a0306');
+    bgBaseGradient.addColorStop(0.8, '#050203');
+    bgBaseGradient.addColorStop(1, '#010101');
+}
 
 function resizeCanvas() {
     if (!canvas) return;
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    buildBaseGradient();
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
+// Крупные мягкие прожекторы (боке): дают фону глубину вместо плоской заливки
+class GlowOrb {
+    constructor() { this.reset(true); }
+    reset(initial) {
+        if (!canvas) return;
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.baseR = Math.random() * 180 + 140;
+        this.speedX = (Math.random() - 0.5) * 0.1;
+        this.speedY = (Math.random() - 0.5) * 0.08;
+        this.alpha = Math.random() * 0.045 + 0.025;
+        this.phase = Math.random() * Math.PI * 2;
+        // Палитра прожекторов: янтарь/золото доминирует, редкий винно-розовый акцент
+        const roll = Math.random();
+        this.color = roll > 0.72 ? '244, 63, 94' : (roll > 0.4 ? '245, 158, 11' : '251, 191, 36');
+        if (!initial) { this.x = Math.random() * canvas.width; this.y = canvas.height + this.baseR; }
+    }
+    update() {
+        this.phase += 0.004;
+        this.x += this.speedX;
+        this.y += this.speedY;
+        if (this.x < -this.baseR || this.x > canvas.width + this.baseR || this.y < -this.baseR || this.y > canvas.height + this.baseR) this.reset(true);
+    }
+    draw() {
+        if (!ctx) return;
+        const r = this.baseR * (1 + Math.sin(this.phase) * 0.06);
+        const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r);
+        g.addColorStop(0, `rgba(${this.color}, ${this.alpha})`);
+        g.addColorStop(1, `rgba(${this.color}, 0)`);
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// Янтарные искры, поднимающиеся вверх (символика "тлеющих огней" сцены)
 class AutumnEmber {
     constructor() {
         this.reset();
@@ -234,10 +288,10 @@ class AutumnEmber {
         if (!canvas) return;
         this.x = Math.random() * canvas.width;
         this.y = canvas.height + 20;
-        this.size = Math.random() * 2.5 + 0.8;
+        this.size = Math.random() * 2.2 + 0.7;
         this.speedY = Math.random() * 0.6 + 0.2;
         this.speedX = (Math.random() - 0.5) * 0.4;
-        this.alpha = Math.random() * 0.5 + 0.2;
+        this.alpha = Math.random() * 0.4 + 0.15;
         this.hue = Math.random() > 0.5 ? 28 : (Math.random() > 0.5 ? 345 : 12);
     }
     update() {
@@ -260,16 +314,118 @@ class AutumnEmber {
     }
 }
 
+// Редкие блики-звёздочки (перекликаются с искрами-уголками hbu-corner в разметке)
+class Twinkle {
+    constructor() { this.reset(); this.life = Math.random(); }
+    reset() {
+        if (!canvas) return;
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height * 0.9;
+        this.size = Math.random() * 2.2 + 1.4;
+        this.speed = Math.random() * 0.012 + 0.006;
+        this.life = 0;
+    }
+    update() {
+        this.life += this.speed;
+        if (this.life >= 1) this.reset();
+    }
+    draw() {
+        if (!ctx) return;
+        const a = Math.sin(this.life * Math.PI);
+        if (a <= 0.02) return;
+        ctx.save();
+        ctx.globalAlpha = a * 0.5;
+        ctx.strokeStyle = '#fde68a';
+        ctx.lineWidth = 1;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = '#fbbf24';
+        const s = this.size * 3;
+        ctx.beginPath();
+        ctx.moveTo(this.x - s, this.y); ctx.lineTo(this.x + s, this.y);
+        ctx.moveTo(this.x, this.y - s); ctx.lineTo(this.x, this.y + s);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// Летящие шёлковые ленты (золото / бордо / оранжевый) — далеко на заднем плане,
+// очень низкая непрозрачность и размытие, чтобы не перетягивать внимание с контента.
+class SilkRibbon {
+    constructor(colorRGB, laneFrac) {
+        this.color = colorRGB;
+        this.seed = Math.random() * 1000;
+        this.laneFrac = laneFrac; // примерная вертикальная "полоса" для ленты
+        this.speed = 0.00006 + Math.random() * 0.00004;
+        this.ampFrac = 0.08 + Math.random() * 0.05;
+        this.widthPeak = 70 + Math.random() * 40;
+        this.alpha = 0.13 + Math.random() * 0.05;
+        this.dir = Math.random() > 0.5 ? 1 : -1;
+        this.segments = 34;
+    }
+    draw(time, w, h) {
+        if (!ctx) return;
+        const spanX = w * 1.5;
+        const startX = ((time * this.speed * this.dir * spanX) % (spanX + w)) - spanX * 0.5 - w * 0.25;
+        const baseY = h * this.laneFrac;
+        const ampY = h * this.ampFrac;
+        const pts = [];
+        for (let i = 0; i <= this.segments; i++) {
+            const t = i / this.segments;
+            const x = startX + t * spanX;
+            const y = baseY
+                + Math.sin(t * Math.PI * 2.4 + this.seed + time * 0.00025) * ampY
+                + Math.sin(t * Math.PI * 0.8 + time * 0.00012 + this.seed) * ampY * 0.45;
+            const widthT = this.widthPeak * Math.pow(Math.sin(Math.PI * t), 1.4);
+            pts.push({ x, y, width: Math.max(0, widthT) });
+        }
+        ctx.save();
+        if (ctxSupportsFilter) ctx.filter = 'blur(22px)';
+        ctx.strokeStyle = `rgba(${this.color}, ${this.alpha})`;
+        ctx.lineCap = 'round';
+        for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i], b = pts[i + 1];
+            if (a.width < 0.6 && b.width < 0.6) continue;
+            ctx.lineWidth = (a.width + b.width) / 2;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+}
+
 if (canvas && ctx) {
-    for (let i = 0; i < 45; i++) embers.push(new AutumnEmber());
+    for (let i = 0; i < 42; i++) embers.push(new AutumnEmber());
+    for (let i = 0; i < 6; i++) glowOrbs.push(new GlowOrb());
+    for (let i = 0; i < 9; i++) twinkles.push(new Twinkle());
+    // Три ленты: янтарно-золотая, бордовая, тёплая оранжевая — каждая в своей полосе экрана
+    silkRibbons.push(new SilkRibbon('245, 158, 11', 0.18));
+    silkRibbons.push(new SilkRibbon('136, 19, 55', 0.55));
+    silkRibbons.push(new SilkRibbon('234, 88, 12', 0.85));
+
     function animateBg() {
-        const grad = ctx.createRadialGradient(canvas.width/2, canvas.height/2, 50, canvas.width/2, canvas.height/2, canvas.width);
-        grad.addColorStop(0, '#120408');
-        grad.addColorStop(0.6, '#080204');
-        grad.addColorStop(1, '#030102');
-        ctx.fillStyle = grad;
+        bgTime += 16;
+        if (!bgBaseGradient) buildBaseGradient();
+        ctx.fillStyle = bgBaseGradient;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        silkRibbons.forEach(r => r.draw(bgTime, canvas.width, canvas.height));
+
+        ctx.globalCompositeOperation = 'lighter';
+        glowOrbs.forEach(o => { o.update(); o.draw(); });
+        ctx.globalCompositeOperation = 'source-over';
+
+        twinkles.forEach(t => { t.update(); t.draw(); });
         embers.forEach(e => { e.update(); e.draw(); });
+
+        // Мягкий виньетаж по краям для кинематографичной глубины
+        const vg = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, canvas.height * 0.3, canvas.width / 2, canvas.height / 2, canvas.height * 0.9);
+        vg.addColorStop(0, 'rgba(0,0,0,0)');
+        vg.addColorStop(1, 'rgba(0,0,0,0.65)');
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
         requestAnimationFrame(animateBg);
     }
     animateBg();
@@ -948,7 +1104,7 @@ function getHomeHTML() {
                         ${hasContest && featuredContest.date ? `<span class="text-xs text-slate-400 font-mono">${featuredContest.date}</span>` : ''}
                     </div>
 
-                    <h1 class="text-4xl md:text-6xl uppercase tracking-wide leading-[0.95] bg-gradient-to-br from-white via-white to-amber-200 bg-clip-text text-transparent drop-shadow-[0_2px_20px_rgba(245,158,11,0.25)]">
+                    <h1 class="hbu-display hbu-gold-text text-4xl md:text-6xl leading-[1.05]">
                         ${hasContest ? (featuredContest.title || 'HariVision Contest') : 'HariVision Public Vote'}
                     </h1>
 
@@ -1002,8 +1158,8 @@ function getHomeHTML() {
             <div class="flex flex-col gap-6">
                 <div class="flex items-center justify-between border-b border-amber-500/20 pb-4">
                     <div>
-                        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Официальный вестник</div>
-                        <h2 class="text-xl md:text-2xl font-black text-white uppercase tracking-wide">Последние новости</h2>
+                        <div class="hbu-eyebrow text-[10px] font-bold text-amber-400 uppercase">Официальный вестник</div>
+                        <h2 class="hbu-display text-2xl md:text-3xl text-white">Последние новости</h2>
                     </div>
                     <button onclick="navigateToView('news')" class="text-xs font-bold uppercase tracking-wider text-amber-400 hover:text-white transition flex items-center gap-1">
                         <span>Все новости</span>
