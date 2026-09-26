@@ -215,7 +215,6 @@ resetAllocations();
 // Фоновая сцена (мягкие прожекторы + янтарные искры + блики-звёзды + шёлковые ленты)
 const canvas = document.getElementById('bg-canvas');
 const ctx = canvas ? canvas.getContext('2d') : null;
-const ctxSupportsFilter = Boolean(ctx && 'filter' in ctx);
 let embers = [];
 let glowOrbs = [];
 let twinkles = [];
@@ -349,24 +348,65 @@ class Twinkle {
 }
 
 // Летящие шёлковые ленты (золото / бордо / оранжевый) — далеко на заднем плане,
-// очень низкая непрозрачность и размытие, чтобы не перетягивать внимание с контента.
+// очень низкая непрозрачность, чтобы не перетягивать внимание с контента.
+//
+// Важно: НЕ используем ctx.filter='blur(...)' — на iOS/Safari фильтр блюрит
+// каждый нарисованный кусок пути ОТДЕЛЬНО (а не итоговую картинку), из-за чего
+// лента из множества сегментов превращается в россыпь кружков; а на Android
+// множественные вызовы blur-фильтра за кадр очень дорогие и вызывают лаги.
+// Вместо этого строим ОДИН сплошной залитый полигон (одна операция fill())
+// и имитируем мягкий край второй, более широкой и прозрачной копией того же
+// полигона позади — дёшево и одинаково выглядит на всех платформах.
 class SilkRibbon {
     constructor(colorRGB, laneFrac) {
         this.color = colorRGB;
         this.seed = Math.random() * 1000;
-        this.laneFrac = laneFrac; // примерная вертикальная "полоса" для ленты
-        this.speed = 0.00006 + Math.random() * 0.00004;
-        this.ampFrac = 0.08 + Math.random() * 0.05;
-        this.widthPeak = 70 + Math.random() * 40;
-        this.alpha = 0.13 + Math.random() * 0.05;
+        this.laneFrac = laneFrac; // центр "блуждания" ленты по вертикали (0..1 высоты)
+        this.speed = 0.00012 + Math.random() * 0.00006;
+        this.ampFrac = 0.1 + Math.random() * 0.06;
+        // Медленное вертикальное блуждание в широком диапазоне — без него лента навсегда
+        // застревает в одной горизонтальной полосе и почти всегда прячется за карточками.
+        this.vRangeFrac = 0.32 + Math.random() * 0.1;
+        this.vSpeed = 0.00003 + Math.random() * 0.00002;
+        this.widthPeak = 170 + Math.random() * 90;
+        this.alpha = 0.22 + Math.random() * 0.07;
         this.dir = Math.random() > 0.5 ? 1 : -1;
-        this.segments = 34;
+        this.segments = 22;
+    }
+    // Строит замкнутый путь ленты (верхняя граница слева-направо, нижняя — обратно)
+    // с заданным множителем ширины, и один раз заливает его.
+    buildAndFill(pts, widthMul, alpha) {
+        const n = pts.length;
+        const upper = new Array(n), lower = new Array(n);
+        for (let i = 0; i < n; i++) {
+            const prev = pts[Math.max(0, i - 1)];
+            const next = pts[Math.min(n - 1, i + 1)];
+            let tx = next.x - prev.x, ty = next.y - prev.y;
+            const len = Math.hypot(tx, ty) || 1;
+            tx /= len; ty /= len;
+            // нормаль = перпендикуляр к касательной
+            const nx = -ty, ny = tx;
+            const halfW = (pts[i].width * widthMul) / 2;
+            upper[i] = { x: pts[i].x + nx * halfW, y: pts[i].y + ny * halfW };
+            lower[i] = { x: pts[i].x - nx * halfW, y: pts[i].y - ny * halfW };
+        }
+        ctx.beginPath();
+        ctx.moveTo(upper[0].x, upper[0].y);
+        for (let i = 1; i < n; i++) ctx.lineTo(upper[i].x, upper[i].y);
+        for (let i = n - 1; i >= 0; i--) ctx.lineTo(lower[i].x, lower[i].y);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(${this.color}, ${alpha})`;
+        ctx.fill();
     }
     draw(time, w, h) {
         if (!ctx) return;
         const spanX = w * 1.5;
-        const startX = ((time * this.speed * this.dir * spanX) % (spanX + w)) - spanX * 0.5 - w * 0.25;
-        const baseY = h * this.laneFrac;
+        // Двойной модуль — чтобы корректно "заворачивать" и при отрицательном dir
+        // (JS-остаток от деления для отрицательных чисел иначе даёт рывки).
+        const cycle = spanX + w;
+        const raw = (time * this.speed * this.dir * spanX) % cycle;
+        const startX = ((raw + cycle) % cycle) - spanX * 0.5 - w * 0.25;
+        const baseY = h * (this.laneFrac + Math.sin(time * this.vSpeed + this.seed) * this.vRangeFrac);
         const ampY = h * this.ampFrac;
         const pts = [];
         for (let i = 0; i <= this.segments; i++) {
@@ -378,20 +418,9 @@ class SilkRibbon {
             const widthT = this.widthPeak * Math.pow(Math.sin(Math.PI * t), 1.4);
             pts.push({ x, y, width: Math.max(0, widthT) });
         }
-        ctx.save();
-        if (ctxSupportsFilter) ctx.filter = 'blur(22px)';
-        ctx.strokeStyle = `rgba(${this.color}, ${this.alpha})`;
-        ctx.lineCap = 'round';
-        for (let i = 0; i < pts.length - 1; i++) {
-            const a = pts[i], b = pts[i + 1];
-            if (a.width < 0.6 && b.width < 0.6) continue;
-            ctx.lineWidth = (a.width + b.width) / 2;
-            ctx.beginPath();
-            ctx.moveTo(a.x, a.y);
-            ctx.lineTo(b.x, b.y);
-            ctx.stroke();
-        }
-        ctx.restore();
+        // Широкий мягкий ореол позади + более узкое плотное ядро поверх — имитация размытия без filter
+        this.buildAndFill(pts, 2.2, this.alpha * 0.35);
+        this.buildAndFill(pts, 1, this.alpha);
     }
 }
 
@@ -400,9 +429,9 @@ if (canvas && ctx) {
     for (let i = 0; i < 6; i++) glowOrbs.push(new GlowOrb());
     for (let i = 0; i < 9; i++) twinkles.push(new Twinkle());
     // Три ленты: янтарно-золотая, бордовая, тёплая оранжевая — каждая в своей полосе экрана
-    silkRibbons.push(new SilkRibbon('245, 158, 11', 0.18));
-    silkRibbons.push(new SilkRibbon('136, 19, 55', 0.55));
-    silkRibbons.push(new SilkRibbon('234, 88, 12', 0.85));
+    silkRibbons.push(new SilkRibbon('245, 158, 11', 0.3));
+    silkRibbons.push(new SilkRibbon('136, 19, 55', 0.5));
+    silkRibbons.push(new SilkRibbon('234, 88, 12', 0.7));
 
     function animateBg() {
         bgTime += 16;
@@ -3058,6 +3087,16 @@ let lastRenderedContentHash = '';
 let isInitialStateLoad = true;
 let prevNewsCount = null;
 let prevRevealMode = false;
+// Приложение подписано на НЕСКОЛЬКО параллельных источников состояния (SSE-канал сервера
+// и прямые слушатели Firestore для разных коллекций). При холодном запуске (особенно PWA
+// с домашнего экрана) subscribeState() сперва отдаёт закэшированный в localStorage снимок,
+// а через мгновение — уже свежие данные с сервера/Firestore. Раньше это читалось как
+// "количество новостей выросло" и слало пользователю дублирующее уведомление о последней
+// новости, хотя реальный Push для неё уже был доставлен раньше отдельным каналом.
+// Поэтому не шлём локальные "догоняющие" уведомления, пока начальная синхронизация не
+// устоится (первые несколько секунд после запуска).
+const APP_BOOT_TIME = Date.now();
+const NOTIFY_GRACE_MS = 6000;
 
 subscribeState((state) => {
     const prevStatus = systemState.status;
@@ -3080,7 +3119,7 @@ subscribeState((state) => {
     }
 
     // Системные уведомления при изменении статуса и публикации новостей
-    if (!isInitialStateLoad && isNotificationsEnabled()) {
+    if (!isInitialStateLoad && isNotificationsEnabled() && (Date.now() - APP_BOOT_TIME > NOTIFY_GRACE_MS)) {
         // 1. Старт или закрытие голосования
         if (prevStatus && prevStatus !== newVotingState.status) {
             if (newVotingState.status === 'open') {

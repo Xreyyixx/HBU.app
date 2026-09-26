@@ -1827,14 +1827,26 @@ window.refreshAdminPushSubscribers = async function() {
         } catch (e) {}
 
         if (count === 0) {
+            // Правила Firestore разрешают листинг artistAccounts (где лежат push_sub_*)
+            // только администратору — без ID-токена этот запрос всегда вернёт 0 / 403,
+            // поэтому обязательно прикладываем Bearer-токен текущего вошедшего админа.
             try {
-                const fsRes = await fetch('https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/artistAccounts?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw&pageSize=300');
-                if (fsRes.ok) {
-                    const fsData = await fsRes.json();
-                    const subs = (fsData.documents || []).filter(d => d.fields?.type?.stringValue === 'push_sub');
-                    if (subs.length > 0) count = subs.length;
+                if (auth && auth.currentUser && !auth.currentUser.isAnonymous) {
+                    const idToken = await auth.currentUser.getIdToken();
+                    const fsRes = await fetch('https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/artistAccounts?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw&pageSize=300', {
+                        headers: { 'Authorization': `Bearer ${idToken}` }
+                    });
+                    if (fsRes.ok) {
+                        const fsData = await fsRes.json();
+                        const subs = (fsData.documents || []).filter(d => d.fields?.type?.stringValue === 'push_sub');
+                        if (subs.length > 0) count = subs.length;
+                    } else {
+                        console.warn('[Push] Firestore fallback listing denied:', fsRes.status);
+                    }
                 }
-            } catch (e2) {}
+            } catch (e2) {
+                console.warn('[Push] Firestore fallback error:', e2);
+            }
         }
 
         const badge = document.getElementById('admin-push-subscribers-badge');
