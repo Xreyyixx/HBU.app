@@ -855,6 +855,15 @@ function getHeartSVG(extraClass = "w-10 h-10") {
     `;
 }
 
+// Декоративная искра для углов премиальных карточек (наследует символику бренда)
+function getSparkleSVG() {
+    return `
+        <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 2 L13.6 9.2 L21 12 L13.6 14.8 L12 22 L10.4 14.8 L3 12 L10.4 9.2 Z" fill="currentColor" opacity="0.55" />
+        </svg>
+    `;
+}
+
 // -------------------------------------------------------------
 // РЕНДЕР ГЛАВНОГО КОНТЕЙНЕРА И СТРАНИЦ
 // -------------------------------------------------------------
@@ -927,17 +936,19 @@ function getHomeHTML() {
     return `
         <div class="flex flex-col gap-10 page-fade">
             <!-- Главный интерактивный баннер выбранного сезона -->
-            <div class="relative rounded-3xl overflow-hidden border border-amber-500/30 bg-gradient-to-br from-[#1c080f] via-[#100307] to-[#060204] p-8 md:p-12 shadow-[0_10px_40px_rgba(245,158,11,0.15)] flex flex-col md:flex-row items-center justify-between gap-8">
+            <div class="hbu-aurora relative rounded-3xl overflow-hidden border border-amber-500/30 bg-gradient-to-br from-[#1c080f] via-[#100307] to-[#060204] p-8 md:p-12 shadow-[0_10px_40px_rgba(245,158,11,0.15)] flex flex-col md:flex-row items-center justify-between gap-8">
+                <div class="hbu-corner top-4 left-4 text-amber-400">${getSparkleSVG()}</div>
+                <div class="hbu-corner bottom-4 right-4 text-amber-400 rotate-180">${getSparkleSVG()}</div>
                 <div class="flex-1 flex flex-col items-start gap-4 z-10">
                     <div class="flex items-center gap-2">
                         <span class="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold uppercase rounded-full tracking-widest flex items-center gap-1.5">
-                            ${hasContest ? (isLive ? `<span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span><span>Прямой эфир</span>` : 
+                            ${hasContest ? (isLive ? `<span class="w-2 h-2 rounded-full bg-red-500 animate-ping"></span><span>Прямой эфир</span>` :
                               (isCompleted ? `<span>🏆</span><span>${fId === 'auto' ? 'Последний завершённый конкурс' : 'Официальный сезон'}</span>` : `<span>⏳</span><span>Предстоящий выпуск</span>`)) : `<span>✨</span><span>HariVision Portal</span>`}
                         </span>
                         ${hasContest && featuredContest.date ? `<span class="text-xs text-slate-400 font-mono">${featuredContest.date}</span>` : ''}
                     </div>
 
-                    <h1 class="text-3xl md:text-5xl font-black text-white uppercase tracking-tight leading-tight">
+                    <h1 class="text-4xl md:text-6xl uppercase tracking-wide leading-[0.95] bg-gradient-to-br from-white via-white to-amber-200 bg-clip-text text-transparent drop-shadow-[0_2px_20px_rgba(245,158,11,0.25)]">
                         ${hasContest ? (featuredContest.title || 'HariVision Contest') : 'HariVision Public Vote'}
                     </h1>
 
@@ -957,7 +968,7 @@ function getHomeHTML() {
                     ` : ''}
 
                     <div class="flex flex-wrap items-center gap-3 pt-2">
-                        <button onclick="navigateToView('voting')" class="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-widest shadow-xl hover:scale-105 transition flex items-center gap-2">
+                        <button onclick="navigateToView('voting')" class="hbu-shine px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-widest shadow-xl hover:scale-105 transition flex items-center gap-2">
                             <span>🗳️</span>
                             <span>Перейти к голосованию</span>
                         </button>
@@ -976,8 +987,8 @@ function getHomeHTML() {
                     </div>
                 </div>
 
-                <div class="w-full md:w-80 flex flex-col items-center justify-center p-6 bg-[#0a0305]/80 border border-amber-500/20 rounded-2xl backdrop-blur-md text-center">
-                    <div class="mb-4">${getHeartSVG("w-16 h-16")}</div>
+                <div class="w-full md:w-80 flex flex-col items-center justify-center p-6 bg-[#0a0305]/80 border border-amber-500/20 rounded-2xl backdrop-blur-md text-center shadow-[0_0_0_1px_rgba(245,158,11,0.05),0_20px_50px_-15px_rgba(0,0,0,0.7)]">
+                    <div class="logo-badge rounded-full mb-4">${getHeartSVG("w-16 h-16")}</div>
                     <div class="text-xs font-bold text-amber-400 uppercase tracking-widest mb-1">${hasContest ? 'Город проведения' : 'Статус платформы'}</div>
                     <div class="text-base font-black text-white uppercase mb-2">${hasContest ? (featuredContest.hostCity || 'TBD') : 'HBU Live Hub'}</div>
                     <div class="text-[11px] text-slate-300 mb-3">${hasContest ? ('Арена: ' + (featuredContest.venue || 'TBD')) : 'Система готова к приёму голосов'}</div>
