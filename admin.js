@@ -346,17 +346,21 @@ if (confirmSubmitBtn) {
 // УВЕДОМЛЕНИЯ (TOAST)
 // -------------------------------------------------------------
 function showToast(message, isError = false) {
-    const container = document.getElementById('toast-container');
+    // Пишем в ГЛОБАЛЬНЫЙ контейнер (виден на любой вкладке), а не в toast-container
+    // внутри вкладки Voting — тот скрыт классом .hidden на всех остальных вкладках.
+    const container = document.getElementById('global-toast-container');
     if (!container) return;
-    container.innerHTML = `
-        <div class="text-[11px] font-bold px-3 py-1 rounded-lg ${isError ? 'bg-rose-950/80 text-rose-300 border border-rose-500/30' : 'bg-green-950/80 text-green-300 border border-green-500/30'} flex items-center gap-1.5 animate-bounce">
-            <span>${isError ? '⚠️' : '✓'}</span>
-            <span>${message}</span>
-        </div>
-    `;
+    const el = document.createElement('div');
+    el.className = `pointer-events-auto shadow-2xl text-xs font-bold px-4 py-3 rounded-2xl border page-fade ${isError ? 'bg-rose-950/95 text-rose-200 border-rose-500/40' : 'bg-[#101d14]/95 text-green-200 border-green-500/40'} flex items-start gap-2`;
+    el.innerHTML = `<span class="text-sm leading-none">${isError ? '⚠️' : '✓'}</span><span class="leading-snug">${message}</span>`;
+    container.appendChild(el);
+    // Ошибки держим дольше (в них полезная диагностическая информация, которую нужно успеть прочитать)
+    const life = isError ? 9000 : 4500;
     setTimeout(() => {
-        if (container.innerHTML.includes(message)) container.innerHTML = '';
-    }, 4000);
+        el.style.transition = 'opacity 0.3s ease';
+        el.style.opacity = '0';
+        setTimeout(() => el.remove(), 300);
+    }, life);
 }
 
 // -------------------------------------------------------------

@@ -55,7 +55,14 @@
     </style>
 </head>
 <body class="p-3 sm:p-6 md:p-10 min-h-screen select-none relative text-slate-100">
-    
+
+    <!-- Глобальный тост-контейнер: всегда поверх всего, видим на ЛЮБОЙ вкладке админки.
+         Раньше showToast() писал в #toast-container внутри вкладки "Voting" — если админ
+         находился на другой вкладке (например "Уведомления"), этот блок был скрыт классом
+         .hidden родительской секции, и сообщение рендерилось, но было физически невидимо
+         ("нажал кнопку — ничего не показало"). -->
+    <div id="global-toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none w-full max-w-md px-3"></div>
+
     <!-- Форма входа -->
     <div id="auth-panel" class="max-w-md mx-auto my-16 bg-[#0d0408] border border-amber-500/25 p-8 sm:p-10 shadow-2xl rounded-3xl page-fade">
         <div class="flex items-center justify-center gap-2.5 mb-4">
