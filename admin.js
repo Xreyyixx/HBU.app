@@ -155,6 +155,14 @@ function setAdminAuthenticated(authenticated) {
         if (activeAdminTab === 'admins') {
             loadAdminSessions();
         }
+        // Счётчик подписчиков нужно обновлять ПОСЛЕ логина, не раньше: запрос к Firestore
+        // за списком подписок требует auth.currentUser (см. refreshAdminPushSubscribers),
+        // а до входа его ещё нет. Раньше это дёргалось один раз по таймеру сразу при
+        // открытии страницы (см. ниже) — то есть ДО того, как вы успевали залогиниться —
+        // получало 0 и больше никогда не пересчитывалось.
+        if (typeof window.refreshAdminPushSubscribers === 'function') {
+            window.refreshAdminPushSubscribers();
+        }
     } else {
         authPanel.classList.remove('hidden');
         dashboard.classList.add('hidden');
@@ -387,6 +395,8 @@ window.switchAdminTab = function(tabName) {
         renderAdminCalendar();
     } else if (tabName === 'admins') {
         loadAdminSessions();
+    } else if (tabName === 'notifications' && typeof window.refreshAdminPushSubscribers === 'function') {
+        window.refreshAdminPushSubscribers();
     }
 };
 
@@ -1989,12 +1999,10 @@ if (typeof window !== 'undefined' && window.location.search.includes('autoSubscr
     });
 }
 
-// Загружаем число подписчиков при инициализации
-setTimeout(() => {
-    if (typeof window.refreshAdminPushSubscribers === 'function') {
-        window.refreshAdminPushSubscribers();
-    }
-}, 1000);
+// Примечание: раньше здесь был безусловный setTimeout(..., 1000), вызывавший
+// refreshAdminPushSubscribers() сразу при загрузке страницы — то есть ДО входа в
+// систему, когда auth.currentUser ещё пуст. Теперь актуальный счётчик запрашивается
+// из setAdminAuthenticated(true) сразу после успешного логина (см. выше по файлу).
 
 window.handleAdminBroadcastSubmit = async function(event) {
     if (event) event.preventDefault();
