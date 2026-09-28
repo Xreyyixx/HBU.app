@@ -714,7 +714,8 @@ function broadcastState(type = 'update') {
 // Отправка Web Push уведомлений всем подписчикам (доставляется даже при закрытом сайте/приложении)
 async function sendPushNotificationToAll({ title, body, url = '/', tag = null }, skipSync = false) {
     if (!PUSH_ENABLED) {
-        return { total: (store.pushSubscriptions || []).length, sent: 0 };
+        console.warn('[WebPush] Отправка невозможна: VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY не заданы в .env сервера.');
+        return { total: (store.pushSubscriptions || []).length, sent: 0, pushEnabled: false, error: 'VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY не заданы на сервере (.env) — Web Push отключён' };
     }
     if (tag && sentPushTags.has(tag)) {
         const lastSent = sentPushTags.get(tag);
@@ -742,7 +743,7 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
     }
     if (!Array.isArray(store.pushSubscriptions) || store.pushSubscriptions.length === 0) {
         console.log('[WebPush] No subscribers registered in store');
-        return { total: 0, sent: 0 };
+        return { total: 0, sent: 0, pushEnabled: true, error: 'В store.pushSubscriptions нет ни одной подписки (см. также синхронизацию с Firestore artistAccounts)' };
     }
 
     let cleanUrl = String(url || '/').trim();
@@ -765,6 +766,10 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
 
     const deadEndpoints = [];
     let sentCount = 0;
+    // Образцы реальных ошибок отправки (не "мёртвые" endpoint'ы, а именно отказы push-сервиса —
+    // например 401/403 из-за несовпадения VAPID-ключей). Раньше это уходило только в server-логи,
+    // которые не видно из админки/чата — теперь возвращаем наружу, чтобы диагностировать без доступа к серверу.
+    const errorSamples = [];
 
     await Promise.allSettled(store.pushSubscriptions.map(async (sub) => {
         try {
@@ -780,6 +785,9 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
                 console.warn(`[WebPush] Pruning inactive subscriber (${status}):`, sub.endpoint);
             } else {
                 console.warn('[WebPush] Send notification note:', err.message || err, 'status:', status);
+                if (errorSamples.length < 3) {
+                    errorSamples.push(`HTTP ${status || '?'}: ${(err.body || err.message || String(err)).toString().slice(0, 200)}`);
+                }
             }
         }
     }));
@@ -791,7 +799,13 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
     }
 
     console.log(`[WebPush] Sent to ${sentCount}/${store.pushSubscriptions.length} devices`);
-    return { total: store.pushSubscriptions.length, sent: sentCount };
+    return {
+        total: store.pushSubscriptions.length,
+        sent: sentCount,
+        pushEnabled: true,
+        pruned: deadEndpoints.length,
+        errors: errorSamples
+    };
 }
 
 // Web Push API: получение публичного VAPID ключа

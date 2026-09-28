@@ -1872,12 +1872,22 @@ window.testAdminPushNotification = async function() {
                 }
             });
             const data = await res.json();
+            // Полный ответ всегда в консоль — на случай, если тост исчезнет раньше, чем успеете прочитать
+            console.log('[WebPush Test] Полный результат:', data);
             if (res.ok && data.success) {
                 pushed = true;
-                if (data.total === 0) {
+                if (data.pushEnabled === false) {
+                    showAdminNotification(`❌ Web Push отключён на сервере: ${data.error || 'VAPID-ключи не настроены в .env'}`, 'error');
+                } else if (data.total === 0) {
                     showAdminNotification(`Внимание: 0 подписанных устройств в базе. Нажмите колокольчик 🔔 на сайте, чтобы подписать это устройство!`, 'info');
+                } else if (data.sent === 0) {
+                    const details = Array.isArray(data.errors) && data.errors.length ? ' Причина (см. также консоль): ' + data.errors.join(' | ') : '';
+                    showAdminNotification(`❌ Отправка не удалась ни на одно из ${data.total} устройств.${details}`, 'error');
+                } else if (data.sent < data.total) {
+                    const details = Array.isArray(data.errors) && data.errors.length ? ' Ошибки: ' + data.errors.join(' | ') : '';
+                    showAdminNotification(`⚠️ Web Push отправлен на ${data.sent} из ${data.total} устройств.${details}`, 'info');
                 } else {
-                    showAdminNotification(`Web Push успешно отправлен на ${data.sent} из ${data.total} подписанных устройств!`, 'success');
+                    showAdminNotification(`✅ Web Push успешно отправлен на ${data.sent} из ${data.total} подписанных устройств!`, 'success');
                 }
                 window.refreshAdminPushSubscribers();
                 return;
