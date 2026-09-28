@@ -347,6 +347,8 @@ function publicState() {
 let contestIdsSeeded = false;
 let newsIdsSeeded = false;
 let votingStateSeeded = false;
+let lastPushSubSyncAt = 0;
+const PUSH_SUB_SYNC_INTERVAL_MS = 2 * 60 * 1000; // раз в 2 минуты, а не при каждом тике/отправке
 let isSyncInProgress = false;
 let knownContestIds = new Set((store.contests || []).map(c => c.id));
 let knownNewsIds = new Set((store.news || []).map(n => n.id));
@@ -559,8 +561,17 @@ async function syncWithFirestore(isSubSyncOnly = false) {
         } catch (e) {}
 
         // 6. Sync push subscriptions from Firestore collection "artistAccounts" (with type === 'push_sub')
+        // САМЫЙ дорогой запрос из всех (pageSize=300 — до 300 прочитанных документов за раз,
+        // тогда как у остальных блоков это обычно 1 документ). Раньше выполнялся при КАЖДОМ
+        // вызове syncWithFirestore — и по таймеру каждые 3 секунды, и при каждой отправке
+        // push. Это било по бесплатной суточной квоте чтений Firestore (50 000/сутки) в
+        // считанные часы; когда квота исчерпывалась, ВСЕ чтения Firestore начинали молча
+        // отваливаться — этим объяснялись сразу несколько симптомов (0 подписчиков в админке,
+        // мигание в заглушку "HBU Live Hub", неработающий push). Ограничиваем частоту отдельно.
+        if (Date.now() - lastPushSubSyncAt > PUSH_SUB_SYNC_INTERVAL_MS) {
         try {
             const res = await fsFetch(`${base}/artistAccounts?key=${apiKey}&pageSize=300`);
+            lastPushSubSyncAt = Date.now();
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || [])
@@ -590,6 +601,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                 }
             }
         } catch (e) {}
+        }
 
         if (updated) {
             saveStore(store);
@@ -693,9 +705,18 @@ async function removePushSubscriptionFromFirestore(endpoint) {
     } catch (e) {}
 }
 
-// Initial sync on startup and recurring sync every 3 seconds
+// Первичная синхронизация при старте + фоновая раз в 60 секунд.
+// Было раз в 3 секунды — при нескольких запросах на чтение ВСЕХ документов коллекции
+// за цикл (без учёта их количества) это легко превышало бесплатную суточную квоту
+// Firestore (50 000 чтений/сутки) за пару часов работы сервера, после чего ВСЕ чтения
+// Firestore начинали молча отваливаться (симптомы: 0 подписчиков в админке, мигание
+// в заглушку "HBU Live Hub", неработающий push). Админ-панель и обычные действия
+// пользователей (публикация новости, старт голосования и т.д.) всё равно обновляются
+// МГНОВЕННО через SSE — этот опрос лишь подхватывает изменения, сделанные напрямую в
+// Firestore, и ему не нужна секундная частота. Если коллекции новостей/конкурсов
+// вырастут ещё сильнее — можно поднять интервал ещё больше.
 syncWithFirestore();
-setInterval(syncWithFirestore, 3000);
+setInterval(syncWithFirestore, 60000);
 
 // SSE Подписчики
 let sseClients = [];
