@@ -3102,12 +3102,23 @@ subscribeState((state) => {
     const prevStatus = systemState.status;
     const prevSession = systemState.sessionId;
 
-    contestsData = state.contests || [];
-    newsData = sortNewsDescending(state.news || []);
-    participantsData = state.participants || DEFAULT_PARTICIPANTS;
+    // Защита от "мигания" на пустое состояние (например, наблюдалось как экран-заглушка
+    // "HBU Live Hub" вместо баннера сезона): у приложения несколько параллельных
+    // источников состояния (SSE сервера + прямые слушатели Firestore), и при
+    // переподключении/рестарте сервера один из них может на мгновение прислать
+    // ПУСТОЙ список — это не значит, что данные реально исчезли. Если у нас уже
+    // есть непустые данные, транзиентный пустой снимок просто игнорируется —
+    // старые данные остаются на экране до следующего снимка с реальным содержимым.
+    if (Array.isArray(state.contests) && (state.contests.length > 0 || contestsData.length === 0)) {
+        contestsData = state.contests;
+    }
+    if (Array.isArray(state.news) && (state.news.length > 0 || newsData.length === 0)) {
+        newsData = sortNewsDescending(state.news);
+    }
+    participantsData = (Array.isArray(state.participants) && state.participants.length > 0) ? state.participants : (participantsData.length ? participantsData : DEFAULT_PARTICIPANTS);
     votesData = state.votes || [];
     calendarNotesData = state.calendarNotes || [];
-    
+
     const newVotingState = state.votingState || { status: 'closed', endsAt: null, sessionId: null };
     const savedSession = localStorage.getItem('harivision_voted_session');
 

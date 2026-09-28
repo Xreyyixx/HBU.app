@@ -338,7 +338,15 @@ function publicState() {
     };
 }
 
-let isInitialSyncDone = false;
+// ВАЖНО: отдельный флаг "база известных id устоялась" НА КАЖДУЮ коллекцию, а не один
+// общий isInitialSyncDone. Раньше если, например, запрос новостей на старте сервера
+// транзиентно падал (контесты при этом синхронизировались успешно), общий флаг всё
+// равно взводился в true — и на следующем цикле ВСЕ старые новости из Firestore
+// выглядели как "новые" и разом рассылались push-уведомлением (наблюдалось как
+// "шквал уведомлений о давно опубликованных новостях" после сбоя/рестарта сервера).
+let contestIdsSeeded = false;
+let newsIdsSeeded = false;
+let votingStateSeeded = false;
 let isSyncInProgress = false;
 let knownContestIds = new Set((store.contests || []).map(c => c.id));
 let knownNewsIds = new Set((store.news || []).map(n => n.id));
@@ -389,7 +397,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                     ...parseFirestoreFields(d.fields)
                 }));
 
-                if (isInitialSyncDone && !isSubSyncOnly) {
+                if (contestIdsSeeded && !isSubSyncOnly) {
                     const newContests = items.filter(c => !knownContestIds.has(c.id));
                     for (const c of newContests) {
                         knownContestIds.add(c.id);
@@ -406,6 +414,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                 items.forEach(c => knownContestIds.add(c.id));
                 store.contests = items;
                 updated = true;
+                contestIdsSeeded = true;
             }
         } catch (e) {}
 
@@ -419,7 +428,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                     const prevStatus = store.votingState ? store.votingState.status : 'closed';
                     const newStatus = fsState.status;
 
-                    if (isInitialSyncDone && prevStatus !== newStatus) {
+                    if (votingStateSeeded && prevStatus !== newStatus) {
                         if (newStatus === 'open') {
                             console.log('[WebPush] Remote voting open detected. Sending push...');
                             sendPushNotificationToAll({
@@ -447,6 +456,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                         updatedAt: fsState.updatedAt || Date.now()
                     };
                     updated = true;
+                    votingStateSeeded = true;
                 }
             }
         } catch (e) {}
@@ -462,7 +472,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                 }));
                 items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-                if (isInitialSyncDone && !isSubSyncOnly) {
+                if (newsIdsSeeded && !isSubSyncOnly) {
                     const newArticles = items.filter(n => !knownNewsIds.has(n.id));
                     for (const n of newArticles) {
                         knownNewsIds.add(n.id);
@@ -479,6 +489,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                 items.forEach(n => knownNewsIds.add(n.id));
                 store.news = items;
                 updated = true;
+                newsIdsSeeded = true;
             }
         } catch (e) {}
 
@@ -584,7 +595,6 @@ async function syncWithFirestore(isSubSyncOnly = false) {
             saveStore(store);
             broadcastState('firestore_sync');
         }
-        isInitialSyncDone = true;
     } catch (e) {
         console.warn('Firestore server sync error:', e);
     } finally {

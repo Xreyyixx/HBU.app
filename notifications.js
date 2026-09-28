@@ -5,10 +5,32 @@ import { ensureFirebaseAuth } from './config.js';
 // =============================================================
 
 const STORAGE_KEY = 'harivision_notifications_enabled';
-// ПУБЛИЧНЫЙ VAPID-ключ (его можно хранить в коде). После перевыпуска ключей
-// (npx web-push generate-vapid-keys) вставьте сюда новый VAPID_PUBLIC_KEY из .env сервера.
-// Старый ключ скомпрометирован: его приватная часть лежала в открытом репозитории.
+// ПУБЛИЧНЫЙ VAPID-ключ. Запасной вариант на случай, если сервер недоступен (статический
+// хостинг без Node-бэкенда) или сетевой запрос ниже не успел выполниться.
+// ВАЖНО: этот ключ должен ТОЧНО совпадать с VAPID_PUBLIC_KEY в .env сервера — иначе
+// браузер подписывается на push под одним ключом, а сервер подписывает уведомления
+// другим (приватным, парным к другому публичному), push-сервис такие отправки молча
+// отклоняет, и уведомления при закрытом сайте просто перестают приходить (без явной
+// ошибки в UI). После перевыпуска ключей (npx web-push generate-vapid-keys) сюда нужно
+// вставлять новый VAPID_PUBLIC_KEY из .env сервера. Старый ключ считается
+// скомпрометированным: его приватная часть ранее лежала в открытом репозитории.
 export const PERMANENT_VAPID_PUBLIC_KEY = 'BPZuY8-gjysoqNyqec1Rqdz2iPd1gNRiwiP0kSOnAxWaSuVGsRvKafnY75wGl5vSsExJGAnC3RPkmzjhMo42wRw';
+
+// Чтобы ключ выше не мог незаметно "разъехаться" с сервером (частая причина внезапной
+// остановки фоновых push), заранее — в фоне, при загрузке страницы — запрашиваем
+// АКТУАЛЬНЫЙ публичный ключ напрямую у сервера и кэшируем его. Делаем это заранее,
+// а не в момент подписки, чтобы не добавлять сетевую задержку перед pushManager.subscribe():
+// на iOS Safari это может "потерять" контекст пользовательского жеста и сорвать подписку.
+let cachedServerVapidKey = null;
+if (typeof window !== 'undefined' && typeof fetch === 'function') {
+    fetch('/api/push/vapid-public-key').then(r => r.ok ? r.json() : null).then(d => {
+        if (d && typeof d.publicKey === 'string' && d.publicKey.length > 20) {
+            cachedServerVapidKey = d.publicKey;
+        }
+    }).catch(() => {
+        // Нормально, если Node-бэкенда нет на этом хостинге — используем PERMANENT_VAPID_PUBLIC_KEY
+    });
+}
 
 export function isNotificationSupported() {
     return typeof window !== 'undefined' && (
@@ -162,8 +184,11 @@ export async function syncPushSubscription() {
             return { success: false, reason: 'PushManager недоступен в Service Worker' };
         }
 
-        // 2. VAPID ключ: используем постоянный ключ без сетевых задержек (сохраняет контекст жеста пользователя на iOS)
-        const targetKeyBytes = urlBase64ToUint8Array(PERMANENT_VAPID_PUBLIC_KEY);
+        // 2. VAPID ключ: берём заранее закэшированный АКТУАЛЬНЫЙ ключ с сервера, если он
+        // успел загрузиться (см. фоновый fetch выше), иначе — запасной постоянный ключ.
+        // Здесь нет доп. сетевого запроса — только чтение уже готового значения, поэтому
+        // контекст пользовательского жеста для pushManager.subscribe() на iOS не теряется.
+        const targetKeyBytes = urlBase64ToUint8Array(cachedServerVapidKey || PERMANENT_VAPID_PUBLIC_KEY);
 
         // 3. Проверяем текущую подписку PushManager
         let sub = await pm.getSubscription();
