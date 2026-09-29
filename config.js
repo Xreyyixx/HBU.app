@@ -51,7 +51,7 @@ try {
 // API живут на одном origin — там ничего переписывать не нужно, API_BASE пустой.
 // ЗАПОЛНИТЕ после деплоя на Render (или другой Node-хостинг), например:
 // 'https://hbu-server.onrender.com'
-export const RENDER_API_BASE = '';
+export const RENDER_API_BASE = 'https://hbu-app.onrender.com';
 export const API_BASE = (typeof window !== 'undefined' && /\.github\.io$/i.test(window.location.hostname))
     ? RENDER_API_BASE
     : '';
