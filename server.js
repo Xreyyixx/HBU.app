@@ -829,13 +829,21 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
             sentCount++;
         } catch (err) {
             const status = err.statusCode;
-            if (status === 404 || status === 410 || (err.message && (err.message.includes('expired') || err.message.includes('unsubscribed')))) {
+            const bodyText = (err.body || err.message || '').toString();
+            // 403 с этим конкретным текстом — подписка навсегда привязана к СТАРОМУ VAPID-ключу
+            // (например, оформлена до ротации ключей). Она никогда не заработает повторно,
+            // пока устройство не переподпишется заново (это происходит само при следующем
+            // открытии сайта — см. самовосстановление в notifications.js), поэтому чистим её
+            // из базы так же, как обычные "мёртвые" 404/410 — иначе она будет вечно засорять
+            // счётчик подписчиков и список ошибок при каждой рассылке.
+            const isVapidMismatch = status === 403 && bodyText.includes('VAPID credentials');
+            if (status === 404 || status === 410 || isVapidMismatch || (err.message && (err.message.includes('expired') || err.message.includes('unsubscribed')))) {
                 deadEndpoints.push(sub.endpoint);
-                console.warn(`[WebPush] Pruning inactive subscriber (${status}):`, sub.endpoint);
+                console.warn(`[WebPush] Pruning inactive subscriber (${status}${isVapidMismatch ? ', VAPID key mismatch' : ''}):`, sub.endpoint);
             } else {
                 console.warn('[WebPush] Send notification note:', err.message || err, 'status:', status);
                 if (errorSamples.length < 3) {
-                    errorSamples.push(`HTTP ${status || '?'}: ${(err.body || err.message || String(err)).toString().slice(0, 200)}`);
+                    errorSamples.push(`HTTP ${status || '?'}: ${bodyText.slice(0, 200)}`);
                 }
             }
         }
