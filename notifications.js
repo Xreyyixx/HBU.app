@@ -14,7 +14,7 @@ const STORAGE_KEY = 'harivision_notifications_enabled';
 // ошибки в UI). После перевыпуска ключей (npx web-push generate-vapid-keys) сюда нужно
 // вставлять новый VAPID_PUBLIC_KEY из .env сервера. Старый ключ считается
 // скомпрометированным: его приватная часть ранее лежала в открытом репозитории.
-export const PERMANENT_VAPID_PUBLIC_KEY = 'BPZuY8-gjysoqNyqec1Rqdz2iPd1gNRiwiP0kSOnAxWaSuVGsRvKafnY75wGl5vSsExJGAnC3RPkmzjhMo42wRw';
+export const PERMANENT_VAPID_PUBLIC_KEY = 'BP4FuPYn3mRKwGpg68C1TvbR4Lhs9-yRPukIQRWn1sGIR3L7KDG4X-JCDYnqPlvS3UNzVTNz-z91Ek1DOMnA1WY';
 
 // Чтобы ключ выше не мог незаметно "разъехаться" с сервером (частая причина внезапной
 // остановки фоновых push), заранее — в фоне, при загрузке страницы — запрашиваем
