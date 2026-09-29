@@ -1877,6 +1877,7 @@ window.testAdminPushNotification = async function() {
     try {
         showAdminNotification('Отправка тестового Web Push...', 'info');
         let pushed = false;
+        let primaryFailReason = '';
         try {
             const res = await fetch('/api/admin/push-test', {
                 method: 'POST',
@@ -1885,10 +1886,11 @@ window.testAdminPushNotification = async function() {
                     'Authorization': `Bearer ${token}`
                 }
             });
-            const data = await res.json();
+            let data = null;
+            try { data = await res.json(); } catch (parseErr) {}
             // Полный ответ всегда в консоль — на случай, если тост исчезнет раньше, чем успеете прочитать
-            console.log('[WebPush Test] Полный результат:', data);
-            if (res.ok && data.success) {
+            console.log('[WebPush Test] HTTP', res.status, 'Полный результат:', data);
+            if (res.ok && data && data.success) {
                 pushed = true;
                 if (data.pushEnabled === false) {
                     showAdminNotification(`❌ Web Push отключён на сервере: ${data.error || 'VAPID-ключи не настроены в .env'}`, 'error');
@@ -1906,26 +1908,48 @@ window.testAdminPushNotification = async function() {
                 window.refreshAdminPushSubscribers();
                 return;
             }
-        } catch (e) {}
+            // Основной путь ответил, но неуспешно — запоминаем ПОЧЕМУ, а не тихо проваливаемся
+            // в запасной вариант (тот раньше врал об успехе, не проверяя свой собственный результат).
+            primaryFailReason = `HTTP ${res.status}` + (data && data.error ? `: ${data.error}` : (!token ? ' (нет токена админ-сессии — попробуйте выйти и войти заново)' : ''));
+        } catch (e) {
+            primaryFailReason = 'сетевая ошибка: ' + (e.message || String(e));
+        }
 
         if (!pushed) {
+            console.warn('[WebPush Test] Основной путь /api/admin/push-test не сработал:', primaryFailReason, '— пробуем запасной вариант через облачную очередь Firestore.');
             const fsUrl = `https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/artistAccounts/broadcast_queue?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw`;
             const testTag = 'test-push-' + Date.now();
-            await fetch(fsUrl, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    fields: {
-                        title: { stringValue: '🧪 Тестовый Push HariVision 2026' },
-                        body: { stringValue: 'Проверка фонового канала Web Push! Доставка при закрытом сайте работает!' },
-                        url: { stringValue: '/#voting' },
-                        tag: { stringValue: testTag },
-                        createdAt: { integerValue: String(Date.now()) },
-                        processed: { booleanValue: false }
-                    }
-                })
-            });
-            showAdminNotification('Запрос на тестовый Web Push отправлен в облачную очередь сервера!', 'success');
+            try {
+                const idToken = (auth && auth.currentUser && !auth.currentUser.isAnonymous) ? await auth.currentUser.getIdToken() : null;
+                const fsRes = await fetch(fsUrl, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+                    },
+                    body: JSON.stringify({
+                        fields: {
+                            title: { stringValue: '🧪 Тестовый Push HariVision 2026' },
+                            body: { stringValue: 'Проверка фонового канала Web Push! Доставка при закрытом сайте работает!' },
+                            url: { stringValue: '/#voting' },
+                            tag: { stringValue: testTag },
+                            createdAt: { integerValue: String(Date.now()) },
+                            processed: { booleanValue: false }
+                        }
+                    })
+                });
+                // Раньше здесь считалось "успехом" само по себе, что fetch() не выбросил исключение —
+                // но fetch НЕ бросает исключение на 403/permission-denied, поэтому сообщение об успехе
+                // было неправдой почти всегда. Теперь реально проверяем res.ok.
+                if (fsRes.ok) {
+                    showAdminNotification(`⏳ Основной путь недоступен (${primaryFailReason}). Запрос поставлен в облачную очередь Firestore — сервер должен забрать его при следующем опросе (до 60 сек).`, 'info');
+                } else {
+                    const fsErrText = await fsRes.text().catch(() => '');
+                    showAdminNotification(`❌ Ни основной путь (${primaryFailReason}), ни запасной не сработали. Firestore: HTTP ${fsRes.status} ${fsErrText.slice(0, 150)}`, 'error');
+                }
+            } catch (fsErr) {
+                showAdminNotification(`❌ Ни основной путь (${primaryFailReason}), ни запасной не сработали: ${fsErr.message}`, 'error');
+            }
             window.refreshAdminPushSubscribers();
         }
     } catch (e) {
