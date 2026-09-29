@@ -60,6 +60,13 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Профили-карточки карьеры артистов (раздел "Артисты" на сайте) — НЕ путать с
+    // коллекцией artists выше (это логин-аккаунты для входа). Публичное чтение, пишет админ.
+    match /artistProfiles/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // ---------- Новости: зрители могут менять только счётчики реакций ----------
     match /news/{docId} {
       allow read: if true;

@@ -96,6 +96,7 @@
             <button id="nav-btn-home" onclick="navigateToView('home')" class="px-3.5 py-1.5 rounded-full text-amber-300 hover:text-white hover:bg-amber-500/10 transition">Главная</button>
             <button id="nav-btn-contests" onclick="navigateToView('contests')" class="px-3.5 py-1.5 rounded-full text-slate-300 hover:text-amber-300 hover:bg-amber-500/10 transition">Архив конкурсов</button>
             <button id="nav-btn-news" onclick="navigateToView('news')" class="px-3.5 py-1.5 rounded-full text-slate-300 hover:text-amber-300 hover:bg-amber-500/10 transition">Новости</button>
+            <button id="nav-btn-artists" onclick="navigateToView('artists')" class="px-3.5 py-1.5 rounded-full text-slate-300 hover:text-amber-300 hover:bg-amber-500/10 transition">Артисты</button>
             <button id="nav-btn-calendar" onclick="navigateToView('calendar')" class="px-3.5 py-1.5 rounded-full text-slate-300 hover:text-amber-300 hover:bg-amber-500/10 transition">Календарь</button>
             <button id="nav-btn-voting" onclick="navigateToView('voting')" class="px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black shadow-md transition">🗳️ Голосование</button>
         </nav>
@@ -193,6 +194,11 @@
                 <button onclick="navigateToView('news'); toggleSideMenu(false);" class="flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-[#16070b] hover:bg-amber-500/15 border border-amber-500/15 text-left text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-amber-300 transition">
                     <span class="text-base">📰</span>
                     <span>Новости HBU</span>
+                </button>
+
+                <button onclick="navigateToView('artists'); toggleSideMenu(false);" class="flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-[#16070b] hover:bg-amber-500/15 border border-amber-500/15 text-left text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-amber-300 transition">
+                    <span class="text-base">🎤</span>
+                    <span>Артисты</span>
                 </button>
 
                 <button onclick="navigateToView('calendar'); toggleSideMenu(false);" class="flex items-center gap-3 px-4 py-3.5 rounded-2xl bg-[#16070b] hover:bg-amber-500/15 border border-amber-500/15 text-left text-xs font-bold uppercase tracking-wider text-slate-200 hover:text-amber-300 transition">
@@ -364,6 +370,7 @@
             <button onclick="navigateToView('home')" class="hover:text-amber-300 transition">Главная</button>
             <button onclick="navigateToView('contests')" class="hover:text-amber-300 transition">Архив</button>
             <button onclick="navigateToView('news')" class="hover:text-amber-300 transition">Новости</button>
+            <button onclick="navigateToView('artists')" class="hover:text-amber-300 transition">Артисты</button>
             <button onclick="navigateToView('voting')" class="hover:text-amber-300 transition text-amber-400">Голосование</button>
             <a href="admin.html" class="hover:text-amber-300 transition">Admin Panel</a>
         </div>

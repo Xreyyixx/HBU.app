@@ -201,6 +201,7 @@ try {
 let currentState = {
     contests: INITIAL_CONTESTS,
     news: sortNewsDescending(INITIAL_NEWS),
+    artistProfiles: [],
     calendarNotes: [],
     participants: DEFAULT_PARTICIPANTS,
     votingState: { status: 'closed', endsAt: null, sessionId: null },
@@ -224,6 +225,9 @@ try {
         }
         if (parsed.news && Array.isArray(parsed.news) && parsed.news.length > 0) {
             currentState.news = sortNewsDescending(parsed.news);
+        }
+        if (parsed.artistProfiles && Array.isArray(parsed.artistProfiles) && parsed.artistProfiles.length > 0) {
+            currentState.artistProfiles = parsed.artistProfiles;
         }
         if (parsed.calendarNotes && Array.isArray(parsed.calendarNotes)) {
             currentState.calendarNotes = parsed.calendarNotes.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));
@@ -276,6 +280,7 @@ function notifyStateChanged(force = false) {
     const serialized = safeJsonStringify({
         contests: currentState.contests,
         news: currentState.news,
+        artistProfiles: currentState.artistProfiles,
         calendarNotes: currentState.calendarNotes,
         participants: currentState.participants,
         votingState: currentState.votingState,
@@ -783,6 +788,21 @@ function initFirestoreListeners() {
         }, (err) => console.warn('Firestore users listener error:', err));
     } catch (e) {}
 
+    // H2. Artist Profiles Real-time Listener (карьерные профили-карточки, раздел "Артисты").
+    // ВАЖНО: currentState.artists (блоки G/H выше) — это логин-аккаунты исполнителей,
+    // совсем другая сущность. Профили карьеры живут отдельно в currentState.artistProfiles.
+    try {
+        onSnapshot(collection(db, "artistProfiles"), (snap) => {
+            const items = [];
+            snap.forEach(d => {
+                const cleaned = sanitizeFirestoreData(d.data());
+                items.push({ id: d.id, ...(cleaned || {}) });
+            });
+            currentState.artistProfiles = items;
+            notifyStateChanged(false);
+        }, (err) => console.warn('Firestore artistProfiles collection error:', err));
+    } catch (e) {}
+
     // I. Real-Time Broadcast Notifications Listener (cross-device instant delivery)
     try {
         const seenBroadcastKeys = new Set();
@@ -897,6 +917,14 @@ async function fetchState(isInitial = false) {
                 if (Array.isArray(data.contests) && data.contests.length > 0) {
                     if (safeJsonStringify(currentState.contests) !== safeJsonStringify(data.contests)) {
                         currentState.contests = data.contests;
+                        updated = true;
+                    }
+                }
+
+                // Sync artist career profiles (НЕ логин-аккаунты — те в data.artists, если сервер их когда-либо пришлёт)
+                if (Array.isArray(data.artistProfiles)) {
+                    if (safeJsonStringify(currentState.artistProfiles) !== safeJsonStringify(data.artistProfiles)) {
+                        currentState.artistProfiles = data.artistProfiles;
                         updated = true;
                     }
                 }
@@ -1332,6 +1360,76 @@ export async function deleteContest(contestId) {
     } catch (e) {}
 
     return currentState.contests;
+}
+
+// -------------------------------------------------------------
+// CRUD: ARTIST PROFILES (архив карьеры артистов, раздел "Артисты")
+// ВАЖНО: не путать с логин-аккаунтами исполнителей (currentState.artists,
+// коллекция Firestore "artists") — это отдельная, независимая сущность.
+// -------------------------------------------------------------
+export async function saveArtistProfile(artist) {
+    if (!artist.id) artist.id = 'artist-profile-' + Date.now();
+    if (!Array.isArray(currentState.artistProfiles)) currentState.artistProfiles = [];
+    const idx = currentState.artistProfiles.findIndex(a => a.id === artist.id);
+    if (idx >= 0) {
+        currentState.artistProfiles[idx] = { ...currentState.artistProfiles[idx], ...artist };
+    } else {
+        currentState.artistProfiles.push(artist);
+    }
+    notifyStateChanged(true);
+
+    // Save to Firestore directly in collection "artistProfiles"
+    try {
+        if (db) {
+            await setDoc(doc(db, "artistProfiles", artist.id), artist, { merge: true });
+        }
+    } catch (e) {
+        console.warn('Firestore save artist profile error:', e);
+    }
+
+    // Save to REST API if available
+    try {
+        const res = await fetch('/api/artist-profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: safeJsonStringify(artist)
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data.artistProfiles) {
+                currentState.artistProfiles = data.artistProfiles;
+                notifyStateChanged(true);
+            }
+        }
+    } catch (e) {}
+
+    return currentState.artistProfiles;
+}
+
+export async function deleteArtistProfile(artistId) {
+    currentState.artistProfiles = (currentState.artistProfiles || []).filter(a => a.id !== artistId);
+    notifyStateChanged(true);
+
+    try {
+        if (db) {
+            await deleteDoc(doc(db, "artistProfiles", artistId));
+        }
+    } catch (e) {
+        console.warn('Firestore delete artist profile error:', e);
+    }
+
+    try {
+        const res = await fetch(`/api/artist-profiles/${artistId}`, { method: 'DELETE' });
+        if (res.ok) {
+            const data = await res.json();
+            if (data.artistProfiles) {
+                currentState.artistProfiles = data.artistProfiles;
+                notifyStateChanged(true);
+            }
+        }
+    } catch (e) {}
+
+    return currentState.artistProfiles;
 }
 
 // -------------------------------------------------------------

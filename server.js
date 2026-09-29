@@ -180,6 +180,11 @@ function loadStore() {
             if (!Array.isArray(data.participants) || data.participants.length === 0) data.participants = DEFAULT_PARTICIPANTS;
             if (!Array.isArray(data.contests)) data.contests = [];
             if (!Array.isArray(data.news)) data.news = [];
+            // ВАЖНО: НЕ "artists" — так уже называется отдельная Firestore-коллекция
+            // логин-аккаунтов исполнителей (роль artist, блокировка самоголосования,
+            // см. tools/migrate-artist-passwords.mjs). Профили-карточки карьеры артистов —
+            // это artistProfiles, полностью независимая сущность.
+            if (!Array.isArray(data.artistProfiles)) data.artistProfiles = [];
             if (!Array.isArray(data.calendarNotes)) data.calendarNotes = [];
             if (!data.votingState) data.votingState = { status: 'closed', endsAt: null, sessionId: null };
             if (!data.recapVideoUrl) data.recapVideoUrl = '';
@@ -215,6 +220,7 @@ function loadStore() {
             ...n,
             reactions: n.reactions || {}
         }))),
+        artistProfiles: [],
         calendarNotes: [],
         participants: DEFAULT_PARTICIPANTS,
         votingState: { status: 'closed', endsAt: null, sessionId: null },
@@ -245,6 +251,7 @@ function saveStore(data) {
 let store = loadStore();
 if (!Array.isArray(store.news)) store.news = [];
 if (!Array.isArray(store.contests)) store.contests = [];
+if (!Array.isArray(store.artistProfiles)) store.artistProfiles = [];
 if (!Array.isArray(store.calendarNotes)) store.calendarNotes = [];
 if (!Array.isArray(store.participants) || store.participants.length === 0) store.participants = DEFAULT_PARTICIPANTS;
 delete store.vapidKeys;
@@ -374,6 +381,7 @@ function publicState() {
 // "шквал уведомлений о давно опубликованных новостях" после сбоя/рестарта сервера).
 let contestIdsSeeded = false;
 let newsIdsSeeded = false;
+let artistProfileIdsSeeded = false;
 let votingStateSeeded = false;
 let lastPushSubSyncAt = 0;
 const PUSH_SUB_SYNC_INTERVAL_MS = 2 * 60 * 1000; // раз в 2 минуты, а не при каждом тике/отправке
@@ -520,6 +528,24 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                 store.news = items;
                 updated = true;
                 newsIdsSeeded = true;
+            }
+        } catch (e) {}
+
+        // 3.5. Sync artist CAREER PROFILES from Firestore collection "artistProfiles".
+        // ВАЖНО: не путать с коллекцией "artists" (логин-аккаунты исполнителей для входа
+        // на сайт) — это полностью отдельная сущность. Без push-уведомлений о "новом
+        // артисте" (не требовалось), но с тем же seeded-флагом ради единообразия.
+        try {
+            const res = await fsFetch(`${base}/artistProfiles?key=${apiKey}`);
+            if (res.ok) {
+                const data = await res.json();
+                const items = (data.documents || []).map(d => ({
+                    id: d.name.split('/').pop(),
+                    ...parseFirestoreFields(d.fields)
+                }));
+                store.artistProfiles = items;
+                updated = true;
+                artistProfileIdsSeeded = true;
             }
         } catch (e) {}
 
@@ -1473,6 +1499,45 @@ app.delete('/api/contests/:id', authenticateAdmin, (req, res) => {
     res.json({ success: true, contests: store.contests });
 });
 
+// --- ARTIST PROFILES CRUD (архив карьеры; сами выступления живут в contest.participants[]
+// через поле artistId — здесь хранится только карточка профиля, без дублирования истории).
+// ВАЖНО: не путать с /api/... для коллекции "artists" — той в этом файле нет, она отдельная
+// Firestore-коллекция логин-аккаунтов исполнителей (см. tools/migrate-artist-passwords.mjs). ---
+app.get('/api/artist-profiles', (req, res) => {
+    res.json(store.artistProfiles || []);
+});
+
+app.post('/api/artist-profiles', authenticateAdmin, (req, res) => {
+    const artist = req.body || {};
+    if (!artist.name || !String(artist.name).trim()) {
+        return res.status(400).json({ success: false, error: 'Имя артиста обязательно' });
+    }
+    if (!Array.isArray(store.artistProfiles)) store.artistProfiles = [];
+    if (!artist.id) {
+        artist.id = 'artist-profile-' + Date.now();
+    }
+    if (!artist.createdAt) artist.createdAt = Date.now();
+    artist.updatedAt = Date.now();
+    const idx = store.artistProfiles.findIndex(a => a.id === artist.id);
+    if (idx >= 0) {
+        store.artistProfiles[idx] = { ...store.artistProfiles[idx], ...artist };
+    } else {
+        store.artistProfiles.push(artist);
+    }
+    saveStore(store);
+    broadcastState('artist_profiles_update');
+    res.json({ success: true, artist, artistProfiles: store.artistProfiles });
+});
+
+app.delete('/api/artist-profiles/:id', authenticateAdmin, (req, res) => {
+    const { id } = req.params;
+    if (!Array.isArray(store.artistProfiles)) store.artistProfiles = [];
+    store.artistProfiles = store.artistProfiles.filter(a => a.id !== id);
+    saveStore(store);
+    broadcastState('artist_profiles_update');
+    res.json({ success: true, artistProfiles: store.artistProfiles });
+});
+
 // --- PARTICIPANTS CRUD (Номера для голосования) ---
 app.get('/api/participants', (req, res) => {
     res.json(store.participants || []);
@@ -1731,9 +1796,10 @@ app.post('/api/votes/reset-all', authenticateAdmin, (req, res) => {
 
 // Full state sync endpoint
 app.post('/api/sync', authenticateAdmin, (req, res) => {
-    const { news, contests, participants, calendarNotes, settings, votingState, votes } = req.body || {};
+    const { news, contests, artistProfiles, participants, calendarNotes, settings, votingState, votes } = req.body || {};
     if (Array.isArray(news) && news.length > 0) store.news = news;
     if (Array.isArray(contests) && contests.length > 0) store.contests = contests;
+    if (Array.isArray(artistProfiles)) store.artistProfiles = artistProfiles;
     if (Array.isArray(participants) && participants.length > 0) store.participants = participants;
     if (Array.isArray(calendarNotes)) {
         const cleanIncoming = calendarNotes.filter(n => n && !['cal-1', 'cal-2', 'cal-3', 'cal-4'].includes(n.id));

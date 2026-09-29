@@ -137,6 +137,10 @@
                 <span>🏆</span>
                 <span>Contests (Конкурсы)</span>
             </button>
+            <button id="tab-btn-artists" onclick="switchAdminTab('artists')" class="px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2">
+                <span>🎤</span>
+                <span>Artists (Артисты)</span>
+            </button>
             <button id="tab-btn-calendar" onclick="switchAdminTab('calendar')" class="px-5 py-2.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-[#16070b] text-slate-300 hover:text-amber-300 border border-amber-500/20 transition flex items-center gap-2">
                 <span>📅</span>
                 <span>Calendar (Календарь)</span>
@@ -390,6 +394,29 @@
 
             <!-- Список конкурсов -->
             <div id="admin-contests-list" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Injected via JS -->
+            </div>
+        </div>
+
+        <!-- ============================================================== -->
+        <!-- РАЗДЕЛ 3.5: ARTISTS (ПРОФИЛИ-КАРТОЧКИ КАРЬЕРЫ АРТИСТОВ) -->
+        <!-- ВАЖНО: не путать с логин-аккаунтами исполнителей — у тех нет отдельной вкладки, -->
+        <!-- они управляются напрямую в Firebase (см. tools/migrate-artist-passwords.mjs). -->
+        <!-- Это архив-профили карьеры для публичной страницы "Артисты". -->
+        <!-- ============================================================== -->
+        <div id="section-artists" class="hidden flex flex-col gap-6">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0d0408]/90 border border-amber-500/20 p-6 rounded-3xl backdrop-blur-xl">
+                <div>
+                    <h2 class="text-xl font-bold text-white uppercase tracking-wide">Профили артистов</h2>
+                    <p class="text-xs text-slate-400">Карточки карьеры для публичного раздела «Артисты». Статистика и история считаются автоматически из данных сезонов.</p>
+                </div>
+                <button onclick="openArtistEditorModal()" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-widest px-6 py-3 rounded-xl shadow-lg transition">
+                    + Добавить артиста
+                </button>
+            </div>
+
+            <!-- Список профилей артистов -->
+            <div id="admin-artists-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <!-- Injected via JS -->
             </div>
         </div>
@@ -1056,6 +1083,73 @@
                 <div class="flex justify-end gap-3 pt-3 border-t border-amber-500/20">
                     <button type="button" onclick="closeContestEditorModal()" class="px-5 py-2.5 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl">Отмена</button>
                     <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg">Сохранить сезон</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Модальное окно редактирования профиля артиста (архив карьеры) -->
+    <div id="artist-editor-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 flex flex-col gap-4 rounded-3xl shadow-2xl">
+            <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
+                <h3 id="artist-editor-title" class="text-lg font-bold text-white uppercase">Профиль артиста</h3>
+                <button onclick="closeArtistEditorModal()" class="text-slate-400 hover:text-white font-bold">✕</button>
+            </div>
+
+            <form id="artist-form" class="flex flex-col gap-4">
+                <input type="hidden" id="artist-edit-id" />
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Сценическое имя</label>
+                        <input type="text" id="artist-input-name" required placeholder="RODION" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Страна / делегация</label>
+                        <input type="text" id="artist-input-country" placeholder="THE KUR" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Фото (ссылка URL)</label>
+                    <input type="text" id="artist-input-photo" placeholder="https://..." oninput="updateArtistPhotoPreview(this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 font-mono" />
+                    <img id="artist-photo-preview" src="" alt="" class="hidden mt-2 w-24 h-24 object-cover rounded-2xl border border-amber-500/25" />
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Биография / описание (опционально)</label>
+                    <textarea id="artist-input-bio" rows="3" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400"></textarea>
+                </div>
+
+                <!-- Привязанные выступления: считаются автоматически из данных сезонов, тут только ссылки -->
+                <div id="artist-linked-performances-block" class="hidden border-t border-amber-500/15 pt-4">
+                    <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-2">Привязанные выступления</div>
+                    <div id="artist-linked-performances-list" class="flex flex-col gap-2"></div>
+                </div>
+
+                <!-- Привязка существующего выступления из уже загруженного сезона -->
+                <div id="artist-link-performance-block" class="hidden border-t border-amber-500/15 pt-4 flex flex-col gap-2">
+                    <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">🔗 Привязать выступление из сезона</div>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <select id="artist-link-contest-select" onchange="renderArtistLinkParticipantOptions()" class="flex-1 bg-[#16070b] border border-amber-500/25 px-3 py-2 text-xs text-white rounded-xl">
+                            <option value="">— выберите сезон —</option>
+                        </select>
+                        <select id="artist-link-participant-select" class="flex-1 bg-[#16070b] border border-amber-500/25 px-3 py-2 text-xs text-white rounded-xl">
+                            <option value="">— выберите запись —</option>
+                        </select>
+                        <button type="button" onclick="linkSelectedArtistPerformance()" class="px-4 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl transition whitespace-nowrap">
+                            Привязать
+                        </button>
+                    </div>
+                    <p class="text-[10px] text-slate-500">Само выступление (место, видео, открытка) по-прежнему редактируется в разделе Contests — здесь только связь профиля с записью.</p>
+                </div>
+
+                <div class="flex justify-between items-center gap-3 pt-3 border-t border-amber-500/20">
+                    <button type="button" id="artist-delete-btn" onclick="deleteAdminArtist()" class="hidden px-4 py-2.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 font-bold text-xs uppercase rounded-xl border border-rose-500/30 transition">Удалить профиль</button>
+                    <div class="flex gap-3 ml-auto">
+                        <button type="button" onclick="closeArtistEditorModal()" class="px-5 py-2.5 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl">Отмена</button>
+                        <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg">Сохранить профиль</button>
+                    </div>
                 </div>
             </form>
         </div>

@@ -51,14 +51,20 @@ function getInitialViewFromHash() {
     if (hash === 'news') return 'news';
     if (hash === 'contests') return 'contests';
     if (hash === 'calendar') return 'calendar';
+    if (hash === 'artists') return 'artists';
     if (hash.startsWith('contest/')) return 'contest-detail';
+    if (hash.startsWith('artist/')) return 'artist-detail';
     return 'home';
 }
 
-let currentPortalView = getInitialViewFromHash(); // 'home' | 'contests' | 'contest-detail' | 'news' | 'voting' | 'calendar'
+let currentPortalView = getInitialViewFromHash(); // 'home' | 'contests' | 'contest-detail' | 'news' | 'voting' | 'calendar' | 'artists' | 'artist-detail'
 let selectedContestId = null;
 if (window.location.hash.startsWith('#contest/')) {
     selectedContestId = window.location.hash.replace(/^#contest\//, '');
+}
+let selectedArtistId = null;
+if (window.location.hash.startsWith('#artist/')) {
+    selectedArtistId = window.location.hash.replace(/^#artist\//, '');
 }
 let currentNewsFilter = 'all';
 let activeModalNewsId = null;
@@ -66,6 +72,9 @@ let activeModalNewsId = null;
 // Данные портала
 let contestsData = [];
 let newsData = [];
+// Профили карьеры артистов (раздел "Артисты"). НЕ путать с логин-аккаунтами исполнителей —
+// та отдельная система авторизации живёт в currentAuthUser/data-service.js и сюда не относится.
+let artistProfilesData = [];
 let participantsData = DEFAULT_PARTICIPANTS;
 let votesData = [];
 let calendarNotesData = [];
@@ -720,7 +729,10 @@ window.navigateToView = function(viewName, param, skipHashUpdate = false) {
     if (viewName === 'contest-detail' && param) {
         selectedContestId = param;
     }
-    
+    if (viewName === 'artist-detail' && param) {
+        selectedArtistId = param;
+    }
+
     // Синхронизация с hash для чистых ссылок и закладок
     if (!skipHashUpdate && !isNational && typeof window !== 'undefined') {
         let newHash = '';
@@ -728,7 +740,9 @@ window.navigateToView = function(viewName, param, skipHashUpdate = false) {
         else if (viewName === 'news') newHash = '#news';
         else if (viewName === 'contests') newHash = '#contests';
         else if (viewName === 'calendar') newHash = '#calendar';
+        else if (viewName === 'artists') newHash = '#artists';
         else if (viewName === 'contest-detail' && selectedContestId) newHash = `#contest/${selectedContestId}`;
+        else if (viewName === 'artist-detail' && selectedArtistId) newHash = `#artist/${selectedArtistId}`;
         else if (viewName === 'home') newHash = '';
 
         if (window.location.hash !== newHash) {
@@ -1073,6 +1087,10 @@ function renderMainView() {
         container.innerHTML = getNewsHTML();
     } else if (currentPortalView === 'calendar') {
         container.innerHTML = getCalendarPageHTML();
+    } else if (currentPortalView === 'artists') {
+        container.innerHTML = getArtistsListHTML();
+    } else if (currentPortalView === 'artist-detail') {
+        container.innerHTML = getArtistDetailHTML(selectedArtistId);
     } else if (currentPortalView === 'voting') {
         container.innerHTML = getVotingPageHTML();
         renderVotingCard();
@@ -1340,6 +1358,274 @@ function getContestsListHTML() {
                         </div>
                     </div>
                 `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// -------------------------------------------------------------
+// АРХИВ АРТИСТОВ: раздел "Артисты" — карьерные профили
+// Статистика и история НЕ хранятся отдельно — считаются на лету из contest.participants[],
+// где каждая запись может быть привязана к профилю через artistId (мягкий фолбэк — совпадение
+// по имени "artist", для записей, ещё не привязанных админом явно).
+// -------------------------------------------------------------
+// Конкурсы называются "contest-<timestamp>" (Date.now() в момент создания в админке) —
+// это единственный НАДЁЖНО сортируемый по времени признак, который у нас есть. Поле date
+// сезона — вручную вводимый текст ("8 июля 2026"), сравнивать его как строку нельзя (первый
+// символ "5 августа" меньше "8 июля", хотя август позже) — так и был найден этот баг при
+// проверке на реальных данных (RODION показывался не в том порядке).
+function getContestChronoKey(contestId) {
+    const m = String(contestId || '').match(/(\d{10,})/);
+    return m ? parseInt(m[1], 10) : 0;
+}
+
+function getArtistPerformances(artist) {
+    const performances = [];
+    (contestsData || []).forEach(c => {
+        (c.participants || c.countries || []).forEach(p => {
+            const linkedById = artist.id && p.artistId && p.artistId === artist.id;
+            const linkedByName = !p.artistId && artist.name && p.artist &&
+                String(p.artist).trim().toLowerCase() === String(artist.name).trim().toLowerCase();
+            if (linkedById || linkedByName) {
+                performances.push({
+                    ...p,
+                    contestId: c.id,
+                    contestTitle: c.title,
+                    contestDate: c.date,
+                    contestStatus: c.status,
+                    _chronoKey: getContestChronoKey(c.id)
+                });
+            }
+        });
+    });
+    performances.sort((a, b) => b._chronoKey - a._chronoKey); // от новых к старым
+    return performances;
+}
+
+function computeArtistStats(artist) {
+    const performances = getArtistPerformances(artist);
+    const ranks = performances
+        .map(p => (p.rank !== undefined && p.rank !== null && p.rank !== '' ? Number(p.rank) : null))
+        .filter(r => r !== null && !isNaN(r) && r > 0);
+    const wins = ranks.filter(r => r === 1).length;
+    const podium = ranks.filter(r => r <= 3).length;
+    const best = ranks.length ? Math.min(...ranks) : null;
+    return { performances, participations: performances.length, wins, podium, best };
+}
+
+// Мини-диаграмма прогресса по местам: статус-цвета (золото — победа, янтарь — призовое,
+// приглушённый — остальное), но КАЖДЫЙ бар подписан своим местом числом — цвет никогда не
+// единственный носитель смысла. Нативный <title> добавляет hover-подсказку без отдельного JS.
+function getArtistRankChartSVG(performances) {
+    const chrono = [...performances].reverse(); // от старых к новым — читается как прогресс во времени
+    if (chrono.length === 0) return '';
+    const ranked = chrono.map(p => Number(p.rank)).filter(r => !isNaN(r) && r > 0);
+    const maxRank = Math.max(8, ...(ranked.length ? ranked : [8]));
+    const barW = 34, gap = 14, h = 108;
+    const totalW = chrono.length * (barW + gap) - gap;
+    const bars = chrono.map((p, i) => {
+        const rank = Number(p.rank);
+        const hasRank = !isNaN(rank) && rank > 0;
+        const barH = hasRank ? Math.max(10, h * (1 - (rank - 1) / maxRank)) : 6;
+        const x = i * (barW + gap);
+        const y = h - barH;
+        const fill = !hasRank ? 'rgba(148,163,184,0.3)' : (rank === 1 ? 'url(#hbuArtistGoldBar)' : (rank <= 3 ? '#f59e0b' : '#7c2d3a'));
+        const label = hasRank ? ('#' + rank) : '—';
+        const tip = `${p.contestTitle || p.contestDate || 'Сезон'}: ${hasRank ? label + ' место' : 'без результата'}`;
+        return `
+            <g>
+                <title>${escapeArtistHtml(tip)}</title>
+                <rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="7" fill="${fill}" />
+                <text x="${x + barW / 2}" y="${h + 17}" text-anchor="middle" font-size="10" fill="#fbbf24" font-family="Inter, sans-serif" font-weight="700">${label}</text>
+            </g>`;
+    }).join('');
+    return `
+        <svg viewBox="0 0 ${totalW} ${h + 26}" class="w-full" style="height:110px" preserveAspectRatio="xMinYMax meet" role="img" aria-label="История мест по сезонам">
+            <defs>
+                <linearGradient id="hbuArtistGoldBar" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#fde68a" />
+                    <stop offset="100%" stop-color="#f59e0b" />
+                </linearGradient>
+            </defs>
+            ${bars}
+        </svg>
+    `;
+}
+
+function escapeArtistHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function getArtistsListHTML() {
+    return `
+        <div class="flex flex-col gap-8 page-fade">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#0d0408]/90 border border-amber-500/20 p-6 md:p-8 rounded-3xl backdrop-blur-xl">
+                <div>
+                    <div class="hbu-eyebrow text-[10px] font-bold text-amber-400 uppercase">Архив карьеры</div>
+                    <h1 class="hbu-display text-2xl md:text-3xl text-white uppercase">Артисты HariVision</h1>
+                </div>
+                <div class="text-xs text-slate-300 font-medium">
+                    Всего профилей: <strong class="text-amber-400">${artistProfilesData.length}</strong>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+                ${artistProfilesData.length === 0 ? `
+                    <div class="col-span-full text-center py-16 bg-[#0d0408]/60 border border-amber-500/15 rounded-3xl p-8">
+                        <span class="text-4xl block mb-3">🎤</span>
+                        <div class="text-base font-bold text-white uppercase tracking-wider">Профили артистов ещё не добавлены</div>
+                        <p class="text-xs text-slate-400 mt-2 max-w-md mx-auto">Администратор может создать профили через панель управления.</p>
+                    </div>
+                ` : artistProfilesData.map(a => {
+                    const stats = computeArtistStats(a);
+                    return `
+                    <div onclick="navigateToView('artist-detail', '${a.id}')" class="hbu-aurora relative bg-[#0d0408]/90 hover:bg-[#16070b] border border-amber-500/20 hover:border-amber-500/40 rounded-3xl backdrop-blur-xl transition shadow-xl cursor-pointer overflow-hidden group flex flex-col">
+                        <div class="w-full h-48 overflow-hidden bg-[#16070b] relative">
+                            ${a.photo ? `<img src="${a.photo}" alt="${escapeArtistHtml(a.name)}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" />` : `
+                                <div class="w-full h-full flex items-center justify-center">${getHeartSVG('w-14 h-14 opacity-40')}</div>
+                            `}
+                            <div class="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#0d0408] to-transparent"></div>
+                        </div>
+                        <div class="p-5 flex flex-col gap-3 flex-grow">
+                            <div>
+                                <h2 class="text-lg font-black text-white group-hover:text-amber-300 uppercase tracking-wide transition">${escapeArtistHtml(a.name)}</h2>
+                                ${a.country ? `<div class="text-xs text-amber-300 font-bold uppercase tracking-wider">${escapeArtistHtml(a.country)}</div>` : ''}
+                            </div>
+                            <div class="flex items-center gap-2 text-[11px] font-mono text-slate-300 pt-2 border-t border-amber-500/10 mt-auto">
+                                <span>${stats.participations} ${stats.participations === 1 ? 'участие' : 'участия'}</span>
+                                <span class="text-amber-500/40">·</span>
+                                <span class="text-amber-400 font-bold">${stats.wins} ${stats.wins === 1 ? 'победа' : 'побед'}</span>
+                                <span class="text-amber-500/40">·</span>
+                                <span>${stats.podium} призовых</span>
+                            </div>
+                        </div>
+                    </div>
+                `; }).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function getArtistDetailHTML(artistId) {
+    const artist = artistProfilesData.find(a => a.id === artistId);
+    if (!artist) {
+        return `
+            <div class="text-center py-20 bg-[#0d0408]/60 border border-amber-500/15 rounded-3xl">
+                <span class="text-4xl block mb-3">🎤</span>
+                <div class="text-base font-bold text-white uppercase tracking-wider">Профиль не найден</div>
+                <button onclick="navigateToView('artists')" class="mt-4 text-xs font-bold text-amber-400 hover:text-white uppercase tracking-wider">&larr; Вернуться к списку артистов</button>
+            </div>
+        `;
+    }
+    const stats = computeArtistStats(artist);
+    const rankChart = getArtistRankChartSVG(stats.performances);
+
+    return `
+        <div class="flex flex-col gap-10 page-fade">
+            <button onclick="navigateToView('artists')" class="self-start text-xs font-bold text-amber-400 hover:text-white uppercase tracking-wider flex items-center gap-1.5 transition">
+                <span>&larr;</span><span>Все артисты</span>
+            </button>
+
+            <!-- Шапка профиля -->
+            <div class="hbu-aurora relative rounded-3xl overflow-hidden border border-amber-500/30 bg-gradient-to-br from-[#1c080f] via-[#100307] to-[#060204] p-8 md:p-12 shadow-[0_10px_40px_rgba(245,158,11,0.15)] flex flex-col md:flex-row items-center gap-8">
+                <div class="hbu-corner top-4 left-4 text-amber-400">${getSparkleSVG()}</div>
+                <div class="w-40 h-40 md:w-48 md:h-48 rounded-full overflow-hidden border-2 border-amber-500/40 bg-[#16070b] flex-shrink-0 shadow-2xl">
+                    ${artist.photo ? `<img src="${artist.photo}" alt="${escapeArtistHtml(artist.name)}" class="w-full h-full object-cover" />` : `<div class="w-full h-full flex items-center justify-center">${getHeartSVG('w-16 h-16 opacity-40')}</div>`}
+                </div>
+                <div class="flex-1 flex flex-col items-center md:items-start gap-3 text-center md:text-left">
+                    ${artist.country ? `<span class="hbu-eyebrow text-[10px] font-bold text-amber-400 uppercase">${escapeArtistHtml(artist.country)}</span>` : ''}
+                    <h1 class="hbu-display hbu-gold-text text-4xl md:text-5xl leading-tight">${escapeArtistHtml(artist.name)}</h1>
+                    ${artist.bio ? `<p class="text-sm text-slate-300 leading-relaxed max-w-2xl">${escapeArtistHtml(artist.bio)}</p>` : ''}
+
+                    <!-- Статистика -->
+                    <div class="flex flex-wrap items-center gap-3 pt-2">
+                        <div class="text-center px-5 py-3 bg-[#0a0305]/80 border border-amber-500/20 rounded-2xl">
+                            <div class="hbu-display text-2xl text-white leading-none">${stats.participations}</div>
+                            <div class="text-[9px] text-slate-400 uppercase tracking-widest mt-1">${stats.participations === 1 ? 'Участие' : 'Участия'}</div>
+                        </div>
+                        <div class="text-center px-5 py-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+                            <div class="hbu-display hbu-gold-text text-2xl leading-none">${stats.wins}</div>
+                            <div class="text-[9px] text-amber-400/80 uppercase tracking-widest mt-1">${stats.wins === 1 ? 'Победа' : 'Побед'}</div>
+                        </div>
+                        <div class="text-center px-5 py-3 bg-[#0a0305]/80 border border-amber-500/20 rounded-2xl">
+                            <div class="hbu-display text-2xl text-white leading-none">${stats.podium}</div>
+                            <div class="text-[9px] text-slate-400 uppercase tracking-widest mt-1">Призовых</div>
+                        </div>
+                        ${stats.best ? `
+                        <div class="text-center px-5 py-3 bg-[#0a0305]/80 border border-amber-500/20 rounded-2xl">
+                            <div class="hbu-display text-2xl text-white leading-none">#${stats.best}</div>
+                            <div class="text-[9px] text-slate-400 uppercase tracking-widest mt-1">Лучший результат</div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Диаграмма прогресса по местам -->
+            ${stats.performances.length > 0 ? `
+                <div class="bg-[#0d0408]/90 border border-amber-500/20 p-6 md:p-8 rounded-3xl backdrop-blur-xl">
+                    <h2 class="hbu-display text-xl text-white mb-1">История мест</h2>
+                    <p class="text-[11px] text-slate-400 mb-4">Хронология результатов по сезонам — наведите на бар для подробностей.</p>
+                    <div class="overflow-x-auto">${rankChart}</div>
+                </div>
+            ` : ''}
+
+            <!-- История выступлений -->
+            <div class="flex flex-col gap-6">
+                <div class="border-b border-amber-500/20 pb-4">
+                    <div class="hbu-eyebrow text-[10px] font-bold text-amber-400 uppercase">Летопись</div>
+                    <h2 class="hbu-display text-2xl text-white">История выступлений</h2>
+                </div>
+
+                ${stats.performances.length === 0 ? `
+                    <div class="text-center py-12 bg-[#0d0408]/60 border border-amber-500/15 rounded-3xl">
+                        <span class="text-3xl block mb-2">🎤</span>
+                        <div class="text-sm font-bold text-slate-300 uppercase tracking-wider">Выступления пока не привязаны</div>
+                        <div class="text-xs text-slate-500 mt-1">Администратор может связать этот профиль с записями участников в сезонах.</div>
+                    </div>
+                ` : `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        ${stats.performances.map((p, idx) => {
+                            const hasPostcardVid = Boolean(p.postcardVideo && p.postcardVideo.trim());
+                            const hasPerfVid = Boolean(p.performanceVideo && p.performanceVideo.trim());
+                            const statusBadge = p.rank === 1
+                                ? `<span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">🏆 Победитель</span>`
+                                : (p.rank && p.rank <= 3
+                                    ? `<span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">Призёр</span>`
+                                    : `<span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-slate-900 text-slate-400 border border-slate-700">Финалист</span>`);
+                            return `
+                            <div class="bg-[#16070b]/95 border border-amber-500/20 hover:border-amber-500/40 p-5 rounded-3xl flex flex-col gap-3 transition shadow-xl">
+                                <div class="flex items-center justify-between gap-2 border-b border-amber-500/10 pb-3">
+                                    <div onclick="event.stopPropagation(); navigateToView('contest-detail', '${p.contestId}')" class="cursor-pointer hover:text-amber-300 transition">
+                                        <div class="text-[10px] font-mono text-amber-400/80">${escapeArtistHtml(p.contestDate || '')}</div>
+                                        <div class="text-xs font-bold text-white uppercase tracking-wide">${escapeArtistHtml(p.contestTitle || 'Сезон HariVision')}</div>
+                                    </div>
+                                    ${p.rank ? statusBadge : ''}
+                                </div>
+
+                                ${p.song ? `
+                                    <div class="text-xs text-slate-300 italic flex items-center gap-1.5 bg-[#0a0305]/60 px-3 py-1.5 rounded-xl border border-amber-500/10">
+                                        <span class="text-amber-400">🎵</span><span class="font-medium text-white">«${escapeArtistHtml(p.song)}»</span>
+                                    </div>
+                                ` : ''}
+                                ${p.country ? `<div class="text-[11px] text-amber-300/80 font-bold uppercase tracking-wider">${p.flag || ''} ${escapeArtistHtml(p.country)}</div>` : ''}
+
+                                ${hasPerfVid || hasPostcardVid ? `
+                                    ${hasPerfVid ? renderVideoPlayerHTML(p.performanceVideo, 'Выступление: ' + (p.contestTitle || ''), 'w-full aspect-video rounded-2xl overflow-hidden border border-amber-500/20 bg-black') :
+                                        renderVideoPlayerHTML(p.postcardVideo, 'Видео-открытка: ' + (p.contestTitle || ''), 'w-full aspect-video rounded-2xl overflow-hidden border border-amber-500/20 bg-black')}
+                                ` : `
+                                    <div class="py-5 px-4 rounded-2xl bg-[#0a0305]/70 border border-dashed border-amber-500/20 text-center">
+                                        <span class="text-[11px] text-slate-500 font-medium">Видео пока не добавлено</span>
+                                    </div>
+                                `}
+
+                                ${p.postcard ? `<div class="text-[11px] text-slate-400 italic">${escapeArtistHtml(p.postcard)}</div>` : ''}
+                            </div>
+                        `; }).join('')}
+                    </div>
+                `}
             </div>
         </div>
     `;
@@ -3115,6 +3401,9 @@ subscribeState((state) => {
     if (Array.isArray(state.news) && (state.news.length > 0 || newsData.length === 0)) {
         newsData = sortNewsDescending(state.news);
     }
+    if (Array.isArray(state.artistProfiles) && (state.artistProfiles.length > 0 || artistProfilesData.length === 0)) {
+        artistProfilesData = state.artistProfiles;
+    }
     participantsData = (Array.isArray(state.participants) && state.participants.length > 0) ? state.participants : (participantsData.length ? participantsData : DEFAULT_PARTICIPANTS);
     votesData = state.votes || [];
     calendarNotesData = state.calendarNotes || [];
@@ -3210,6 +3499,7 @@ subscribeState((state) => {
     const currentContentHash = safeJsonStringify({
         contests: contestsData,
         news: newsData,
+        artistProfiles: artistProfilesData,
         participants: participantsData,
         recapUrl: systemState.recapVideoUrl,
         featuredId: systemState.featuredContestId,
