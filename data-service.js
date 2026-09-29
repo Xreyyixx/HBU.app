@@ -1,4 +1,4 @@
-import { db, auth, ensureFirebaseAuth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS, INITIAL_CALENDAR_NOTES } from './config.js';
+import { db, auth, ensureFirebaseAuth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS, INITIAL_CALENDAR_NOTES, API_BASE } from './config.js';
 import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
     signInWithEmailAndPassword, 
@@ -594,10 +594,14 @@ function initRealtimeSync() {
     // 2. Immediate Direct Firestore pull
     fetchFirestoreStateDirectly();
 
-    // 3. Server-Sent Events for local development
+    // 3. Server-Sent Events (работает когда рядом есть живой Node-сервер — локально
+    // или на реальном хостинге вроде Render; на чистом GitHub Pages сервера нет вообще,
+    // поэтому запрос просто не подключится, и приложение продолжит работать через
+    // прямые слушатели Firestore выше). API_BASE переписывает адрес на реальный сервер,
+    // если статика раздаётся с другого origin (см. config.js).
     if (typeof EventSource !== 'undefined') {
         try {
-            sseSource = new EventSource('/api/events');
+            sseSource = new EventSource((API_BASE || '') + '/api/events');
             sseSource.onmessage = (event) => {
                 try {
                     const parsed = JSON.parse(event.data);

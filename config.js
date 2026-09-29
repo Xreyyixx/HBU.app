@@ -41,10 +41,28 @@ try {
     setLogLevel('silent');
 } catch (e) {}
 
+// -------------------------------------------------------------
+// Адрес Node-бэкенда (server.js), когда статика раздаётся НЕ с него.
+// GitHub Pages — чисто статический хостинг: он не умеет исполнять server.js
+// (нет Node, POST-запросы отклоняются самой инфраструктурой GitHub с 405).
+// Поэтому со страницы, открытой на *.github.io, все обращения к /api/...
+// нужно переадресовывать на реальный адрес развёрнутого сервера (например, Render).
+// На самом сервере (или в локальной разработке через `node server.js`) статика и
+// API живут на одном origin — там ничего переписывать не нужно, API_BASE пустой.
+// ЗАПОЛНИТЕ после деплоя на Render (или другой Node-хостинг), например:
+// 'https://hbu-server.onrender.com'
+export const RENDER_API_BASE = '';
+export const API_BASE = (typeof window !== 'undefined' && /\.github\.io$/i.test(window.location.hostname))
+    ? RENDER_API_BASE
+    : '';
+if (typeof window !== 'undefined' && /\.github\.io$/i.test(window.location.hostname) && !RENDER_API_BASE) {
+    console.warn('[HBU] Страница открыта на GitHub Pages, а адрес API-сервера (RENDER_API_BASE в config.js) не заполнен — все запросы к /api/... не будут работать.');
+}
+
 // Fetch Firebase config from server or window fallback (no hardcoded production credentials)
 let remoteConfig = null;
 try {
-    const res = await fetch('/api/firebase-config');
+    const res = await fetch((API_BASE || '') + '/api/firebase-config');
     if (res.ok) {
         remoteConfig = await res.json();
     }
@@ -115,8 +133,16 @@ if (typeof window !== 'undefined' && typeof window.fetch === 'function' && !wind
     const _origFetch = window.fetch.bind(window);
     const patchedFetch = async function(input, init = {}) {
         try {
-            const url = typeof input === 'string' ? input : (input && input.url) || '';
+            let url = typeof input === 'string' ? input : (input && input.url) || '';
             const isApi = url.startsWith('/api/') || url.startsWith(window.location.origin + '/api/');
+            // Страница раздаётся с другого origin, чем сервер (GitHub Pages + Render) —
+            // переписываем относительный /api/... на реальный адрес сервера прозрачно,
+            // для ЛЮБОГО кода в приложении, без правки каждого отдельного fetch()-вызова.
+            if (isApi && API_BASE && url.startsWith('/api/')) {
+                const rewritten = API_BASE + url;
+                input = (typeof input === 'string') ? rewritten : new Request(rewritten, input);
+                url = rewritten;
+            }
             const isFirestoreRest = url.startsWith('https://firestore.googleapis.com/');
             if (isApi || isFirestoreRest) {
                 const headers = new Headers((init && init.headers) || (typeof input !== 'string' && input.headers) || {});

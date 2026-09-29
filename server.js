@@ -9,7 +9,35 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+// Render (и большинство Node-хостингов) сами назначают порт через переменную окружения
+// PORT и передают её приложению — слушать фиксированный 3000 на таком хостинге нельзя.
+const PORT = process.env.PORT || 3000;
+
+// CORS: статика теперь может раздаваться с ДРУГОГО origin (например, GitHub Pages),
+// а API — отсюда, с сервера. Без этих заголовков браузер блокирует все кросс-доменные
+// запросы ещё до того, как они дойдут до роутов ниже. Список разрешённых источников
+// можно расширить через .env (ALLOWED_ORIGINS="https://a.com,https://b.com").
+const DEFAULT_ALLOWED_ORIGINS = [
+    'https://xreyyixx.github.io',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000'
+];
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
+    : DEFAULT_ALLOWED_ORIGINS);
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    }
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+    }
+    next();
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
