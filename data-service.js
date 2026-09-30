@@ -1367,69 +1367,147 @@ export async function deleteContest(contestId) {
 // ВАЖНО: не путать с логин-аккаунтами исполнителей (currentState.artists,
 // коллекция Firestore "artists") — это отдельная, независимая сущность.
 // -------------------------------------------------------------
+// Серверная сессия админа живёт в памяти/на диске Node-сервера; на бесплатном Render
+// диск эфемерный, поэтому после каждого рестарта сервера сохранённый в браузере токен
+// становится недействительным (HTTP 401), хотя сам админ по-прежнему вошёл в Firebase.
+// Этот хелпер тихо получает свежий токен по ID-токену Firebase.
+export async function refreshAdminServerSession() {
+    if (!auth || !auth.currentUser || auth.currentUser.isAnonymous) return null;
+    try {
+        const idToken = await auth.currentUser.getIdToken();
+        const res = await fetch('/api/admin/register-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+            body: '{}'
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data && data.success && data.token) {
+            localStorage.setItem('harivision_admin_token', data.token);
+            return data.token;
+        }
+    } catch (e) {}
+    return null;
+}
+
+// Возвращает { ok, firestoreOk, serverOk, error }. Раньше результат сохранения молча
+// проглатывался, и админка писала «профиль создан!» даже когда не сохранилось нигде
+// (Firestore отклонял запись по правилам, а серверный токен протух).
 export async function saveArtistProfile(artist) {
     if (!artist.id) artist.id = 'artist-profile-' + Date.now();
     if (!Array.isArray(currentState.artistProfiles)) currentState.artistProfiles = [];
-    const idx = currentState.artistProfiles.findIndex(a => a.id === artist.id);
+
+    // Чистим undefined (Firestore их не принимает) и фиксируем «как было» для отката
+    const clean = JSON.parse(safeJsonStringify(artist) || '{}');
+    clean.id = artist.id;
+    const snapshotBefore = JSON.parse(JSON.stringify(currentState.artistProfiles));
+
+    const idx = currentState.artistProfiles.findIndex(a => a.id === clean.id);
     if (idx >= 0) {
-        currentState.artistProfiles[idx] = { ...currentState.artistProfiles[idx], ...artist };
+        currentState.artistProfiles[idx] = clean;
     } else {
-        currentState.artistProfiles.push(artist);
+        currentState.artistProfiles.push(clean);
     }
     notifyStateChanged(true);
 
-    // Save to Firestore directly in collection "artistProfiles"
-    try {
-        if (db) {
-            await setDoc(doc(db, "artistProfiles", artist.id), artist, { merge: true });
+    // Оба канала идут параллельно: отказ Firestore может занимать секунды, и ждать его
+    // перед запросом к серверу незачем.
+    const firestorePart = (async () => {
+        try {
+            if (!db) return { ok: false, error: 'Firestore не инициализирован' };
+            await ensureFirebaseAuth();
+            // Профиль редактируется целиком — полная перезапись, а не merge (иначе удалённые
+            // из формы диаграммы/таблицы остались бы в документе).
+            await setDoc(doc(db, "artistProfiles", clean.id), clean);
+            return { ok: true, error: '' };
+        } catch (e) {
+            console.warn('Firestore save artist profile error:', e);
+            return { ok: false, error: (e && (e.code || e.message)) || String(e) };
         }
-    } catch (e) {
-        console.warn('Firestore save artist profile error:', e);
+    })();
+    const serverPart = (async () => {
+        try {
+            const post = () => fetch('/api/artist-profiles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: safeJsonStringify(clean)
+            });
+            let res = await post();
+            if (res.status === 401 && await refreshAdminServerSession()) {
+                res = await post();
+            }
+            if (!res.ok) return { ok: false, error: 'HTTP ' + res.status };
+            return { ok: true, error: '', data: await res.json() };
+        } catch (e) {
+            return { ok: false, error: (e && e.message) || String(e) };
+        }
+    })();
+    const [fsResult, srvResult] = await Promise.all([firestorePart, serverPart]);
+    const firestoreOk = fsResult.ok, firestoreError = fsResult.error;
+    const serverOk = srvResult.ok, serverError = srvResult.error;
+    // Если Firestore принял запись — его realtime-слушатель и так приведёт список к единому
+    // виду; серверный список подменяет локальный только когда Firestore недоступен.
+    if (serverOk && !firestoreOk && srvResult.data && srvResult.data.artistProfiles) {
+        currentState.artistProfiles = srvResult.data.artistProfiles;
+        notifyStateChanged(true);
     }
 
-    // Save to REST API if available
-    try {
-        const res = await fetch('/api/artist-profiles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: safeJsonStringify(artist)
-        });
-        if (res.ok) {
-            const data = await res.json();
-            if (data.artistProfiles) {
-                currentState.artistProfiles = data.artistProfiles;
-                notifyStateChanged(true);
-            }
-        }
-    } catch (e) {}
+    if (!firestoreOk && !serverOk) {
+        // Нигде не сохранилось — откатываем локальное «оптимистичное» изменение
+        currentState.artistProfiles = snapshotBefore;
+        notifyStateChanged(true);
+    }
 
-    return currentState.artistProfiles;
+    return {
+        ok: firestoreOk || serverOk,
+        firestoreOk,
+        serverOk,
+        error: firestoreOk || serverOk ? '' : `Firestore: ${firestoreError || 'недоступен'}; сервер: ${serverError || 'недоступен'}`,
+        firestoreError
+    };
 }
 
 export async function deleteArtistProfile(artistId) {
+    const snapshotBefore = JSON.parse(JSON.stringify(currentState.artistProfiles || []));
     currentState.artistProfiles = (currentState.artistProfiles || []).filter(a => a.id !== artistId);
     notifyStateChanged(true);
 
-    try {
-        if (db) {
+    // Оба канала идут параллельно (см. saveArtistProfile)
+    const firestorePart = (async () => {
+        try {
+            if (!db) return false;
+            await ensureFirebaseAuth();
             await deleteDoc(doc(db, "artistProfiles", artistId));
+            return true;
+        } catch (e) {
+            console.warn('Firestore delete artist profile error:', e);
+            return false;
         }
-    } catch (e) {
-        console.warn('Firestore delete artist profile error:', e);
+    })();
+    const serverPart = (async () => {
+        try {
+            const del = () => fetch(`/api/artist-profiles/${artistId}`, { method: 'DELETE' });
+            let res = await del();
+            if (res.status === 401 && await refreshAdminServerSession()) {
+                res = await del();
+            }
+            return res.ok ? await res.json() : null;
+        } catch (e) {
+            return null;
+        }
+    })();
+    const [firestoreOk, serverData] = await Promise.all([firestorePart, serverPart]);
+    const serverOk = Boolean(serverData);
+    if (serverOk && !firestoreOk && serverData.artistProfiles) {
+        currentState.artistProfiles = serverData.artistProfiles;
+        notifyStateChanged(true);
     }
 
-    try {
-        const res = await fetch(`/api/artist-profiles/${artistId}`, { method: 'DELETE' });
-        if (res.ok) {
-            const data = await res.json();
-            if (data.artistProfiles) {
-                currentState.artistProfiles = data.artistProfiles;
-                notifyStateChanged(true);
-            }
-        }
-    } catch (e) {}
-
-    return currentState.artistProfiles;
+    if (!firestoreOk && !serverOk) {
+        currentState.artistProfiles = snapshotBefore;
+        notifyStateChanged(true);
+    }
+    return { ok: firestoreOk || serverOk, firestoreOk, serverOk };
 }
 
 // -------------------------------------------------------------

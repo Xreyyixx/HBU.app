@@ -415,6 +415,18 @@
                 </button>
             </div>
 
+            <!-- Появляется сам, если Firestore отклонил запись профиля (нет разрешения в опубликованных правилах) -->
+            <div id="artist-rules-warning" class="hidden bg-rose-950/40 border border-rose-500/40 rounded-3xl p-5 flex flex-col gap-3">
+                <div class="text-sm font-bold text-rose-200">⚠️ Firestore не принимает запись профилей артистов</div>
+                <p class="text-xs text-rose-100/80 leading-relaxed">
+                    В опубликованных правилах Firestore нет разрешения на коллекцию <code class="font-mono">artistProfiles</code>, поэтому профили
+                    сохраняются только на сервере и пропадут при его перезапуске. Откройте Firebase Console → Firestore Database → Rules,
+                    добавьте фрагмент ниже внутрь блока <code class="font-mono">match /databases/{database}/documents { … }</code> и нажмите Publish.
+                </p>
+                <pre id="artist-rules-snippet" class="text-[11px] font-mono text-amber-100 bg-[#0a0305] border border-amber-500/20 rounded-xl p-3 overflow-x-auto"></pre>
+                <button type="button" onclick="copyArtistRulesSnippet()" class="self-start px-4 py-2 bg-rose-900/60 hover:bg-rose-800 border border-rose-500/40 text-rose-100 font-bold text-[11px] uppercase rounded-xl transition">Скопировать фрагмент</button>
+            </div>
+
             <!-- Список профилей артистов -->
             <div id="admin-artists-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <!-- Injected via JS -->
@@ -1088,67 +1100,137 @@
         </div>
     </div>
 
-    <!-- Модальное окно редактирования профиля артиста (архив карьеры) -->
-    <div id="artist-editor-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8 flex flex-col gap-4 rounded-3xl shadow-2xl">
+    <!-- Модальное окно редактирования профиля артиста (архив карьеры).
+         Логика — artist-admin.js. Вкладки: Профиль / Выступления / Диаграммы / Таблицы. -->
+    <div id="artist-editor-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4">
+        <div class="bg-[#0d0408] border border-amber-500/30 w-full max-w-3xl max-h-[92vh] overflow-y-auto p-5 sm:p-7 flex flex-col gap-4 rounded-3xl shadow-2xl">
             <div class="flex items-center justify-between border-b border-amber-500/20 pb-3">
                 <h3 id="artist-editor-title" class="text-lg font-bold text-white uppercase">Профиль артиста</h3>
-                <button onclick="closeArtistEditorModal()" class="text-slate-400 hover:text-white font-bold">✕</button>
+                <button type="button" onclick="closeArtistEditorModal()" class="text-slate-400 hover:text-white font-bold">✕</button>
             </div>
 
-            <form id="artist-form" class="flex flex-col gap-4">
+            <form id="artist-form" class="flex flex-col gap-4" onsubmit="return false">
                 <input type="hidden" id="artist-edit-id" />
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <!-- Вкладки -->
+                <div id="artist-tabs" class="flex items-center gap-1.5 p-1 bg-[#16070b] border border-amber-500/20 rounded-2xl overflow-x-auto">
+                    <button type="button" data-pane="profile" onclick="switchArtistPane('profile')" class="flex-1 whitespace-nowrap py-2 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wider transition">👤 Профиль</button>
+                    <button type="button" data-pane="performances" onclick="switchArtistPane('performances')" class="flex-1 whitespace-nowrap py-2 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wider transition">🎤 Выступления</button>
+                    <button type="button" data-pane="charts" onclick="switchArtistPane('charts')" class="flex-1 whitespace-nowrap py-2 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wider transition">📊 Диаграммы</button>
+                    <button type="button" data-pane="tables" onclick="switchArtistPane('tables')" class="flex-1 whitespace-nowrap py-2 px-3 rounded-xl text-[11px] font-bold uppercase tracking-wider transition">▦ Таблицы</button>
+                </div>
+
+                <!-- ============ ВКЛАДКА: ПРОФИЛЬ ============ -->
+                <div id="artist-pane-profile" class="flex flex-col gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Сценическое имя</label>
+                            <input type="text" id="artist-input-name" placeholder="RODION" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Страна / делегация</label>
+                            <input type="text" id="artist-input-country" placeholder="THE KUR" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                        </div>
+                    </div>
+
                     <div>
-                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Сценическое имя</label>
-                        <input type="text" id="artist-input-name" required placeholder="RODION" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Фото артиста</label>
+                        <div class="bg-[#16070b] border border-amber-500/25 p-3.5 rounded-2xl flex flex-col gap-3">
+                            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                                <label class="cursor-pointer bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow shrink-0">
+                                    <span>📁 Загрузить файл</span>
+                                    <input type="file" id="artist-photo-file" accept="image/*" class="hidden" onchange="handleArtistPhotoFile(event)" />
+                                </label>
+                                <span class="text-[10px] text-slate-400 text-center sm:text-left">или вставьте ссылку (URL):</span>
+                            </div>
+                            <input type="text" id="artist-input-photo" placeholder="https://..." oninput="updateArtistPhotoPreview(this.value)" class="w-full bg-[#0a0305] border border-amber-500/20 px-3.5 py-2 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 font-mono" />
+                            <div id="artist-photo-dropzone" ondragover="event.preventDefault(); this.classList.add('border-amber-400')" ondragleave="this.classList.remove('border-amber-400')" ondrop="handleArtistPhotoDrop(event)" class="relative border border-dashed border-amber-500/30 rounded-xl p-3 bg-[#0a0305]/60 flex items-center justify-center min-h-[96px] overflow-hidden transition">
+                                <div id="artist-photo-placeholder" class="flex flex-col items-center gap-1 text-slate-400 pointer-events-none py-1">
+                                    <span class="text-2xl">🖼️</span>
+                                    <span class="text-[10px] text-center">Перетащите картинку сюда или выберите файл</span>
+                                </div>
+                                <img id="artist-photo-preview" src="" alt="" class="hidden max-h-44 rounded-xl object-cover border border-amber-500/20" />
+                                <button type="button" id="artist-photo-remove" onclick="clearArtistPhoto()" class="hidden absolute top-2 right-2 px-2.5 py-1 bg-rose-950/90 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-[10px] font-bold uppercase rounded-lg transition">✕ Убрать</button>
+                            </div>
+                            <div class="text-[10px] text-slate-500">Файл автоматически сжимается (до ~640px), чтобы профиль помещался в базу.</div>
+                        </div>
                     </div>
+
                     <div>
-                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Страна / делегация</label>
-                        <input type="text" id="artist-input-country" placeholder="THE KUR" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400" />
+                        <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Биография / описание (опционально)</label>
+                        <textarea id="artist-input-bio" rows="4" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400"></textarea>
                     </div>
                 </div>
 
-                <div>
-                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Фото (ссылка URL)</label>
-                    <input type="text" id="artist-input-photo" placeholder="https://..." oninput="updateArtistPhotoPreview(this.value)" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400 font-mono" />
-                    <img id="artist-photo-preview" src="" alt="" class="hidden mt-2 w-24 h-24 object-cover rounded-2xl border border-amber-500/25" />
-                </div>
-
-                <div>
-                    <label class="text-[10px] font-bold text-amber-400 uppercase tracking-widest block mb-1">Биография / описание (опционально)</label>
-                    <textarea id="artist-input-bio" rows="3" class="w-full bg-[#16070b] border border-amber-500/25 px-4 py-2.5 text-xs text-white rounded-xl focus:outline-none focus:border-amber-400"></textarea>
-                </div>
-
-                <!-- Привязанные выступления: считаются автоматически из данных сезонов, тут только ссылки -->
-                <div id="artist-linked-performances-block" class="hidden border-t border-amber-500/15 pt-4">
-                    <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-2">Привязанные выступления</div>
-                    <div id="artist-linked-performances-list" class="flex flex-col gap-2"></div>
-                </div>
-
-                <!-- Привязка существующего выступления из уже загруженного сезона -->
-                <div id="artist-link-performance-block" class="hidden border-t border-amber-500/15 pt-4 flex flex-col gap-2">
-                    <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">🔗 Привязать выступление из сезона</div>
-                    <div class="flex flex-col sm:flex-row gap-2">
-                        <select id="artist-link-contest-select" onchange="renderArtistLinkParticipantOptions()" class="flex-1 bg-[#16070b] border border-amber-500/25 px-3 py-2 text-xs text-white rounded-xl">
-                            <option value="">— выберите сезон —</option>
-                        </select>
-                        <select id="artist-link-participant-select" class="flex-1 bg-[#16070b] border border-amber-500/25 px-3 py-2 text-xs text-white rounded-xl">
-                            <option value="">— выберите запись —</option>
-                        </select>
-                        <button type="button" onclick="linkSelectedArtistPerformance()" class="px-4 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl transition whitespace-nowrap">
-                            Привязать
-                        </button>
+                <!-- ============ ВКЛАДКА: ВЫСТУПЛЕНИЯ ============ -->
+                <div id="artist-pane-performances" class="hidden flex flex-col gap-5">
+                    <div id="artist-unsaved-note" class="hidden text-[11px] text-amber-200/90 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3.5 py-2.5">
+                        Привязка записей из сезонов станет доступна после первого сохранения профиля (кнопка «Применить» внизу). Ручные выступления можно добавлять уже сейчас.
                     </div>
-                    <p class="text-[10px] text-slate-500">Само выступление (место, видео, открытка) по-прежнему редактируется в разделе Contests — здесь только связь профиля с записью.</p>
+
+                    <!-- Привязанные записи из сезонов -->
+                    <div id="artist-linked-section" class="flex flex-col gap-2">
+                        <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Привязано из сезонов</div>
+                        <div id="artist-linked-performances-list" class="flex flex-col gap-2"></div>
+                    </div>
+
+                    <!-- Импорт по имени + ручная привязка -->
+                    <div id="artist-link-section" class="flex flex-col gap-3 border-t border-amber-500/15 pt-4">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">🔗 Связать с выступлениями в сезонах</div>
+                            <button type="button" onclick="scanArtistImportCandidates()" class="px-3.5 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-[11px] uppercase rounded-xl transition">🔍 Найти по имени в сезонах</button>
+                        </div>
+                        <div id="artist-import-result" class="hidden flex flex-col gap-2"></div>
+
+                        <div class="text-[10px] text-slate-400">Или выберите запись вручную:</div>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <select id="artist-link-contest-select" onchange="renderArtistLinkParticipantOptions()" class="flex-1 bg-[#16070b] border border-amber-500/25 px-3 py-2 text-xs text-white rounded-xl">
+                                <option value="">— выберите сезон —</option>
+                            </select>
+                            <select id="artist-link-participant-select" class="flex-1 bg-[#16070b] border border-amber-500/25 px-3 py-2 text-xs text-white rounded-xl">
+                                <option value="">— выберите запись —</option>
+                            </select>
+                            <button type="button" onclick="linkSelectedArtistPerformance()" class="px-4 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl transition whitespace-nowrap">Привязать</button>
+                        </div>
+                    </div>
+
+                    <!-- Ручные выступления -->
+                    <div class="flex flex-col gap-3 border-t border-amber-500/15 pt-4">
+                        <div class="flex items-center justify-between gap-2">
+                            <div>
+                                <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">✍️ Выступления, добавленные вручную</div>
+                                <div class="text-[10px] text-slate-500">Для номеров, которых нет в разделе конкурсов: гостевые выступления, прошлые сезоны, ссылки на плееры.</div>
+                            </div>
+                            <button type="button" onclick="addArtistManualPerformance()" class="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-[11px] uppercase rounded-xl shadow whitespace-nowrap">+ Добавить</button>
+                        </div>
+                        <div id="artist-manual-list" class="flex flex-col gap-3"></div>
+                    </div>
                 </div>
 
-                <div class="flex justify-between items-center gap-3 pt-3 border-t border-amber-500/20">
+                <!-- ============ ВКЛАДКА: ДИАГРАММЫ ============ -->
+                <div id="artist-pane-charts" class="hidden flex flex-col gap-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="text-[11px] text-slate-400 leading-relaxed">Введите подписи и значения (например, соотношение жанров или баллы по сезонам) — сайт сам построит диаграмму и посчитает проценты.</div>
+                        <button type="button" onclick="addArtistChart()" class="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-[11px] uppercase rounded-xl shadow whitespace-nowrap">+ Диаграмма</button>
+                    </div>
+                    <div id="artist-charts-list" class="flex flex-col gap-4"></div>
+                </div>
+
+                <!-- ============ ВКЛАДКА: ТАБЛИЦЫ ============ -->
+                <div id="artist-pane-tables" class="hidden flex flex-col gap-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="text-[11px] text-slate-400 leading-relaxed">Кликните на любую ячейку и впишите данные. Можно вставить таблицу целиком из Excel / Google Таблиц (Ctrl+V в ячейку).</div>
+                        <button type="button" onclick="addArtistTable()" class="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-[11px] uppercase rounded-xl shadow whitespace-nowrap">+ Таблица</button>
+                    </div>
+                    <div id="artist-tables-list" class="flex flex-col gap-4"></div>
+                </div>
+
+                <div class="flex flex-wrap justify-between items-center gap-3 pt-3 border-t border-amber-500/20">
                     <button type="button" id="artist-delete-btn" onclick="deleteAdminArtist()" class="hidden px-4 py-2.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 font-bold text-xs uppercase rounded-xl border border-rose-500/30 transition">Удалить профиль</button>
-                    <div class="flex gap-3 ml-auto">
-                        <button type="button" onclick="closeArtistEditorModal()" class="px-5 py-2.5 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl">Отмена</button>
-                        <button type="submit" class="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg">Сохранить профиль</button>
+                    <div class="flex flex-wrap gap-2 ml-auto">
+                        <button type="button" onclick="closeArtistEditorModal()" class="px-5 py-2.5 bg-[#16070b] text-slate-300 font-bold text-xs uppercase rounded-xl">Закрыть</button>
+                        <button type="button" id="artist-apply-btn" onclick="submitArtistForm(true)" class="px-5 py-2.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs uppercase rounded-xl transition">Применить</button>
+                        <button type="button" id="artist-save-btn" onclick="submitArtistForm(false)" class="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg">Сохранить и закрыть</button>
                     </div>
                 </div>
             </form>

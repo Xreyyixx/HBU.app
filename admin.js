@@ -32,6 +32,7 @@ import {
     sortNewsDescending,
     checkIsAdmin 
 } from './data-service.js';
+import { initArtistAdmin } from './artist-admin.js';
 
 let appState = {
     contests: [],
@@ -50,6 +51,13 @@ let appState = {
 let activeModalVoteId = null;
 let activeAdminTab = 'voting';
 let timerInterval = null;
+
+// Раздел «Артисты» живёт в artist-admin.js; ссылка заполняется инициализацией ниже по файлу.
+// Обёртка — function declaration (поднимается), чтобы её можно было звать из любого места файла.
+let artistAdmin = null;
+function renderAdminArtists() {
+    if (artistAdmin) artistAdmin.renderAdminArtists();
+}
 
 // -------------------------------------------------------------
 // РУЧНАЯ И АВТОМАТИЧЕСКАЯ ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ
@@ -1739,240 +1747,18 @@ window.saveFeaturedBannerFromSelect = async function() {
 };
 
 // -------------------------------------------------------------
-// РАЗДЕЛ: ARTIST PROFILES (архив карьеры артистов, раздел «Артисты»)
-// ВАЖНО: НЕ путать с логин-аккаунтами исполнителей (роль artist для входа на сайт,
-// отдельная Firestore-коллекция "artists") — это независимая сущность appState.artistProfiles.
-// Сами выступления НЕ дублируются здесь: они по-прежнему живут в contest.participants[],
-// эта модалка только создаёт СВЯЗЬ (participant.artistId) с уже существующей записью.
+// РАЗДЕЛ «АРТИСТЫ» (профили карьеры) — вся логика в artist-admin.js
+// ВАЖНО: не путать с логин-аккаунтами исполнителей (Firestore "artists").
 // -------------------------------------------------------------
-function renderAdminArtists() {
-    const container = document.getElementById('admin-artists-list');
-    if (!container) return;
-
-    const list = appState.artistProfiles || [];
-    if (list.length === 0) {
-        container.innerHTML = `<div class="col-span-full text-center py-10 text-xs text-slate-400">Профилей артистов пока нет. Добавьте первый!</div>`;
-        return;
-    }
-
-    container.innerHTML = list.map(a => {
-        const perfCount = getArtistLinkedPerformances(a.id).length;
-        return `
-        <div class="bg-[#0d0408]/90 border border-amber-500/20 p-5 rounded-3xl backdrop-blur-xl flex items-center gap-4 shadow-lg">
-            <div class="w-16 h-16 rounded-2xl overflow-hidden bg-[#16070b] border border-amber-500/20 flex-shrink-0">
-                ${a.photo ? `<img src="${escapeHtml(a.photo)}" alt="" class="w-full h-full object-cover" />` : `<div class="w-full h-full flex items-center justify-center text-lg">🎤</div>`}
-            </div>
-            <div class="flex-1 min-w-0">
-                <h3 class="text-sm font-black text-white uppercase tracking-wide truncate">${escapeHtml(a.name || '')}</h3>
-                ${a.country ? `<div class="text-[11px] text-amber-300 font-bold uppercase tracking-wider">${escapeHtml(a.country)}</div>` : ''}
-                <div class="text-[10px] text-slate-400 font-mono mt-1">${perfCount} ${perfCount === 1 ? 'выступление привязано' : 'выступлений привязано'}</div>
-            </div>
-            <div class="flex flex-col gap-1.5 flex-shrink-0">
-                <button onclick="openArtistEditorModal('${a.id}')" class="px-3 py-1.5 bg-[#16070b] hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-[10px] uppercase rounded-lg transition">Редактировать</button>
-                <button onclick="deleteAdminArtist('${a.id}')" class="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900 border border-rose-500/30 text-rose-300 font-bold text-[10px] uppercase rounded-lg transition">Удалить</button>
-            </div>
-        </div>
-    `}).join('');
-}
-
-// Выступления, УЖЕ явно привязанные к профилю (по artistId). Мягкий фолбэк по имени
-// (используется на публичной странице для старых, ещё не привязанных записей) здесь
-// намеренно не применяется — в админке нужна точная картина того, что реально связано.
-function getArtistLinkedPerformances(artistId) {
-    const result = [];
-    (appState.contests || []).forEach(c => {
-        (c.participants || c.countries || []).forEach((p, idx) => {
-            if (p.artistId === artistId) {
-                result.push({ ...p, contestId: c.id, contestTitle: c.title, contestDate: c.date, participantIndex: idx });
-            }
-        });
-    });
-    return result;
-}
-
-let currentEditingArtistId = null;
-
-window.openArtistEditorModal = function(artistId) {
-    const modal = document.getElementById('artist-editor-modal');
-    const titleEl = document.getElementById('artist-editor-title');
-    const form = document.getElementById('artist-form');
-    form.reset();
-    document.getElementById('artist-photo-preview').classList.add('hidden');
-    currentEditingArtistId = artistId || null;
-
-    const linkedBlock = document.getElementById('artist-linked-performances-block');
-    const linkBlock = document.getElementById('artist-link-performance-block');
-    const deleteBtn = document.getElementById('artist-delete-btn');
-
-    if (artistId) {
-        const a = (appState.artistProfiles || []).find(x => x.id === artistId);
-        if (!a) return;
-        titleEl.innerText = 'Редактирование профиля артиста';
-        document.getElementById('artist-edit-id').value = a.id;
-        document.getElementById('artist-input-name').value = a.name || '';
-        document.getElementById('artist-input-country').value = a.country || '';
-        document.getElementById('artist-input-photo').value = a.photo || '';
-        document.getElementById('artist-input-bio').value = a.bio || '';
-        updateArtistPhotoPreview(a.photo || '');
-        deleteBtn.classList.remove('hidden');
-        linkedBlock.classList.remove('hidden');
-        linkBlock.classList.remove('hidden');
-        renderArtistLinkedPerformancesList(artistId);
-        renderArtistLinkContestOptions();
-    } else {
-        titleEl.innerText = 'Новый профиль артиста';
-        document.getElementById('artist-edit-id').value = '';
-        deleteBtn.classList.add('hidden');
-        linkedBlock.classList.add('hidden');
-        linkBlock.classList.add('hidden'); // привязка выступлений доступна только после первого сохранения
-    }
-
-    modal.classList.remove('hidden');
-};
-
-window.closeArtistEditorModal = function() {
-    document.getElementById('artist-editor-modal').classList.add('hidden');
-    currentEditingArtistId = null;
-};
-
-window.updateArtistPhotoPreview = function(url) {
-    const img = document.getElementById('artist-photo-preview');
-    if (url && url.trim()) {
-        img.src = url.trim();
-        img.classList.remove('hidden');
-    } else {
-        img.classList.add('hidden');
-    }
-};
-
-function renderArtistLinkedPerformancesList(artistId) {
-    const listEl = document.getElementById('artist-linked-performances-list');
-    const performances = getArtistLinkedPerformances(artistId);
-    if (performances.length === 0) {
-        listEl.innerHTML = `<div class="text-[11px] text-slate-500 italic">Ещё нет привязанных выступлений — используйте форму ниже.</div>`;
-        return;
-    }
-    listEl.innerHTML = performances.map(p => `
-        <div class="flex items-center justify-between gap-2 bg-[#16070b] border border-amber-500/15 px-3 py-2 rounded-xl">
-            <div class="text-[11px] text-slate-200">
-                <span class="text-amber-400 font-mono">${escapeHtml(p.contestDate || '')}</span>
-                <span class="mx-1">·</span>
-                <span class="font-bold">${escapeHtml(p.contestTitle || p.contestId)}</span>
-                ${p.rank ? `<span class="ml-1.5 text-amber-300">#${p.rank}</span>` : ''}
-            </div>
-            <div class="flex items-center gap-2">
-                <button type="button" onclick="closeArtistEditorModal(); openContestEditorModal('${p.contestId}')" class="text-[10px] font-bold text-amber-400 hover:text-white uppercase">✏️ В сезоне</button>
-                <button type="button" onclick="unlinkArtistPerformance('${p.contestId}', ${p.participantIndex})" class="text-[10px] font-bold text-rose-400 hover:text-rose-300 uppercase">✕ Отвязать</button>
-            </div>
-        </div>
-    `).join('');
-}
-
-window.renderArtistLinkContestOptions = function() {
-    const select = document.getElementById('artist-link-contest-select');
-    const contests = appState.contests || [];
-    select.innerHTML = `<option value="">— выберите сезон —</option>` +
-        contests.map(c => `<option value="${c.id}">${escapeHtml(c.title || c.id)} (${escapeHtml(c.date || '')})</option>`).join('');
-    document.getElementById('artist-link-participant-select').innerHTML = `<option value="">— сначала выберите сезон —</option>`;
-};
-
-window.renderArtistLinkParticipantOptions = function() {
-    const contestId = document.getElementById('artist-link-contest-select').value;
-    const participantSelect = document.getElementById('artist-link-participant-select');
-    if (!contestId) {
-        participantSelect.innerHTML = `<option value="">— сначала выберите сезон —</option>`;
-        return;
-    }
-    const contest = (appState.contests || []).find(c => c.id === contestId);
-    const participants = (contest && (contest.participants || contest.countries)) || [];
-    if (participants.length === 0) {
-        participantSelect.innerHTML = `<option value="">В этом сезоне нет участников</option>`;
-        return;
-    }
-    participantSelect.innerHTML = `<option value="">— выберите запись —</option>` +
-        participants.map((p, idx) => `<option value="${idx}">${escapeHtml(p.country || ('Запись ' + (idx + 1)))} — ${escapeHtml(p.artist || 'без имени')}${p.artistId ? ' (уже привязано)' : ''}</option>`).join('');
-};
-
-window.linkSelectedArtistPerformance = async function() {
-    if (!currentEditingArtistId) {
-        showAdminNotification('Сначала сохраните профиль артиста, затем привяжите выступление', 'error');
-        return;
-    }
-    const contestId = document.getElementById('artist-link-contest-select').value;
-    const idxStr = document.getElementById('artist-link-participant-select').value;
-    if (!contestId || idxStr === '') {
-        showAdminNotification('Выберите сезон и запись участника', 'error');
-        return;
-    }
-    const contest = (appState.contests || []).find(c => c.id === contestId);
-    if (!contest) return;
-    const participants = contest.participants || contest.countries || [];
-    const idx = parseInt(idxStr, 10);
-    if (!participants[idx]) return;
-
-    participants[idx] = { ...participants[idx], artistId: currentEditingArtistId };
-    const updatedContest = { ...contest, participants, countries: participants };
-    await saveContest(updatedContest, false);
-    showAdminNotification('Выступление привязано к профилю артиста');
-    renderArtistLinkedPerformancesList(currentEditingArtistId);
-    renderArtistLinkParticipantOptions();
-};
-
-window.unlinkArtistPerformance = async function(contestId, participantIndex) {
-    const contest = (appState.contests || []).find(c => c.id === contestId);
-    if (!contest) return;
-    const participants = [...(contest.participants || contest.countries || [])];
-    if (!participants[participantIndex]) return;
-    const { artistId, ...rest } = participants[participantIndex];
-    participants[participantIndex] = rest;
-    const updatedContest = { ...contest, participants, countries: participants };
-    await saveContest(updatedContest, false);
-    showAdminNotification('Связь с выступлением снята');
-    if (currentEditingArtistId) renderArtistLinkedPerformancesList(currentEditingArtistId);
-};
-
-document.getElementById('artist-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const id = document.getElementById('artist-edit-id').value || undefined;
-    const artist = {
-        id,
-        name: document.getElementById('artist-input-name').value.trim(),
-        country: document.getElementById('artist-input-country').value.trim(),
-        photo: document.getElementById('artist-input-photo').value.trim(),
-        bio: document.getElementById('artist-input-bio').value.trim()
-    };
-    if (!artist.name) {
-        showAdminNotification('Укажите имя артиста', 'error');
-        return;
-    }
-    const wasNew = !id;
-    await saveArtistProfile(artist); // мутирует artist.id, если он был не задан (см. data-service.js)
-    showToast(wasNew ? 'Профиль артиста создан!' : 'Профиль артиста сохранён!');
-    renderAdminArtists();
-    closeArtistEditorModal();
-    if (wasNew && artist.id) {
-        // Переоткрываем уже сохранённый профиль в режиме редактирования, чтобы сразу
-        // была доступна привязка выступлений (недоступна для ещё не сохранённого профиля).
-        openArtistEditorModal(artist.id);
-    }
+artistAdmin = initArtistAdmin({
+    getState: () => appState,
+    saveContest,
+    saveArtistProfile,
+    deleteArtistProfile,
+    showToast,
+    openAdminConfirmModal,
+    escapeHtml
 });
-
-window.deleteAdminArtist = function(artistId) {
-    const id = artistId || currentEditingArtistId;
-    if (!id) return;
-    const artist = (appState.artistProfiles || []).find(a => a.id === id);
-    openAdminConfirmModal({
-        title: 'Удаление профиля артиста',
-        message: `Удалить профиль «${artist ? artist.name : id}»? Сами выступления в сезонах останутся, но связь с профилем будет потеряна.`,
-        confirmText: 'Удалить профиль',
-        onConfirm: async () => {
-            await deleteArtistProfile(id);
-            showToast('Профиль артиста удалён');
-            closeArtistEditorModal();
-            renderAdminArtists();
-        }
-    });
-};
 
 // -------------------------------------------------------------
 // ГЛАВНЫЙ СЛУШАТЕЛЬ СОСТОЯНИЯ
@@ -1998,7 +1784,7 @@ subscribeState((newState) => {
     updateVotingSessionUI();
     renderAdminNews();
     renderAdminContests();
-    renderAdminArtists();
+    if (artistAdmin) artistAdmin.onStateChanged();
     renderAdminCalendar();
     updateBannerSelectUI();
 });
