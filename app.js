@@ -27,7 +27,8 @@ import {
     deleteAdminCalendarNote,
     isAdminUser,
     loginAdminServer,
-    loginAdminFirebase
+    loginAdminFirebase,
+    enableHeavySync
 } from './data-service.js';
 import { createArtistViews } from './artist-views.js';
 
@@ -727,6 +728,7 @@ window.toggleSideMenu = function(force) {
 
 window.navigateToView = function(viewName, param, skipHashUpdate = false) {
     currentPortalView = viewName;
+    if (viewName === 'voting') enableHeavySync();
     if (viewName === 'contest-detail' && param) {
         selectedContestId = param;
     }
@@ -3159,6 +3161,8 @@ subscribeState((state) => {
     }
     participantsData = (Array.isArray(state.participants) && state.participants.length > 0) ? state.participants : (participantsData.length ? participantsData : DEFAULT_PARTICIPANTS);
     votesData = state.votes || [];
+    // Начальный вид по хэшу (#voting) или национальная страница: тяжёлую синхронизацию включаем сразу.
+    if (isNational || currentPortalView === 'voting') enableHeavySync();
     calendarNotesData = state.calendarNotes || [];
 
     const newVotingState = state.votingState || { status: 'closed', endsAt: null, sessionId: null };

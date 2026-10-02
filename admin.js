@@ -2,27 +2,30 @@ import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db } from './config.js
 import { syncPushSubscription } from './notifications.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { 
-    subscribeState, 
-    saveNewsArticle, 
-    deleteNewsArticle, 
+import {
+    saveNewsArticle,
+    deleteNewsArticle,
     saveContest,
     deleteContest,
     saveArtistProfile,
     deleteArtistProfile,
     saveParticipant,
-    deleteParticipant, 
-    resetParticipantsToDefault, 
-    updateVotingState, 
-    updateVotingThreshold, 
+    deleteParticipant,
+    resetParticipantsToDefault,
+    updateVotingState,
+    updateVotingThreshold,
     saveRecapVideoUrl,
     saveFeaturedBanner,
     syncAllToFirestore,
-    fetchFirestoreStateDirectly,
-    loginAdminServer,
     verifyAdminSession,
-    deleteVote as deleteVoteFromService, 
-    resetAllVotes,
+    deleteVote as deleteVoteFromService,
+    resetAllVotes
+} from './admin-service.js';
+import {
+    subscribeState,
+    fetchFirestoreStateDirectly,
+    enableHeavySync,
+    loginAdminServer,
     saveAdminCalendarNote,
     deleteAdminCalendarNote,
     mergeVotes,
@@ -74,7 +77,7 @@ window.manualCloudSync = async function() {
             await fetchFirestoreStateDirectly();
         } catch (e) {}
 
-        renderAdminCalendar();
+        window.renderAdminCalendarGrid();
 
         if (btn) {
             btn.innerHTML = `<span>☁️</span><span>Синхронизировать с облаком</span>`;
@@ -162,7 +165,7 @@ function setAdminAuthenticated(authenticated) {
         renderAdminNews();
         renderAdminContests();
         renderAdminArtists();
-        renderAdminCalendar();
+        window.renderAdminCalendarGrid();
         updateBannerSelectUI();
         if (activeAdminTab === 'admins') {
             loadAdminSessions();
@@ -404,7 +407,7 @@ window.switchAdminTab = function(tabName) {
     });
 
     if (tabName === 'calendar') {
-        renderAdminCalendar();
+        window.renderAdminCalendarGrid();
     } else if (tabName === 'admins') {
         loadAdminSessions();
     } else if (tabName === 'notifications' && typeof window.refreshAdminPushSubscribers === 'function') {
@@ -1763,6 +1766,7 @@ artistAdmin = initArtistAdmin({
 // -------------------------------------------------------------
 // ГЛАВНЫЙ СЛУШАТЕЛЬ СОСТОЯНИЯ
 // -------------------------------------------------------------
+enableHeavySync();
 subscribeState((newState) => {
     appState = newState;
 
@@ -1785,7 +1789,7 @@ subscribeState((newState) => {
     renderAdminNews();
     renderAdminContests();
     if (artistAdmin) artistAdmin.onStateChanged();
-    renderAdminCalendar();
+    window.renderAdminCalendarGrid();
     updateBannerSelectUI();
 });
 
@@ -2188,7 +2192,7 @@ window.setAdminCalendarFilter = function(filter) {
             btn.className = `px-3.5 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider bg-[#16070b] ${colors[f] || 'text-slate-300'} hover:bg-amber-500/10 border transition`;
         }
     });
-    renderAdminCalendar();
+    window.renderAdminCalendarGrid();
 };
 
 const CALENDAR_TYPE_CONFIG = {
@@ -2588,7 +2592,7 @@ window.quickSaveAdminCalendarNote = async function(event) {
 
         showToast('✓ Заметка успешно сохранена и опубликована на всех устройствах!');
         adminQuickFormOpen = false;
-        renderAdminCalendar();
+        window.renderAdminCalendarGrid();
     } catch (err) {
         console.error('Error saving quick calendar note:', err);
         showToast('✕ Ошибка: ' + err.message);
@@ -2885,7 +2889,7 @@ window.saveCalendarNoteFromAdmin = async function(event) {
 
         showToast(editId ? '✓ Событие в календаре успешно обновлено' : '✓ Событие успешно добавлено в календарь');
         closeCalendarEditorModal();
-        renderAdminCalendar();
+        window.renderAdminCalendarGrid();
     } catch (err) {
         console.error('Error saving calendar note:', err);
         showToast('✕ Ошибка: ' + err.message);
@@ -2907,7 +2911,7 @@ window.deleteCalendarNoteFromAdmin = async function(id) {
             appState.calendarNotes = appState.calendarNotes.filter(n => n.id !== id);
         }
         showToast('✓ Событие удалено из календаря');
-        renderAdminCalendar();
+        window.renderAdminCalendarGrid();
     } catch (err) {
         showToast('✕ Ошибка при удалении: ' + err.message);
     }
