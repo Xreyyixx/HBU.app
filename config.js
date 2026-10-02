@@ -88,7 +88,9 @@ if (firebaseConfig.apiKey) {
         app = initializeApp(firebaseConfig);
         try {
             db = initializeFirestore(app, {
-                experimentalForceLongPolling: true
+                // Автоопределение: быстрый WebChannel/WebSocket, а long-polling только если сеть
+                // (прокси, фаервол) его не пускает. Раньше long-polling был включён принудительно.
+                experimentalAutoDetectLongPolling: true
             });
         } catch (initErr) {
             db = getFirestore(app);

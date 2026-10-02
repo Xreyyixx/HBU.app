@@ -6,10 +6,14 @@
     "dev": "node server.js",
     "start": "node server.js",
     "build": "node -e \"console.log('Build complete')\"",
-    "lint": "node -e \"console.log('Lint ok')\""
+    "lint": "node -e \"console.log('Lint ok')\"",
+    "build:css": "tailwindcss -c tailwind.config.cjs -i tailwind.input.css -o tailwind.css --minify"
   },
   "dependencies": {
     "express": "^4.21.2",
     "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
   }
 }

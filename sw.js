@@ -34,7 +34,9 @@ self.addEventListener('fetch', (event) => {
     }
 
     event.respondWith(
-        fetch(event.request, { cache: 'no-store' })
+        // Без cache:'no-store' — иначе каждый запуск заново качает весь JS (~700 КБ),
+        // игнорируя HTTP-кэш GitHub Pages (он и так отдаёт свежее после ревалидации).
+        fetch(event.request)
             .then((response) => {
                 if (response && response.status === 200 && response.type === 'basic') {
                     const responseClone = response.clone();
@@ -127,8 +129,8 @@ self.addEventListener('push', (event) => {
     let payload = {
         title: 'HariVision 2026',
         body: 'Новое уведомление от Haribo Broadcasting Union!',
-        icon: 'icons/HBU_icon.png',
-        badge: 'icons/HBU_icon.png',
+        icon: 'icons/HBU_icon_192.png',
+        badge: 'icons/HBU_icon_192.png',
         tag: 'hbu_push_' + Date.now(),
         url: '/#voting'
     };
@@ -148,7 +150,7 @@ self.addEventListener('push', (event) => {
 
     let iconUrl;
     try {
-        const iconPath = (payload.icon || 'icons/HBU_icon.png').replace(/^\/+/, '');
+        const iconPath = (payload.icon || 'icons/HBU_icon_192.png').replace(/^\/+/, '');
         iconUrl = new URL(iconPath, appBaseUrl).href;
     } catch (e) {
         iconUrl = undefined;

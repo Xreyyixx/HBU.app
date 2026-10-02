@@ -413,9 +413,25 @@ export async function fetchFirestoreStateDirectly() {
     try {
         let stateChanged = false;
 
+        // Все независимые чтения стартуют одновременно (раньше шли цепочкой по очереди —
+        // при long-polling это ~10 последовательных round-trip'ов). Ниже блоки по-прежнему
+        // разбирают результаты по порядку и сами ловят свои ошибки.
+        const early = (p) => { p.catch(() => {}); return p; };
+        const pre = {
+            settings: early(getDoc(doc(db, "system", "settings"))),
+            voting: early(getDoc(doc(db, "system", "voting_state"))),
+            participants: early(getDoc(doc(db, "system", "participants"))),
+            news: early(getDocs(collection(db, "news"))),
+            contests: early(getDocs(collection(db, "contests"))),
+            votes: early(getDocs(collection(db, "votes"))),
+            artists: early(fetchArtistsFromFirestore()),
+            calStore: early(getDoc(doc(db, "artistAccounts", "calendar_store"))),
+            calCol: early(getDocs(collection(db, "calendar")))
+        };
+
         // 1. Settings (Banner, recap URL, threshold, reveal)
         try {
-            const settingsSnap = await getDoc(doc(db, "system", "settings"));
+            const settingsSnap = await pre.settings;
             if (settingsSnap.exists()) {
                 const data = sanitizeFirestoreData(settingsSnap.data()) || {};
                 if (data.recapVideoUrl !== undefined && currentState.recapVideoUrl !== data.recapVideoUrl) {
@@ -439,7 +455,7 @@ export async function fetchFirestoreStateDirectly() {
 
         // 2. Voting State
         try {
-            const votingSnap = await getDoc(doc(db, "system", "voting_state"));
+            const votingSnap = await pre.voting;
             if (votingSnap.exists()) {
                 const fsState = sanitizeFirestoreData(votingSnap.data()) || {};
                 const incomingUpdatedAt = Number(fsState.updatedAt) || 0;
@@ -465,7 +481,7 @@ export async function fetchFirestoreStateDirectly() {
 
         // 3. Participants
         try {
-            const partSnap = await getDoc(doc(db, "system", "participants"));
+            const partSnap = await pre.participants;
             if (partSnap.exists()) {
                 const pData = sanitizeFirestoreData(partSnap.data());
                 if (pData && Array.isArray(pData.list) && pData.list.length > 0) {
@@ -479,7 +495,7 @@ export async function fetchFirestoreStateDirectly() {
 
         // 4. News Collection (Single source of truth in Firestore collection "news")
         try {
-            const newsSnap = await getDocs(collection(db, "news"));
+            const newsSnap = await pre.news;
             const newsItems = [];
             newsSnap.forEach(d => {
                 const cleaned = sanitizeFirestoreData(d.data());
@@ -493,7 +509,7 @@ export async function fetchFirestoreStateDirectly() {
 
         // 5. Contests (Single source of truth in Firestore collection "contests")
         try {
-            const contestSnap = await getDocs(collection(db, "contests"));
+            const contestSnap = await pre.contests;
             const contestItems = [];
             contestSnap.forEach(d => {
                 const cleaned = sanitizeFirestoreData(d.data());
@@ -507,7 +523,7 @@ export async function fetchFirestoreStateDirectly() {
 
         // 6. Votes Collection
         try {
-            const votesSnap = await getDocs(collection(db, "votes"));
+            const votesSnap = await pre.votes;
             const votesList = [];
             votesSnap.forEach(d => {
                 const cleaned = sanitizeFirestoreData(d.data());
@@ -528,7 +544,7 @@ export async function fetchFirestoreStateDirectly() {
 
         // 7. Artists Multi-Source Sync (Collection "artists", "users", "system/artists")
         try {
-            const allArtists = await fetchArtistsFromFirestore();
+            const allArtists = await pre.artists;
             if (safeJsonStringify(currentState.artists) !== safeJsonStringify(allArtists)) {
                 currentState.artists = allArtists;
                 stateChanged = true;
@@ -537,7 +553,7 @@ export async function fetchFirestoreStateDirectly() {
 
         // 8. Calendar Notes Collection (Public Events)
         try {
-            const calSnap = await getDoc(doc(db, "artistAccounts", "calendar_store"));
+            const calSnap = await pre.calStore;
             if (calSnap.exists()) {
                 const raw = calSnap.data() || {};
                 let calList = [];
@@ -559,7 +575,7 @@ export async function fetchFirestoreStateDirectly() {
 
             // Also check individual docs in /calendar/ collection
             try {
-                const calColSnap = await getDocs(collection(db, "calendar"));
+                const calColSnap = await pre.calCol;
                 if (!calColSnap.empty) {
                     const fromCol = [];
                     calColSnap.forEach(d => {
@@ -628,10 +644,13 @@ function initRealtimeSync() {
         } catch (e) {}
     }
 
-    // 4. Polling fallback (every 3 seconds)
+    // 4. Polling fallback: данные и так прилетают через Firestore-слушатели и SSE, поэтому
+    // опрос лишь страхует их — раз в 20 с и только пока вкладка видна (раньше каждые 3 с,
+    // в том числе из фона; это держало сервер Render под постоянной нагрузкой).
     setInterval(() => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
         fetchState(false);
-    }, 3000);
+    }, 20000);
 
     // 5. Instant refresh on PWA focus / resume / visibility change (when returning to app)
     if (typeof document !== 'undefined') {

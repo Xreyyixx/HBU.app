@@ -468,7 +468,7 @@ export async function sendSystemNotification(title, body, url = '/', tag = null)
         cleanUrl = cleanUrl.replace(/^index\.html/, '') || '/';
     }
 
-    const iconUrl = new URL('icons/HBU_icon.png', window.location.href).href;
+    const iconUrl = new URL('icons/HBU_icon_192.png', window.location.href).href;
     const options = {
         body,
         icon: iconUrl,

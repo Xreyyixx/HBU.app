@@ -829,8 +829,8 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
     const payload = JSON.stringify({
         title: title || 'HariVision 2026',
         body: body || '',
-        icon: 'icons/HBU_icon.png',
-        badge: 'icons/HBU_icon.png',
+        icon: 'icons/HBU_icon_192.png',
+        badge: 'icons/HBU_icon_192.png',
         tag: tag || ('hbu_push_' + Date.now()),
         url: cleanUrl,
         data: {

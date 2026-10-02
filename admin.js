@@ -1836,7 +1836,7 @@ window.testAdminNotification = async function() {
             perm = await Notification.requestPermission();
         }
 
-        const iconUrl = new URL('icons/HBU_icon.png', window.location.href).href;
+        const iconUrl = new URL('icons/HBU_icon_192.png', window.location.href).href;
         const targetUrl = new URL('admin.html', window.location.href).href;
 
         if (perm === 'granted') {
