@@ -1,0 +1,16 @@
+{
+  "id": "./admin.html",
+  "name": "HariVision Admin | HBU",
+  "short_name": "HBU Admin",
+  "description": "Панель управления HariVision",
+  "start_url": "./admin.html",
+  "scope": "./admin.html",
+  "display": "standalone",
+  "background_color": "#060204",
+  "theme_color": "#060204",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "./icons/HBU_admin_192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/HBU_admin_512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
