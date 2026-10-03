@@ -304,6 +304,7 @@ async function getServerIdToken() {
             console.warn('[Firebase] FIREBASE_SERVER_EMAIL / FIREBASE_SERVER_PASSWORD не заданы — сервер работает без служебного доступа к Firestore.');
             serverAuthWarned = true;
         }
+        pushDiag.serverAuth = 'not-configured';
         return null;
     }
     if (serverIdToken && Date.now() < serverIdTokenExpiresAt - 60000) {
@@ -319,8 +320,10 @@ async function getServerIdToken() {
         if (r.ok && data.idToken) {
             serverIdToken = data.idToken;
             serverIdTokenExpiresAt = Date.now() + (Number(data.expiresIn) || 3600) * 1000;
+            pushDiag.serverAuth = 'ok';
             return serverIdToken;
         }
+        pushDiag.serverAuth = 'failed: ' + String(data?.error?.message || r.status).slice(0, 80);
         console.warn('[Firebase] Служебный вход сервера не удался:', data?.error?.message || r.status);
     } catch (e) {
         console.warn('[Firebase] Служебный вход сервера: ошибка сети', e.message);
@@ -328,12 +331,42 @@ async function getServerIdToken() {
     return null;
 }
 
+// Список документов коллекции со ВСЕМИ страницами. REST отдаёт по 20 документов (или меньше, если
+// страница упёрлась в лимит размера) и nextPageToken для продолжения; раньше сервер читал только
+// первую страницу — из-за этого он «не видел» push-подписки (они лежали на второй странице), а при
+// росте числа новостей/конкурсов терял и их. Возвращает объект, совместимый с использованием
+// res.ok / res.status / await res.json() → { documents }.
+async function fsListAll(urlWithKey) {
+    const first = await fsFetch(`${urlWithKey}&pageSize=300`);
+    if (!first.ok) return first;
+    const firstData = await first.json();
+    let docs = firstData.documents || [];
+    let token = firstData.nextPageToken;
+    let guard = 0;
+    while (token && guard++ < 20) {
+        const next = await fsFetch(`${urlWithKey}&pageSize=300&pageToken=${encodeURIComponent(token)}`);
+        if (!next.ok) break;
+        const nextData = await next.json();
+        docs = docs.concat(nextData.documents || []);
+        token = nextData.nextPageToken;
+    }
+    return { ok: true, status: first.status, json: async () => ({ documents: docs }) };
+}
+
 // fetch к Firestore REST с авторизацией служебного аккаунта
 async function fsFetch(url, options = {}) {
     const token = await getServerIdToken();
     const headers = { ...(options.headers || {}) };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    return fetch(url, { ...options, headers });
+    const res = await fetch(url, { ...options, headers });
+    // Если служебный токен почему-то отвергнут (просрочен/аккаунт отключён), пробуем тот же запрос
+    // анонимно: публичные операции (подписки, календарь) правилами разрешены и без токена.
+    if (token && (res.status === 401 || res.status === 403)) {
+        serverIdToken = null;
+        const plain = { ...(options.headers || {}) };
+        return fetch(url, { ...options, headers: plain });
+    }
+    return res;
 }
 
 // Проверка ID-токена Firebase (подпись проверяет сам Google) + наличие admins/{uid}
@@ -385,6 +418,10 @@ let artistProfileIdsSeeded = false;
 let votingStateSeeded = false;
 let lastPushSubSyncAt = 0;
 const PUSH_SUB_SYNC_INTERVAL_MS = 2 * 60 * 1000; // раз в 2 минуты, а не при каждом тике/отправке
+// Диагностика сохранности подписок (без секретов): видна в GET /api/push/subscribers-count.
+// Диск бесплатного Render стирается при каждом засыпании/деплое, поэтому единственное надёжное
+// хранилище подписок — Firestore; здесь видно, работает ли запись/восстановление.
+const pushDiag = { serverAuth: 'unknown', lastSave: null, lastRestore: null, restoredTotal: 0, backfilledTotal: 0 };
 let isSyncInProgress = false;
 let knownContestIds = new Set((store.contests || []).map(c => c.id));
 let knownNewsIds = new Set((store.news || []).map(n => n.id));
@@ -427,7 +464,8 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
         // 1. Sync contests directly from Firestore collection "contests"
         try {
-            const res = await fsFetch(`${base}/contests?key=${apiKey}`);
+            const res = await fsListAll(`${base}/contests?key=${apiKey}`);
+            pushDiag.lastRestore = { ok: res.ok, status: res.status, at: Date.now() };
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || []).map(d => ({
@@ -501,7 +539,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
         // 3. Sync news directly from Firestore collection "news"
         try {
-            const res = await fsFetch(`${base}/news?key=${apiKey}`);
+            const res = await fsListAll(`${base}/news?key=${apiKey}`);
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || []).map(d => ({
@@ -536,7 +574,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
         // на сайт) — это полностью отдельная сущность. Без push-уведомлений о "новом
         // артисте" (не требовалось), но с тем же seeded-флагом ради единообразия.
         try {
-            const res = await fsFetch(`${base}/artistProfiles?key=${apiKey}`);
+            const res = await fsListAll(`${base}/artistProfiles?key=${apiKey}`);
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || []).map(d => ({
@@ -624,13 +662,24 @@ async function syncWithFirestore(isSubSyncOnly = false) {
         // мигание в заглушку "HBU Live Hub", неработающий push). Ограничиваем частоту отдельно.
         if (Date.now() - lastPushSubSyncAt > PUSH_SUB_SYNC_INTERVAL_MS) {
         try {
-            const res = await fsFetch(`${base}/artistAccounts?key=${apiKey}&pageSize=300`);
+            const res = await fsListAll(`${base}/artistAccounts?key=${apiKey}`);
             lastPushSubSyncAt = Date.now();
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || [])
                     .map(d => parseFirestoreFields(d.fields))
                     .filter(s => s && s.type === 'push_sub' && s.endpoint && s.keys && s.keys.p256dh && s.keys.auth);
+                pushDiag.lastRestore.found = items.length;
+                // Обратное дозаполнение: подписки, которые есть на сервере, но не сохранены в Firestore
+                // (например, запись не удалась в момент подписки), дописываем туда — иначе при
+                // следующем засыпании Render они пропадут навсегда.
+                try {
+                    const have = new Set(items.map(i => i.endpoint));
+                    const missing = (store.pushSubscriptions || []).filter(s => s && s.endpoint && s.keys && !have.has(s.endpoint)).slice(0, 30);
+                    for (const sub of missing) {
+                        if (await savePushSubscriptionToFirestore(sub)) pushDiag.backfilledTotal++;
+                    }
+                } catch (e) {}
                 if (items.length > 0) {
                     if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
                     let anyAdded = false;
@@ -643,6 +692,7 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                                 expirationTime: fsSub.expirationTime || null
                             });
                             anyAdded = true;
+                            pushDiag.restoredTotal++;
                         } else if (existing.keys?.p256dh !== fsSub.keys.p256dh || existing.keys?.auth !== fsSub.keys.auth) {
                             existing.keys = fsSub.keys;
                             anyAdded = true;
@@ -654,7 +704,9 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                     }
                 }
             }
-        } catch (e) {}
+        } catch (e) {
+            pushDiag.lastRestore = { ...(pushDiag.lastRestore || {}), ok: false, error: String(e && e.message || e).slice(0, 160) };
+        }
         }
 
         if (updated) {
@@ -738,13 +790,17 @@ async function savePushSubscriptionToFirestore(subscription) {
                 }
             })
         });
+        pushDiag.lastSave = { ok: res.ok, status: res.status, at: Date.now() };
         if (res.ok) {
             console.log('[Firestore] pushSub successfully persisted to artistAccounts doc:', docId);
         } else {
             console.warn('[Firestore] pushSub save status:', res.status);
         }
+        return res.ok;
     } catch (e) {
+        pushDiag.lastSave = { ok: false, error: String(e.message).slice(0, 120), at: Date.now() };
         console.warn('[Firestore] pushSub save note:', e.message);
+        return false;
     }
 }
 
@@ -948,7 +1004,7 @@ app.get('/api/push/subscribers-count', async (req, res) => {
     try {
         await syncWithFirestore();
     } catch (e) {}
-    res.json({ count: Array.isArray(store.pushSubscriptions) ? store.pushSubscriptions.length : 0 });
+    res.json({ count: Array.isArray(store.pushSubscriptions) ? store.pushSubscriptions.length : 0, diag: pushDiag });
 });
 
 // Web Push API: тестовый push администратора
