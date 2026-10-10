@@ -28,9 +28,12 @@ import {
     isAdminUser,
     loginAdminServer,
     loginAdminFirebase,
-    enableHeavySync
+    enableHeavySync,
+    isInitialSyncDone,
+    onInitialSync
 } from './data-service.js';
 import { createArtistViews } from './artist-views.js';
+import { createHomeSearch } from './home-search.js';
 
 // Состояние редактирования официальных событий админа
 let calendarAdminEditingDate = null;
@@ -632,7 +635,7 @@ window.handleAuthLoginSubmit = async function(event) {
     }
 
     try {
-        const user = await loginUser(idEl.value, passEl.value);
+        const user = await withLoader(loginUser(idEl.value, passEl.value), 'Входим в аккаунт…');
         closeAuthModal();
         if (pendingAuthAction === 'voting') {
             pendingAuthAction = null;
@@ -667,7 +670,7 @@ window.handleAuthRegisterSubmit = async function(event) {
     }
 
     try {
-        const user = await registerUser(idEl.value, passEl.value, nameEl ? nameEl.value : '');
+        const user = await withLoader(registerUser(idEl.value, passEl.value, nameEl ? nameEl.value : ''), 'Создаём аккаунт…');
         closeAuthModal();
         if (pendingAuthAction === 'voting') {
             pendingAuthAction = null;
@@ -688,7 +691,7 @@ window.handleAuthRegisterSubmit = async function(event) {
 
 window.handleLogout = async function() {
     if (confirm('Вы уверены, что хотите выйти из аккаунта?')) {
-        await logoutUser();
+        await withLoader(logoutUser(), 'Выходим…');
         userName = '';
         renderVotingCard();
     }
@@ -1026,7 +1029,7 @@ window.submitVote = async function() {
         };
 
         // Отправка голоса через универсальный сервис (Firestore + REST API + локальное состояние)
-        const result = await submitVoteToService(votePayload);
+        const result = await withLoader(submitVoteToService(votePayload), 'Отправляем ваш голос…');
         const savedId = (result && result.vote && result.vote.id) || (result && result.voteId) || votePayload.id;
         
         if (savedId) {
@@ -1069,6 +1072,64 @@ function getSparkleSVG() {
 // -------------------------------------------------------------
 // РЕНДЕР ГЛАВНОГО КОНТЕЙНЕРА И СТРАНИЦ
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// ЭКРАНЫ ЗАГРУЗКИ (loader.js): пока база не ответила и кэша нет,
+// вместо пустых разделов показываем анимацию «загружаем».
+// -------------------------------------------------------------
+function withLoader(promise, label) {
+    return window.HBULoader ? window.HBULoader.track(promise, label) : promise;
+}
+
+// Поиск на главной (home-search.js): данные берёт из текущего состояния портала.
+const homeSearch = createHomeSearch({
+    getData: () => ({
+        contests: contestsData,
+        news: newsData,
+        artists: artistProfilesData,
+        calendar: calendarNotesData
+    }),
+    navigate: (view, param) => navigateToView(view, param),
+    openNews: (id) => openNewsModal(id),
+    openCalendarDay: (date) => {
+        navigateToView('calendar');
+        setTimeout(() => window.openCalendarDayModal(date), 50);
+    }
+});
+
+// Если база молчит слишком долго (нет сети, заблокирован Firestore), перестаём ждать
+// и показываем то, что есть: пустые разделы с их обычными пояснениями.
+let dataWaitExpired = false;
+setTimeout(() => {
+    dataWaitExpired = true;
+    renderMainView();
+    finishBootIfReady();
+}, 12000);
+
+// setTimeout: колбэк может прийти синхронно ещё во время загрузки модуля,
+// когда часть переменных ниже ещё не объявлена.
+onInitialSync(() => setTimeout(() => {
+    renderMainView();
+    finishBootIfReady();
+}, 0));
+
+function isDataReady() {
+    return dataWaitExpired || isInitialSyncDone() ||
+        contestsData.length > 0 || newsData.length > 0 || artistProfilesData.length > 0;
+}
+
+// Раздел-деталь открыт по ссылке, а нужного сезона/артиста ещё нет в кэше: ждём базу,
+// а не показываем «не найдено».
+function isDetailPending() {
+    if (dataWaitExpired || isInitialSyncDone()) return false;
+    if (currentPortalView === 'contest-detail') return !contestsData.some(c => c.id === selectedContestId);
+    if (currentPortalView === 'artist-detail') return !artistProfilesData.some(a => a.id === selectedArtistId);
+    return false;
+}
+
+function finishBootIfReady() {
+    if (window.HBULoader && isDataReady()) window.HBULoader.finishBoot();
+}
+
 function renderMainView() {
     const container = document.getElementById('portal-view-container');
     if (!container) {
@@ -1080,8 +1141,21 @@ function renderMainView() {
 
     updateSideMenuContests();
 
+    if (window.HBULoader && (!isDataReady() || isDetailPending())) {
+        // Не перерисовываем тот же экран загрузки на каждое обновление состояния,
+        // иначе анимация и счётчик касаний сбрасываются.
+        if (container.dataset.hbuLoading !== currentPortalView) {
+            container.innerHTML = window.HBULoader.viewHTML(currentPortalView);
+            container.dataset.hbuLoading = currentPortalView;
+        }
+        return;
+    }
+    delete container.dataset.hbuLoading;
+
     if (currentPortalView === 'home') {
+        const searchSnap = homeSearch.snapshot();
         container.innerHTML = getHomeHTML();
+        homeSearch.restore(searchSnap);
     } else if (currentPortalView === 'contests') {
         container.innerHTML = getContestsListHTML();
     } else if (currentPortalView === 'contest-detail') {
@@ -1141,6 +1215,8 @@ function getHomeHTML() {
 
     return `
         <div class="flex flex-col gap-10 page-fade">
+            ${homeSearch.html()}
+
             <!-- Главный интерактивный баннер выбранного сезона -->
             <div class="hbu-aurora relative rounded-3xl overflow-hidden border border-amber-500/30 bg-gradient-to-br from-[#1c080f] via-[#100307] to-[#060204] p-8 md:p-12 shadow-[0_10px_40px_rgba(245,158,11,0.15)] flex flex-col md:flex-row items-center justify-between gap-8">
                 <div class="hbu-corner top-4 left-4 text-amber-400">${getSparkleSVG()}</div>
@@ -2678,7 +2754,7 @@ window.saveAdminCalendarNoteFromModal = async function(dateStr) {
             notifySubscribers
         };
 
-        await saveAdminCalendarNote(noteData);
+        await withLoader(saveAdminCalendarNote(noteData), 'Сохраняем событие…');
 
         // Update local array immediately
         if (!Array.isArray(calendarNotesData)) calendarNotesData = [];
@@ -2711,7 +2787,7 @@ window.deleteAdminCalendarNoteFromModal = async function(id, dateStr) {
         return;
     }
     try {
-        await deleteAdminCalendarNote(id);
+        await withLoader(deleteAdminCalendarNote(id), 'Удаляем событие…');
         if (Array.isArray(calendarNotesData)) {
             calendarNotesData = calendarNotesData.filter(n => n.id !== id);
         }
@@ -2736,7 +2812,7 @@ window.promptAdminUnlockForCalendar = async function(dateStr, noteId = null) {
     if (!password) return;
 
     try {
-        await loginAdminFirebase(email, password);
+        await withLoader(loginAdminFirebase(email, password), 'Проверяем доступ…');
         showToast('✓ Вход администратора выполнен');
         window.startEditAdminEvent(dateStr, noteId);
         renderMainView();
@@ -3276,6 +3352,7 @@ subscribeState((state) => {
             renderVotingCard();
         }
     }
+    finishBootIfReady();
 });
 
 // Первоначальный рендер
@@ -3283,6 +3360,7 @@ renderMainView();
 if (isNational || currentPortalView === 'voting') {
     renderVotingCard();
 }
+finishBootIfReady();
 
 // Инициализация отображения статуса уведомлений и фоновой подписки Web Push
 updateNotificationUI();

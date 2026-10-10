@@ -72,7 +72,7 @@ window.manualCloudSync = async function() {
         btn.disabled = true;
     }
     try {
-        const result = await syncAllToFirestore(appState);
+        const result = await withLoader(syncAllToFirestore(appState), 'Синхронизируем с базой…');
         try {
             await fetchFirestoreStateDirectly();
         } catch (e) {}
@@ -101,6 +101,14 @@ window.manualCloudSync = async function() {
 let isAuthenticated = false;
 
 // Экранирование пользовательских строк перед вставкой в HTML (защита от XSS)
+// Экраны ожидания (loader.js): «занят» на время запросов к базе.
+function withLoader(promise, label) {
+    return window.HBULoader ? window.HBULoader.track(promise, label) : promise;
+}
+function finishAdminBoot() {
+    if (window.HBULoader) window.HBULoader.finishBoot();
+}
+
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -227,11 +235,19 @@ setInterval(async () => {
         } catch (e) {}
     }
 
+    if (!auth) finishAdminBoot();
+
     // Доступ к панели только для вошедшего пользователя Firebase, у которого есть документ admins/{uid}.
     // Анонимные зрители и обычные пользователи панель не получают.
     if (auth) {
         onAuthStateChanged(auth, async (user) => {
-            if (user && !user.isAnonymous && await checkIsAdmin(user)) {
+            let isAdmin = false;
+            try {
+                isAdmin = Boolean(user && !user.isAnonymous && await checkIsAdmin(user));
+            } finally {
+                finishAdminBoot();
+            }
+            if (isAdmin) {
                 setAdminAuthenticated(true);
                 if (!localStorage.getItem('harivision_admin_token')) {
                     await registerCurrentAdminSession();
@@ -277,8 +293,10 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     } else {
         try {
             const firebaseEmail = loginInput.includes('@') ? loginInput : `${loginInput}@harivision.org`;
-            const userCred = await signInWithEmailAndPassword(auth, firebaseEmail, password);
-            const isAdmin = await checkIsAdmin(userCred.user);
+            const { isAdmin } = await withLoader((async () => {
+                const cred = await signInWithEmailAndPassword(auth, firebaseEmail, password);
+                return { isAdmin: await checkIsAdmin(cred.user) };
+            })(), 'Проверяем доступ…');
             if (!isAdmin) {
                 try { await signOut(auth); } catch (e) {}
                 if (errEl) {
@@ -423,25 +441,25 @@ window.openVoting = async function(minutes) {
     const endsAt = minutes > 0 ? new Date(Date.now() + minutes * 60000).toISOString() : null;
     
     // Обнуляем все голоса и скрываем результаты предыдущего голосования
-    await resetAllVotes();
+    await withLoader(resetAllVotes(), 'Обнуляем голоса…');
 
-    await updateVotingState({
+    await withLoader(updateVotingState({
         status: 'open',
         endsAt: endsAt,
         sessionId: newSessionId,
         openedAt: new Date().toISOString(),
         updatedAt: Date.now()
-    });
+    }), 'Обновляем голосование…');
     showToast(`Голосование открыто ${minutes > 0 ? 'на ' + minutes + ' мин' : 'без ограничения времени'}`);
 };
 
 window.closeVoting = async function() {
-    await updateVotingState({
+    await withLoader(updateVotingState({
         status: 'closed',
         endsAt: null,
         sessionId: appState.votingState.sessionId || ('session_' + Date.now()),
         updatedAt: Date.now()
-    });
+    }), 'Обновляем голосование…');
     showToast('Голосование закрыто');
 };
 
@@ -461,7 +479,7 @@ window.saveRecapUrlFromInput = async function() {
     const statusEl = document.getElementById('recap-save-status');
     if (!input) return;
     const url = input.value.trim();
-    await saveRecapVideoUrl(url);
+    await withLoader(saveRecapVideoUrl(url), 'Сохраняем видео…');
     if (statusEl) {
         statusEl.innerText = '✓ Ссылка на повтор успешно сохранена и обновлена!';
         statusEl.classList.remove('hidden');
@@ -478,7 +496,7 @@ window.confirmResetAllVotes = function() {
         message: 'Вы уверены, что хотите полностью очистить все голоса зрителей текущей сессии? Это действие необратимо.',
         confirmText: 'Очистить голоса',
         onConfirm: async () => {
-            await resetAllVotes();
+            await withLoader(resetAllVotes(), 'Обнуляем голоса…');
             showToast('Все голоса успешно удалены');
         }
     });
@@ -549,7 +567,7 @@ window.inspectVote = function(voteId) {
 
 document.getElementById('reset-vote-btn').addEventListener('click', async () => {
     if (!activeModalVoteId) return;
-    await deleteVoteFromService(activeModalVoteId);
+    await withLoader(deleteVoteFromService(activeModalVoteId), 'Удаляем голос…');
     closeVoteModal();
     showToast('Голос аннулирован');
 });
@@ -562,7 +580,7 @@ window.deleteVote = function(voteId) {
         message: `Вы действительно хотите аннулировать голос "${voterLabel}"?`,
         confirmText: 'Аннулировать голос',
         onConfirm: async () => {
-            await deleteVoteFromService(voteId);
+            await withLoader(deleteVoteFromService(voteId), 'Удаляем голос…');
             showToast(`Голос ${escapeHtml(voterLabel)} аннулирован`);
         }
     });
@@ -681,7 +699,7 @@ document.getElementById('participant-form').addEventListener('submit', async (e)
         postcard
     };
 
-    await saveParticipant(participantData);
+    await withLoader(saveParticipant(participantData), 'Сохраняем участника…');
     closeParticipantEditorModal();
     showToast(`Номер #${number} успешно сохранён`);
 });
@@ -694,7 +712,7 @@ window.deleteAdminParticipant = function(id) {
         message: `Удалить номер "${label}" из системы голосования?`,
         confirmText: 'Удалить номер',
         onConfirm: async () => {
-            await deleteParticipant(id);
+            await withLoader(deleteParticipant(id), 'Удаляем участника…');
             showToast(`Участник ${label} удалён`);
         }
     });
@@ -706,7 +724,7 @@ window.resetParticipantsDefaults = function() {
         message: 'Сбросить список участников к стандартным 8 номерам HariVision?',
         confirmText: 'Сбросить к исходным',
         onConfirm: async () => {
-            await resetParticipantsToDefault();
+            await withLoader(resetParticipantsToDefault(), 'Сбрасываем участников…');
             showToast('Список номеров сброшен к исходным 8 участникам');
         }
     });
@@ -1291,7 +1309,7 @@ document.getElementById('news-form').addEventListener('submit', async (e) => {
         content
     };
 
-    await saveNewsArticle(articleData, notifySubscribers);
+    await withLoader(saveNewsArticle(articleData, notifySubscribers), 'Публикуем новость…');
     closeNewsEditorModal();
     showToast(notifySubscribers ? 'Новость сохранена, подписчикам отправлен Push!' : 'Новость успешно сохранена и опубликована!');
 });
@@ -1304,7 +1322,7 @@ window.deleteAdminNews = function(id) {
         message: `Вы действительно хотите удалить новость "${title}"? Она будет удалена с портала.`,
         confirmText: 'Удалить новость',
         onConfirm: async () => {
-            await deleteNewsArticle(id);
+            await withLoader(deleteNewsArticle(id), 'Удаляем новость…');
             showToast('Новость успешно удалена');
         }
     });
@@ -1674,7 +1692,7 @@ document.getElementById('contest-form').addEventListener('submit', async (e) => 
         knownDetails
     };
 
-    await saveContest(contestData, notifySubscribers);
+    await withLoader(saveContest(contestData, notifySubscribers), 'Сохраняем сезон…');
     closeContestEditorModal();
     showToast(notifySubscribers ? 'Сезон сохранен, подписчикам отправлен Push!' : 'Информация о конкурсе успешно сохранена!');
 });
@@ -1687,7 +1705,7 @@ window.deleteAdminContest = function(id) {
         message: `Вы уверены, что хотите удалить сезон "${title}"? Все связанные данные сезона будут удалены.`,
         confirmText: 'Удалить сезон',
         onConfirm: async () => {
-            await deleteContest(id);
+            await withLoader(deleteContest(id), 'Удаляем сезон…');
             showToast('Конкурс удален');
         }
     });
@@ -1737,7 +1755,7 @@ window.saveFeaturedBannerFromSelect = async function() {
     if (!select) return;
 
     const chosenId = select.value;
-    await saveFeaturedBanner(chosenId);
+    await withLoader(saveFeaturedBanner(chosenId), 'Меняем баннер…');
 
     if (statusEl) {
         statusEl.innerText = '✓ Настройка главного баннера успешно сохранена и применена!';
@@ -2583,7 +2601,7 @@ window.quickSaveAdminCalendarNote = async function(event) {
             notifySubscribers
         };
 
-        await saveAdminCalendarNote(noteData);
+        await withLoader(saveAdminCalendarNote(noteData), 'Сохраняем событие…');
         if (!Array.isArray(appState.calendarNotes)) appState.calendarNotes = [];
         const idx = appState.calendarNotes.findIndex(n => n.id === noteData.id);
         if (idx >= 0) appState.calendarNotes[idx] = { ...noteData };
@@ -2870,7 +2888,7 @@ window.saveCalendarNoteFromAdmin = async function(event) {
             notifySubscribers
         };
 
-        await saveAdminCalendarNote(noteData);
+        await withLoader(saveAdminCalendarNote(noteData), 'Сохраняем событие…');
         if (!Array.isArray(appState.calendarNotes)) appState.calendarNotes = [];
         const idx = appState.calendarNotes.findIndex(n => n.id === noteData.id);
         if (idx >= 0) appState.calendarNotes[idx] = { ...noteData };
@@ -2906,7 +2924,7 @@ window.deleteCalendarNoteFromAdmin = async function(id) {
         return;
     }
     try {
-        await deleteAdminCalendarNote(id);
+        await withLoader(deleteAdminCalendarNote(id), 'Удаляем событие…');
         if (Array.isArray(appState.calendarNotes)) {
             appState.calendarNotes = appState.calendarNotes.filter(n => n.id !== id);
         }
