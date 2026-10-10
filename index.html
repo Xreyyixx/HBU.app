@@ -44,6 +44,9 @@
     </script>
     
     <!-- PWA & iOS Support -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#060204">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -369,7 +372,15 @@
     </div>
 
     <!-- Footer -->
-    <footer class="relative z-10 w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between py-6 mt-8 border-t border-amber-500/15 text-[10px] text-slate-500 gap-3">
+    <!-- Спонсор -->
+    <section class="hbu-sponsor relative z-10 w-full max-w-6xl mx-auto mt-10 flex flex-col items-center gap-3" aria-label="Спонсор">
+        <span class="text-[10px] font-bold uppercase tracking-[0.3em] text-amber-500/60">Спонсор HariVision</span>
+        <div class="hbu-sponsor-card">
+            <img src="icons/sponsor-pcakes.png" alt="ρcakes" width="110" height="130" loading="lazy" class="hbu-sponsor-logo" />
+        </div>
+    </section>
+
+    <footer class="relative z-10 w-full max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between py-6 mt-6 border-t border-amber-500/15 text-[10px] text-slate-500 gap-3">
         <div class="flex items-center gap-2">
             <span class="font-bold text-amber-400/90 uppercase tracking-widest">Haribo Broadcasting Union</span>
             <span>•</span>

@@ -501,3 +501,22 @@
 .hbu-search-arrow { color: rgba(245, 158, 11, .6); font-size: 13px; flex-shrink: 0; }
 .hbu-search-empty { padding: 26px 16px; text-align: center; color: #94a3b8; font-size: 12px; }
 .hbu-search-empty b { display: block; font-size: 26px; margin-bottom: 6px; }
+
+/* Блок спонсора внизу главной: тёмная подложка, как у оригинального логотипа,
+   чтобы он читался поверх анимированного фона */
+.hbu-sponsor-card {
+    padding: 18px 34px;
+    border-radius: 24px;
+    border: 1px solid rgba(242, 198, 201, .14);
+    background: radial-gradient(80% 80% at 50% 40%, rgba(242, 198, 201, .06), transparent 70%), #050203;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
+}
+.hbu-sponsor-logo {
+    display: block;
+    height: 120px;
+    width: auto;
+    opacity: .92;
+    transition: transform .3s ease, opacity .3s ease, filter .3s ease;
+    filter: drop-shadow(0 6px 18px rgba(242, 198, 201, .12));
+}
+.hbu-sponsor-logo:hover { transform: translateY(-3px) scale(1.03); opacity: 1; filter: drop-shadow(0 8px 24px rgba(242, 198, 201, .25)); }
