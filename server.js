@@ -537,6 +537,22 @@ async function syncWithFirestore(isSubSyncOnly = false) {
             }
         } catch (e) {}
 
+        // 2.5. Настройки сайта (сезон на главной, рекап, порог, режим итогов) из "system/settings".
+        // Раньше сервер их не забирал: после перезапуска (на Render хранилище сбрасывается)
+        // он раздавал 'auto', и посетители видели последний завершённый сезон вместо выбранного.
+        try {
+            const res = await fsFetch(`${base}/system/settings?key=${apiKey}`);
+            if (res.ok) {
+                const doc = await res.json();
+                const fsSettings = parseFirestoreFields(doc.fields);
+                if (fsSettings.featuredContestId !== undefined && fsSettings.featuredContestId !== null) store.featuredContestId = fsSettings.featuredContestId;
+                if (fsSettings.recapVideoUrl !== undefined && fsSettings.recapVideoUrl !== null) store.recapVideoUrl = fsSettings.recapVideoUrl;
+                if (fsSettings.manualThreshold !== undefined && fsSettings.manualThreshold !== null) store.manualThreshold = Number(fsSettings.manualThreshold) || 0;
+                if (fsSettings.revealMode !== undefined && fsSettings.revealMode !== null) store.revealMode = Boolean(fsSettings.revealMode);
+                updated = true;
+            }
+        } catch (e) {}
+
         // 3. Sync news directly from Firestore collection "news"
         try {
             const res = await fsListAll(`${base}/news?key=${apiKey}`);

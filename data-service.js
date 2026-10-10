@@ -213,6 +213,17 @@ export let currentState = {
 };
 
 let lastNotifiedStateJson = '';
+// Настройки сайта (сезон на главной и т.п.) хранятся в Firestore system/settings. Как только
+// они оттуда получены, значения от сервера (/api/state, SSE) их больше не перезаписывают:
+// сервер может отставать (например, после перезапуска на Render он отдаёт 'auto').
+let firestoreSettingsLoaded = false;
+const SETTINGS_KEYS = ['featuredContestId', 'recapVideoUrl', 'manualThreshold', 'revealMode'];
+function withoutServerSettings(data) {
+    if (!firestoreSettingsLoaded || !data || typeof data !== 'object') return data;
+    const copy = { ...data };
+    SETTINGS_KEYS.forEach(k => { delete copy[k]; });
+    return copy;
+}
 let isFirestoreInitialized = false;
 
 // Загрузка локального кэша
@@ -469,6 +480,7 @@ export async function fetchFirestoreStateDirectly() {
         try {
             const settingsSnap = await pre.settings;
             if (settingsSnap.exists()) {
+                firestoreSettingsLoaded = true;
                 const data = sanitizeFirestoreData(settingsSnap.data()) || {};
                 if (data.recapVideoUrl !== undefined && currentState.recapVideoUrl !== data.recapVideoUrl) {
                     currentState.recapVideoUrl = data.recapVideoUrl;
@@ -671,7 +683,7 @@ function initRealtimeSync() {
                         }
                     }
                     if (parsed && parsed.data) {
-                        const newData = parsed.data;
+                        const newData = withoutServerSettings(parsed.data);
                         if (Array.isArray(newData.votes)) {
                             currentState.votes = newData.votes;
                         }
@@ -746,6 +758,7 @@ function initFirestoreListeners() {
     try {
         onSnapshot(doc(db, "system", "settings"), (snap) => {
             if (snap.exists()) {
+                firestoreSettingsLoaded = true;
                 const data = sanitizeFirestoreData(snap.data()) || {};
                 let changed = false;
                 if (data.recapVideoUrl !== undefined && currentState.recapVideoUrl !== data.recapVideoUrl) {
@@ -952,7 +965,7 @@ async function fetchState(isInitial = false) {
     try {
         const res = await fetch('/api/state');
         if (res.ok) {
-            const data = await res.json();
+            const data = withoutServerSettings(await res.json());
             if (data && typeof data === 'object') {
                 let updated = false;
 
