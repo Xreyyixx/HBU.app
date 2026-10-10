@@ -262,6 +262,24 @@ function saveLocalCache() {
 // Список подписчиков
 const stateListeners = new Set();
 
+// Первая синхронизация с базой (Firestore или сервер). Пока её нет, а локального кэша тоже нет,
+// приложение показывает экран загрузки вместо пустых разделов.
+let initialSyncDone = false;
+const initialSyncWaiters = new Set();
+function markInitialSyncDone() {
+    if (initialSyncDone) return;
+    initialSyncDone = true;
+    initialSyncWaiters.forEach(cb => {
+        try { cb(); } catch (e) { console.error('Initial sync waiter error:', e); }
+    });
+    initialSyncWaiters.clear();
+}
+export function isInitialSyncDone() { return initialSyncDone; }
+export function onInitialSync(callback) {
+    if (initialSyncDone) { callback(); return; }
+    initialSyncWaiters.add(callback);
+}
+
 export function subscribeState(callback) {
     stateListeners.add(callback);
     // Initial call
@@ -425,7 +443,8 @@ export function mergeCalendarNotes(current = [], incoming = []) {
 }
 
 export async function fetchFirestoreStateDirectly() {
-    if (!db || isDirectSyncRunning) return;
+    if (!db) { markInitialSyncDone(); return; }
+    if (isDirectSyncRunning) return;
     isDirectSyncRunning = true;
     try {
         let stateChanged = false;
@@ -624,6 +643,7 @@ export async function fetchFirestoreStateDirectly() {
         console.warn('Direct Firestore fetch error:', err);
     } finally {
         isDirectSyncRunning = false;
+        markInitialSyncDone();
     }
 }
 
@@ -657,6 +677,7 @@ function initRealtimeSync() {
                         }
                         currentState = { ...currentState, ...newData };
                         notifyStateChanged(false);
+                        markInitialSyncDone();
                     }
                 } catch (err) {}
             };
@@ -1015,6 +1036,7 @@ async function fetchState(isInitial = false) {
                 if (updated || isInitial) {
                     notifyStateChanged(isInitial);
                 }
+                markInitialSyncDone();
             }
         }
     } catch (e) {
@@ -1417,7 +1439,7 @@ const COUNTRY_SYNONYMS = {
     'казахстан': ['казахстан', 'kazakhstan', 'kaz', 'kz']
 };
 
-function transliterateRuToEn(text) {
+export function transliterateRuToEn(text) {
     if (!text) return '';
     const ruToEn = {
         'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
@@ -1432,7 +1454,7 @@ function transliterateRuToEn(text) {
         .join('');
 }
 
-function transliterateEnToRu(text) {
+export function transliterateEnToRu(text) {
     if (!text) return '';
     const map = [
         ['sch', 'щ'], ['sh', 'ш'], ['ch', 'ч'], ['ts', 'ц'], ['zh', 'ж'],

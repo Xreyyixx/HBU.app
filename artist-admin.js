@@ -15,6 +15,9 @@
 // =====================================================================
 import { renderCustomChartCard, renderCustomTableCard } from './artist-views.js';
 
+// Экран «занят» из loader.js на время запросов к базе.
+const hbuTrack = (promise, label) => (window.HBULoader ? window.HBULoader.track(promise, label) : promise);
+
 // Фрагмент правил, которого может не хватать в опубликованных правилах Firestore
 export const ARTIST_RULES_SNIPPET = `match /artistProfiles/{docId} {
   allow read: if true;
@@ -330,7 +333,7 @@ export function initArtistAdmin(deps) {
         if (!contest) { showToast('Сезон не найден', true); return false; }
         const participants = participantsOf(contest).map(p => ({ ...p }));
         mutator(participants);
-        await saveContest({ ...contest, participants, countries: participants }, false);
+        await hbuTrack(saveContest({ ...contest, participants, countries: participants }, false), 'Сохраняем сезон…');
         return true;
     }
 
@@ -913,7 +916,7 @@ export function initArtistAdmin(deps) {
         (keepOpen ? applyBtn : saveBtn).innerText = 'Сохранение…';
         let res;
         try {
-            res = await saveArtistProfile(artist);
+            res = await hbuTrack(saveArtistProfile(artist), 'Сохраняем артиста…');
         } catch (e) {
             res = { ok: false, error: (e && e.message) || String(e) };
         } finally {
@@ -958,7 +961,7 @@ export function initArtistAdmin(deps) {
             message: `Удалить профиль «${artist ? artist.name : id}»? Сами выступления в сезонах останутся, но связь с профилем будет потеряна, а ручные записи, диаграммы и таблицы удалятся вместе с профилем.`,
             confirmText: 'Удалить профиль',
             onConfirm: async () => {
-                const res = await deleteArtistProfile(id);
+                const res = await hbuTrack(deleteArtistProfile(id), 'Удаляем артиста…');
                 if (res && res.ok === false) {
                     showToast('Не удалось удалить профиль: нет связи ни с Firestore, ни с сервером', true);
                     return;
