@@ -1,5 +1,6 @@
 import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db } from './config.js';
 import { syncPushSubscription } from './notifications.js';
+import { enhanceRichTextarea } from './rich-editor.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import {
@@ -101,6 +102,9 @@ window.manualCloudSync = async function() {
 let isAuthenticated = false;
 
 // Экранирование пользовательских строк перед вставкой в HTML (защита от XSS)
+// Панель форматирования текста (rich-editor.js) для новостей и описания сезона.
+['news-input-summary', 'news-input-content', 'contest-input-desc'].forEach(id => enhanceRichTextarea(document.getElementById(id)));
+
 // Экраны ожидания (loader.js): «занят» на время запросов к базе.
 function withLoader(promise, label) {
     return window.HBULoader ? window.HBULoader.track(promise, label) : promise;

@@ -9,6 +9,7 @@
 // =====================================================================
 import { esc } from './artist-views.js';
 import { transliterateRuToEn, transliterateEnToRu } from './data-service.js';
+import { stripRichText } from './rich-text.js';
 
 const GROUP_LIMIT = 5;
 
@@ -30,7 +31,7 @@ function normalize(value) {
 }
 
 function stripHtml(value) {
-    return String(value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    return stripRichText(String(value || '')).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 // Расстояние Левенштейна не больше 1 (одна опечатка: замена, пропуск или лишняя буква).

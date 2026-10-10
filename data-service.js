@@ -1,5 +1,5 @@
 import { db, auth, ensureFirebaseAuth, INITIAL_CONTESTS, INITIAL_NEWS, DEFAULT_PARTICIPANTS, INITIAL_CALENDAR_NOTES, API_BASE } from './config.js';
-import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { collection, doc, onSnapshot, setDoc, deleteDoc, getDocs, getDoc, updateDoc, increment, FieldPath } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { 
     signInWithEmailAndPassword, 
     createUserWithEmailAndPassword, 
@@ -675,6 +675,7 @@ function initRealtimeSync() {
                         if (Array.isArray(newData.votes)) {
                             currentState.votes = newData.votes;
                         }
+                        if (Array.isArray(newData.news)) newData.news = keepLiveReactions(newData.news);
                         currentState = { ...currentState, ...newData };
                         notifyStateChanged(false);
                         markInitialSyncDone();
@@ -973,8 +974,9 @@ async function fetchState(isInitial = false) {
 
                 // Sync news
                 if (Array.isArray(data.news) && data.news.length > 0) {
-                    if (safeJsonStringify(currentState.news) !== safeJsonStringify(data.news)) {
-                        currentState.news = data.news;
+                    const serverNews = keepLiveReactions(data.news);
+                    if (safeJsonStringify(currentState.news) !== safeJsonStringify(serverNews)) {
+                        currentState.news = serverNews;
                         updated = true;
                     }
                 }
@@ -1249,23 +1251,32 @@ export function sortNewsDescending(list = []) {
     });
 }
 
+// Реакции считает только Firestore: атомарный increment(±1) на одно поле reactions.<emoji>.
+// Раньше счётчик увеличивался трижды за клик — в app.js, здесь (это один и тот же объект
+// новости) и ещё раз на сервере, чей ответ затем перезаписывал локальное значение, а
+// весь map реакций писался в Firestore целиком и затирал чужие клики.
 export async function toggleNewsReaction(newsId, emoji, action = 'add') {
     const article = (currentState.news || []).find(n => n.id === newsId);
+    const delta = action === 'remove' ? -1 : 1;
     if (article) {
-        if (!article.reactions) article.reactions = {};
-        const curr = Number(article.reactions[emoji]) || 0;
-        if (action === 'remove') {
-            article.reactions[emoji] = Math.max(0, curr - 1);
-        } else {
-            article.reactions[emoji] = curr + 1;
-        }
+        const curr = Number(article.reactions && article.reactions[emoji]) || 0;
+        if (delta < 0 && curr <= 0) return;
+        // Оптимистично: снимок Firestore с настоящим значением придёт следом.
+        article.reactions = { ...(article.reactions || {}), [emoji]: curr + delta };
         notifyStateChanged(true);
-
-        try {
-            await setDoc(doc(db, "news", newsId), { reactions: article.reactions }, { merge: true });
-        } catch (e) {}
     }
 
+    if (db) {
+        try {
+            await ensureFirebaseAuth();
+            await updateDoc(doc(db, "news", newsId), new FieldPath('reactions', emoji), increment(delta));
+            return;
+        } catch (e) {
+            console.warn('Firestore reaction update failed, falling back to server:', e);
+        }
+    }
+
+    // Запасной путь без Firestore: только сервер (одна операция, а не две).
     try {
         const res = await fetch(`/api/news/${newsId}/react`, {
             method: 'POST',
@@ -1280,6 +1291,17 @@ export async function toggleNewsReaction(newsId, emoji, action = 'add') {
             }
         }
     } catch (e) {}
+}
+
+// Сервер забирает новости из Firestore раз в минуту, поэтому его счётчики реакций
+// отстают. Пока работает Firestore, реакции берём из него, а не из ответа сервера.
+function keepLiveReactions(serverNews) {
+    if (!db || !Array.isArray(serverNews)) return serverNews;
+    const live = new Map((currentState.news || []).map(n => [n.id, n]));
+    return serverNews.map(n => {
+        const local = live.get(n.id);
+        return local && local.reactions ? { ...n, reactions: local.reactions } : n;
+    });
 }
 
 // -------------------------------------------------------------

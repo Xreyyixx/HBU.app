@@ -1,0 +1,79 @@
+/* Форматированный текст новостей и сезонов (rich-text.js) и панель форматирования в админке (rich-editor.js) */
+.hbu-rt { display: flex; flex-direction: column; gap: .75em; white-space: normal; }
+.hbu-rt p { margin: 0; }
+.hbu-rt strong { color: #fff; font-weight: 800; }
+.hbu-rt em { font-style: italic; }
+.hbu-rt u { text-decoration-color: rgba(245, 158, 11, .7); text-underline-offset: 3px; }
+.hbu-rt s { opacity: .7; }
+.hbu-rt-h1, .hbu-rt-h2 { margin: .4em 0 0; color: #fff; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; line-height: 1.25; }
+.hbu-rt-h1 { font-size: 1.3em; }
+.hbu-rt-h2 { font-size: 1.08em; color: #fcd34d; }
+.hbu-rt-list { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: .3em; }
+ul.hbu-rt-list { list-style: none; padding-left: 1.1em; }
+ul.hbu-rt-list li { position: relative; }
+ul.hbu-rt-list li::before { content: '◆'; position: absolute; left: -1.1em; top: .1em; font-size: .7em; color: #f59e0b; }
+ol.hbu-rt-list { list-style: decimal; }
+ol.hbu-rt-list li::marker { color: #f59e0b; font-weight: 800; }
+.hbu-rt-quote {
+    margin: 0;
+    padding: .7em 1em;
+    border-left: 3px solid #f59e0b;
+    border-radius: 0 12px 12px 0;
+    background: rgba(245, 158, 11, .07);
+    color: #fde68a;
+    font-style: italic;
+}
+.hbu-rt-mark { background: rgba(245, 158, 11, .3); color: #fff7d6; padding: 0 .2em; border-radius: 4px; }
+.hbu-rt-link { color: #fbbf24; text-decoration: underline; text-underline-offset: 3px; word-break: break-word; }
+.hbu-rt-link:hover { color: #fde68a; }
+.hbu-rt-spoiler {
+    background: #3b2a12;
+    color: transparent;
+    border-radius: 4px;
+    padding: 0 .25em;
+    cursor: pointer;
+    transition: color .25s ease, background .25s ease;
+}
+.hbu-rt-spoiler.is-open { background: rgba(245, 158, 11, .12); color: inherit; cursor: auto; }
+
+.hbu-rt-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+    padding: 5px;
+    border-radius: 12px;
+    border: 1px solid rgba(245, 158, 11, .2);
+    background: #0a0305;
+}
+.hbu-rt-btn {
+    min-width: 30px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #e2e8f0;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .15s ease, border-color .15s ease;
+}
+.hbu-rt-btn:hover { background: rgba(245, 158, 11, .14); border-color: rgba(245, 158, 11, .3); }
+.hbu-rt-btn.is-on { background: rgba(245, 158, 11, .22); border-color: rgba(251, 191, 36, .6); color: #fde68a; }
+.hbu-rt-preview-btn { margin-left: auto; font-size: 11px; font-weight: 700; }
+.hbu-rt-sep { width: 1px; height: 18px; margin: 0 3px; background: rgba(245, 158, 11, .2); }
+.hbu-rt-hint { margin-top: 4px; font-size: 10px; color: #64748b; }
+.hbu-rt-preview {
+    margin-top: 8px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px dashed rgba(245, 158, 11, .35);
+    background: rgba(13, 4, 8, .8);
+    color: #cbd5e1;
+    font-size: 13px;
+    line-height: 1.6;
+}
+.hbu-rt-preview.hidden { display: none; }
+.hbu-rt-empty { color: #64748b; font-style: italic; }
