@@ -32,8 +32,9 @@ import {
     isInitialSyncDone,
     onInitialSync
 } from './data-service.js';
-import { createArtistViews } from './artist-views.js';
+import { createArtistViews, parseRuDate, computeArtistStats } from './artist-views.js';
 import { createHomeSearch } from './home-search.js';
+import { renderRichText, renderRichInline } from './rich-text.js';
 
 // Состояние редактирования официальных событий админа
 let calendarAdminEditingDate = null;
@@ -109,10 +110,19 @@ function hasUserReacted(newsId, emoji) {
     return Boolean(map[newsId] && map[newsId][emoji]);
 }
 
+// Пока запрос по этой паре «новость + эмодзи» не завершён, повторные нажатия игнорируются:
+// одно нажатие = одна реакция, даже при двойном тапе.
+const pendingReactionKeys = new Set();
+
 window.toggleNewsReactionUser = async function(newsId, emoji, event) {
     if (event) {
         event.stopPropagation();
+        event.preventDefault();
     }
+    const key = `${newsId}|${emoji}`;
+    if (pendingReactionKeys.has(key)) return;
+    pendingReactionKeys.add(key);
+
     const map = getUserReactionsMap();
     if (!map[newsId]) map[newsId] = {};
     const alreadyReacted = Boolean(map[newsId][emoji]);
@@ -128,22 +138,15 @@ window.toggleNewsReactionUser = async function(newsId, emoji, event) {
         localStorage.setItem('harivision_user_reactions', safeJsonStringify(map, '{}'));
     } catch (e) {}
 
-    // Оптимистичное локальное обновление
-    const article = newsData.find(n => n.id === newsId);
-    if (article) {
-        if (!article.reactions) article.reactions = {};
-        const curr = Number(article.reactions[emoji]) || 0;
-        article.reactions[emoji] = action === 'remove' ? Math.max(0, curr - 1) : curr + 1;
-    }
-
-    // Мгновенное обновление DOM для модалки и карточек
-    updateNewsReactionContainers(newsId);
-
-    // Синхронизация с сервером (разошлет новое состояние всем пользователям сайта)
+    // Счётчик меняет только data-service (один раз); здесь лишь перерисовываем кнопки.
     try {
-        await toggleNewsReaction(newsId, emoji, action);
+        const pending = toggleNewsReaction(newsId, emoji, action);
+        updateNewsReactionContainers(newsId);
+        await pending;
     } catch (e) {
         console.warn('Sync reaction failed:', e);
+    } finally {
+        pendingReactionKeys.delete(key);
     }
 };
 
@@ -797,7 +800,7 @@ window.openNewsModal = function(newsId) {
     document.getElementById('modal-news-tag').innerText = article.category || article.tag || 'Новость';
     document.getElementById('modal-news-date').innerText = article.date;
     document.getElementById('modal-news-title').innerText = article.title;
-    document.getElementById('modal-news-content').innerText = article.content;
+    document.getElementById('modal-news-content').innerHTML = renderRichText(article.content);
 
     const mediaContainer = document.getElementById('modal-news-media');
     let mediaHtml = '';
@@ -1235,7 +1238,7 @@ function getHomeHTML() {
                     </h1>
 
                     <p class="text-amber-200/90 text-sm md:text-base font-medium max-w-xl leading-relaxed">
-                        ${hasContest ? (featuredContest.slogan ? `«${featuredContest.slogan}» — официальный музыкальный смотр Haribo Broadcasting Union.` : (featuredContest.description || 'Официальный музыкальный конкурс Haribo Broadcasting Union.')) : 'Официальная платформа интерактивного зрительского голосования и прямых трансляций Haribo Broadcasting Union.'}
+                        ${hasContest ? (featuredContest.slogan ? `«${featuredContest.slogan}» — официальный музыкальный смотр Haribo Broadcasting Union.` : (featuredContest.description ? renderRichInline(featuredContest.description) : 'Официальный музыкальный конкурс Haribo Broadcasting Union.')) : 'Официальная платформа интерактивного зрительского голосования и прямых трансляций Haribo Broadcasting Union.'}
                     </p>
 
                     ${hasContest && featuredContest.winner ? `
@@ -1331,7 +1334,7 @@ function getHomeHTML() {
                                     <div>
                                         <div class="text-[10px] font-mono text-amber-400/80 mb-2">${n.date}</div>
                                         <h3 class="text-base font-bold text-white group-hover:text-amber-300 transition uppercase tracking-wide line-clamp-2 mb-2">${n.title}</h3>
-                                        <p class="text-xs text-slate-300 font-normal leading-relaxed line-clamp-3">${n.summary}</p>
+                                        <p class="text-xs text-slate-300 font-normal leading-relaxed line-clamp-3">${renderRichInline(n.summary)}</p>
                                     </div>
 
                                     <div>
@@ -1391,9 +1394,109 @@ function getHomeHTML() {
 }
 
 // -------------------------------------------------------------
+// СОРТИРОВКА СПИСКОВ (сезоны, новости, артисты). Выбор запоминается в браузере.
+// -------------------------------------------------------------
+const LIST_SORT_OPTIONS = {
+    contests: [
+        { key: 'new', label: 'Сначала новые' },
+        { key: 'old', label: 'Сначала старые' },
+        { key: 'az', label: 'По названию' }
+    ],
+    news: [
+        { key: 'new', label: 'Сначала новые' },
+        { key: 'old', label: 'Сначала старые' },
+        { key: 'popular', label: 'Популярные' },
+        { key: 'az', label: 'По названию' }
+    ],
+    artists: [
+        { key: 'az', label: 'А → Я' },
+        { key: 'za', label: 'Я → А' },
+        { key: 'wins', label: 'Больше побед' },
+        { key: 'count', label: 'Больше участий' }
+    ]
+};
+
+const LIST_SORT_STORAGE_KEY = 'harivision_list_sort';
+const listSort = (() => {
+    const defaults = { contests: 'new', news: 'new', artists: 'az' };
+    try {
+        const saved = JSON.parse(localStorage.getItem(LIST_SORT_STORAGE_KEY) || '{}');
+        Object.keys(defaults).forEach(k => {
+            if (LIST_SORT_OPTIONS[k].some(o => o.key === saved[k])) defaults[k] = saved[k];
+        });
+    } catch (e) {}
+    return defaults;
+})();
+
+window.setListSort = function(section, key) {
+    if (!LIST_SORT_OPTIONS[section] || !LIST_SORT_OPTIONS[section].some(o => o.key === key)) return;
+    listSort[section] = key;
+    try { localStorage.setItem(LIST_SORT_STORAGE_KEY, JSON.stringify(listSort)); } catch (e) {}
+    renderMainView();
+};
+
+function renderSortBar(section) {
+    return `
+        <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Сортировка">
+            <span class="text-[10px] font-bold uppercase tracking-widest text-amber-500/70 mr-1">Сортировка:</span>
+            ${LIST_SORT_OPTIONS[section].map(o => `
+                <button type="button" onclick="setListSort('${section}', '${o.key}')" aria-pressed="${listSort[section] === o.key}" class="text-[11px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-xl transition ${
+                    listSort[section] === o.key
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-400/60'
+                        : 'bg-[#16070b] text-slate-400 hover:text-white border border-amber-500/15'
+                }">${o.label}</button>
+            `).join('')}
+        </div>
+    `;
+}
+
+const ruCollator = new Intl.Collator('ru', { sensitivity: 'base', numeric: true });
+
+// Дата сезона — свободный текст («8 июля 2026»); запасной ключ — timestamp в id.
+function contestTime(c) {
+    const fromDate = parseRuDate(c && c.date);
+    if (fromDate) return fromDate;
+    const m = String((c && c.id) || '').match(/(\d{10,})/);
+    return m ? parseInt(m[1], 10) : 0;
+}
+
+function sortContests(list) {
+    const arr = [...list];
+    const mode = listSort.contests;
+    if (mode === 'az') return arr.sort((a, b) => ruCollator.compare(a.title || '', b.title || ''));
+    const dir = mode === 'old' ? 1 : -1;
+    return arr.sort((a, b) => (contestTime(a) - contestTime(b)) * dir);
+}
+
+function reactionsTotal(n) {
+    return Object.values((n && n.reactions) || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
+}
+
+function sortNewsList(list) {
+    const mode = listSort.news;
+    if (mode === 'new') return sortNewsDescending(list);
+    if (mode === 'old') return sortNewsDescending(list).reverse();
+    if (mode === 'popular') return sortNewsDescending(list).sort((a, b) => reactionsTotal(b) - reactionsTotal(a));
+    return [...list].sort((a, b) => ruCollator.compare(a.title || '', b.title || ''));
+}
+
+function sortArtists(list) {
+    const arr = [...list];
+    const mode = listSort.artists;
+    if (mode === 'az' || mode === 'za') {
+        const dir = mode === 'za' ? -1 : 1;
+        return arr.sort((a, b) => ruCollator.compare(a.name || '', b.name || '') * dir);
+    }
+    const stats = new Map(arr.map(a => [a.id, computeArtistStats(a, contestsData)]));
+    const field = mode === 'wins' ? 'wins' : 'participations';
+    return arr.sort((a, b) => (stats.get(b.id)[field] - stats.get(a.id)[field]) || ruCollator.compare(a.name || '', b.name || ''));
+}
+
+// -------------------------------------------------------------
 // ШАБЛОН СПИСКА ВСЕХ СЕЗОНОВ (CONTESTS LIST)
 // -------------------------------------------------------------
 function getContestsListHTML() {
+    const sortedContests = sortContests(contestsData);
     return `
         <div class="flex flex-col gap-8 page-fade">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#0d0408]/90 border border-amber-500/20 p-6 md:p-8 rounded-3xl backdrop-blur-xl">
@@ -1406,6 +1509,8 @@ function getContestsListHTML() {
                 </div>
             </div>
 
+            ${contestsData.length > 1 ? renderSortBar('contests') : ''}
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 ${contestsData.length === 0 ? `
                     <div class="col-span-1 md:col-span-2 text-center py-16 bg-[#0d0408]/60 border border-amber-500/15 rounded-3xl p-8">
@@ -1413,7 +1518,7 @@ function getContestsListHTML() {
                         <div class="text-base font-bold text-white uppercase tracking-wider">Сезоны ещё не добавлены</div>
                         <p class="text-xs text-slate-400 mt-2 max-w-md mx-auto">Список конкурсов пуст. Администратор может создать новые сезоны через панель управления.</p>
                     </div>
-                ` : contestsData.map(c => `
+                ` : sortedContests.map(c => `
                     <div onclick="navigateToView('contest-detail', '${c.id}')" class="bg-[#0d0408]/90 hover:bg-[#16070b] border border-amber-500/20 hover:border-amber-500/40 p-6 md:p-8 rounded-3xl backdrop-blur-xl transition shadow-xl cursor-pointer flex flex-col justify-between group">
                         <div>
                             <div class="flex items-center justify-between mb-3">
@@ -1428,7 +1533,7 @@ function getContestsListHTML() {
 
                             <h2 class="text-xl font-black text-white group-hover:text-amber-300 uppercase tracking-wide transition mb-1">${c.title}</h2>
                             <div class="text-xs text-amber-300 font-bold uppercase tracking-wider mb-3">«${c.slogan}»</div>
-                            <p class="text-xs text-slate-300 font-normal leading-relaxed line-clamp-3 mb-4">${c.description || ''}</p>
+                            <p class="text-xs text-slate-300 font-normal leading-relaxed line-clamp-3 mb-4">${renderRichInline(c.description)}</p>
                         </div>
 
                         <div class="pt-4 border-t border-amber-500/15 flex items-center justify-between text-xs text-slate-400">
@@ -1455,7 +1560,8 @@ window.toggleArtistHistoryOrder = function() {
 };
 
 function getArtistsListHTML() {
-    return artistViews.getArtistsListHTML(artistProfilesData, contestsData);
+    const toolbar = artistProfilesData.length > 1 ? renderSortBar('artists') : '';
+    return artistViews.getArtistsListHTML(sortArtists(artistProfilesData), contestsData, toolbar);
 }
 
 function getArtistDetailHTML(artistId) {
@@ -1494,7 +1600,7 @@ function getContestDetailHTML(contestId) {
                 <div class="lg:col-span-2 bg-[#0d0408]/90 border border-amber-500/20 p-6 md:p-8 rounded-3xl backdrop-blur-xl flex flex-col gap-6">
                     <div>
                         <h2 class="text-sm font-bold text-amber-400 uppercase tracking-widest mb-3">О событии</h2>
-                        <p class="text-sm text-slate-200 leading-relaxed font-normal">${c.description || 'Информация о сезоне обновляется.'}</p>
+                        <div class="text-sm text-slate-200 leading-relaxed font-normal">${c.description ? renderRichText(c.description) : 'Информация о сезоне обновляется.'}</div>
                     </div>
 
                     ${c.videoUrl ? `
@@ -1720,7 +1826,7 @@ window.switchContestParticipantVideoTab = function(contestId, idx, tab) {
 // -------------------------------------------------------------
 function getNewsHTML() {
     const categories = ['all', 'Конкурс', 'Анонс', 'Архив', 'Организация'];
-    const sortedNews = sortNewsDescending(newsData);
+    const sortedNews = sortNewsList(newsData);
     const filteredNews = currentNewsFilter === 'all' 
         ? sortedNews 
         : sortedNews.filter(n => (n.category === currentNewsFilter || n.tag === currentNewsFilter));
@@ -1745,6 +1851,8 @@ function getNewsHTML() {
                     `).join('')}
                 </div>
             </div>
+
+            ${newsData.length > 1 ? renderSortBar('news') : ''}
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 ${filteredNews.length === 0 ? `
@@ -1783,7 +1891,7 @@ function getNewsHTML() {
                             <div>
                                 <div class="text-[10px] font-mono text-amber-400/80 mb-2">${n.date}</div>
                                 <h2 class="text-base font-bold text-white group-hover:text-amber-300 transition uppercase tracking-wide line-clamp-2 mb-2">${n.title}</h2>
-                                <p class="text-xs text-slate-300 font-normal leading-relaxed line-clamp-3">${n.summary}</p>
+                                <p class="text-xs text-slate-300 font-normal leading-relaxed line-clamp-3">${renderRichInline(n.summary)}</p>
                             </div>
 
                             <div>

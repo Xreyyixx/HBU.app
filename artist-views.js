@@ -361,7 +361,7 @@ export function createArtistViews({ renderVideoPlayerHTML }) {
             </div>`;
     }
 
-    function getArtistsListHTML(artists, contests) {
+    function getArtistsListHTML(artists, contests, toolbarHTML = '') {
         const list = Array.isArray(artists) ? artists : [];
         return `
         <div class="flex flex-col gap-8 page-fade">
@@ -372,6 +372,7 @@ export function createArtistViews({ renderVideoPlayerHTML }) {
                 </div>
                 <div class="text-xs text-slate-300 font-medium">Всего профилей: <strong class="text-amber-400">${list.length}</strong></div>
             </div>
+            ${toolbarHTML}
 
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
                 ${list.length === 0 ? `
