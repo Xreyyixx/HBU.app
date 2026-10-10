@@ -502,21 +502,85 @@
 .hbu-search-empty { padding: 26px 16px; text-align: center; color: #94a3b8; font-size: 12px; }
 .hbu-search-empty b { display: block; font-size: 26px; margin-bottom: 6px; }
 
-/* Блок спонсора внизу главной: тёмная подложка, как у оригинального логотипа,
-   чтобы он читался поверх анимированного фона */
-.hbu-sponsor-card {
-    padding: 18px 34px;
-    border-radius: 24px;
-    border: 1px solid rgba(242, 198, 201, .14);
-    background: radial-gradient(80% 80% at 50% 40%, rgba(242, 198, 201, .06), transparent 70%), #050203;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
+/* Блок спонсора внизу главной: логотип ρcakes без подложки и рассказ о спонсоре.
+   Цвета взяты из логотипа (кремово-розовый, какао) и мягко смешаны с янтарём сайта. */
+.hbu-sponsor-panel {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 36px;
+    align-items: center;
+    padding: 30px 40px;
+    border-radius: 28px;
+    border: 1px solid rgba(246, 184, 196, .16);
+    background:
+        radial-gradient(60% 120% at 0% 50%, rgba(246, 184, 196, .10), transparent 65%),
+        radial-gradient(50% 90% at 100% 0%, rgba(245, 158, 11, .07), transparent 70%),
+        rgba(22, 7, 11, .55);
+    backdrop-filter: blur(6px);
+    overflow: hidden;
+}
+.hbu-sponsor-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: linear-gradient(180deg, transparent, #f6b8c4, #c99a8a, transparent);
+    opacity: .6;
+}
+.hbu-sponsor-brand {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 170px;
+    height: 170px;
+}
+.hbu-sponsor-brand::before {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(246, 184, 196, .16), rgba(246, 184, 196, .04) 55%, transparent 72%);
+    border: 1px dashed rgba(246, 184, 196, .18);
+    animation: hbu-sponsor-spin 40s linear infinite;
 }
 .hbu-sponsor-logo {
+    position: relative;
     display: block;
-    height: 120px;
+    height: 150px;
     width: auto;
-    opacity: .92;
-    transition: transform .3s ease, opacity .3s ease, filter .3s ease;
-    filter: drop-shadow(0 6px 18px rgba(242, 198, 201, .12));
+    transition: transform .4s ease, filter .4s ease;
+    filter: drop-shadow(0 6px 20px rgba(246, 184, 196, .18));
 }
-.hbu-sponsor-logo:hover { transform: translateY(-3px) scale(1.03); opacity: 1; filter: drop-shadow(0 8px 24px rgba(242, 198, 201, .25)); }
+.hbu-sponsor-panel:hover .hbu-sponsor-logo { transform: translateY(-4px) rotate(-2deg); filter: drop-shadow(0 10px 26px rgba(246, 184, 196, .32)); }
+.hbu-sponsor-eyebrow { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; color: rgba(246, 184, 196, .75); }
+.hbu-sponsor-title { margin-top: 8px; font-size: 28px; line-height: 1.15; color: #fdf2f4; }
+.hbu-sponsor-title span { color: #f6b8c4; font-style: italic; }
+.hbu-sponsor-lead { margin-top: 10px; max-width: 60ch; font-size: 14px; line-height: 1.6; color: #cbd5e1; }
+.hbu-sponsor-perks { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hbu-sponsor-perks li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: rgba(246, 184, 196, .05);
+    border: 1px solid rgba(246, 184, 196, .10);
+    transition: background .3s ease, border-color .3s ease;
+}
+.hbu-sponsor-perks li:hover { background: rgba(246, 184, 196, .09); border-color: rgba(246, 184, 196, .22); }
+.hbu-sponsor-icon { flex-shrink: 0; font-size: 20px; line-height: 1.2; }
+.hbu-sponsor-perks b { display: block; font-size: 13px; color: #fde7ea; }
+.hbu-sponsor-perks div span { display: block; margin-top: 3px; font-size: 12px; line-height: 1.5; color: #94a3b8; }
+@keyframes hbu-sponsor-spin { to { transform: rotate(360deg); } }
+@media (max-width: 720px) {
+    .hbu-sponsor-panel { grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 18px; padding: 26px 18px; }
+    .hbu-sponsor-panel::before { inset: 0 0 auto 0; width: auto; height: 3px; background: linear-gradient(90deg, transparent, #f6b8c4, #c99a8a, transparent); }
+    .hbu-sponsor-brand { width: 140px; height: 140px; }
+    .hbu-sponsor-logo { height: 124px; }
+    .hbu-sponsor-title { font-size: 24px; }
+    .hbu-sponsor-lead { margin-inline: auto; }
+    .hbu-sponsor-perks { grid-template-columns: 1fr; text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) { .hbu-sponsor-brand::before { animation: none; } }
