@@ -2,7 +2,7 @@ import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db } from './config.js
 import { syncPushSubscription } from './notifications.js';
 import { enhanceRichTextarea } from './rich-editor.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-import { onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { onSnapshot, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import {
     saveNewsArticle,
     deleteNewsArticle,
@@ -1892,46 +1892,66 @@ window.testAdminNotification = async function() {
     }
 };
 
-window.refreshAdminPushSubscribers = async function() {
+// Счётчик подписчиков Web Push. Два источника опрашиваются параллельно:
+//   1) Firestore (artistAccounts/push_sub_*) — основное хранилище подписок, читает только админ;
+//   2) сервер на Render (/api/push/subscribers-count) — сколько подписок видит рассыльщик.
+// Раньше сначала ждали сервер, а бесплатный Render после сна просыпается до минуты или
+// не отвечает вовсе: всё это время (или навсегда) в админке висел «0», хотя подписки в базе есть.
+async function countPushSubscribersInFirestore() {
+    if (!db || !auth || !auth.currentUser || auth.currentUser.isAnonymous) return null;
+    const snap = await getDocs(collection(db, 'artistAccounts'));
+    let count = 0;
+    snap.forEach(d => {
+        const data = d.data() || {};
+        if (data.type === 'push_sub' && data.endpoint) count++;
+    });
+    return count;
+}
+
+async function countPushSubscribersOnServer() {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
     try {
-        let count = 0;
-        try {
-            const res = await fetch('/api/push/subscribers-count');
-            if (res.ok) {
-                const data = await res.json();
-                count = data.count !== undefined ? data.count : 0;
-            }
-        } catch (e) {}
+        const res = await fetch('/api/push/subscribers-count', controller ? { signal: controller.signal } : {});
+        if (!res.ok) return null;
+        const data = await res.json();
+        return typeof data.count === 'number' ? data.count : null;
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
 
-        if (count === 0) {
-            // Правила Firestore разрешают листинг artistAccounts (где лежат push_sub_*)
-            // только администратору — без ID-токена этот запрос всегда вернёт 0 / 403,
-            // поэтому обязательно прикладываем Bearer-токен текущего вошедшего админа.
-            try {
-                if (auth && auth.currentUser && !auth.currentUser.isAnonymous) {
-                    const idToken = await auth.currentUser.getIdToken();
-                    const fsRes = await fetch('https://firestore.googleapis.com/v1/projects/voting-91412/databases/(default)/documents/artistAccounts?key=AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw&pageSize=300', {
-                        headers: { 'Authorization': `Bearer ${idToken}` }
-                    });
-                    if (fsRes.ok) {
-                        const fsData = await fsRes.json();
-                        const subs = (fsData.documents || []).filter(d => d.fields?.type?.stringValue === 'push_sub');
-                        if (subs.length > 0) count = subs.length;
-                    } else {
-                        console.warn('[Push] Firestore fallback listing denied:', fsRes.status);
-                    }
-                }
-            } catch (e2) {
-                console.warn('[Push] Firestore fallback error:', e2);
-            }
+window.refreshAdminPushSubscribers = async function() {
+    const badge = document.getElementById('admin-push-subscribers-badge');
+    if (badge) {
+        badge.innerText = '…';
+        badge.classList.add('animate-pulse');
+    }
+    let fsCount = null;
+    let serverCount = null;
+    let serverDone = false;
+    // Показываем число, как только ответил любой источник; сервер не задерживает показ.
+    const render = () => {
+        if (!badge) return;
+        const known = [fsCount, serverCount].filter(n => typeof n === 'number');
+        if (known.length) {
+            badge.classList.remove('animate-pulse');
+            badge.innerText = Math.max(...known);
         }
-
-        const badge = document.getElementById('admin-push-subscribers-badge');
-        if (badge) {
-            badge.innerText = count;
-        }
-    } catch (e) {
-        console.warn('Error refreshing subscribers count:', e);
+        badge.title = `В базе: ${fsCount === null ? 'нет данных' : fsCount} · сервер видит: ${serverCount !== null ? serverCount : (serverDone ? 'не ответил' : 'ждём ответа')}`;
+    };
+    const fsTask = countPushSubscribersInFirestore()
+        .then(n => { fsCount = n; render(); })
+        .catch(e => console.warn('[Push] Firestore subscribers count error:', e));
+    const serverTask = countPushSubscribersOnServer()
+        .then(n => { serverCount = n; })
+        .catch(e => console.warn('[Push] Server subscribers count error:', e))
+        .finally(() => { serverDone = true; render(); });
+    await Promise.allSettled([fsTask, serverTask]);
+    if (badge && fsCount === null && serverCount === null) {
+        badge.classList.remove('animate-pulse');
+        badge.innerText = '—';
+        badge.title = 'Не удалось получить число подписчиков ни из базы, ни с сервера';
     }
 };
 
