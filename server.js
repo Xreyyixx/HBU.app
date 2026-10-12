@@ -427,6 +427,98 @@ let knownContestIds = new Set((store.contests || []).map(c => c.id));
 let knownNewsIds = new Set((store.news || []).map(n => n.id));
 const sentPushTags = new Map(); // tag -> timestamp
 
+function parseFirestoreFields(fields) {
+    if (!fields) return {};
+    const res = {};
+    for (const [k, v] of Object.entries(fields)) {
+        res[k] = parseFirestoreValue(v);
+    }
+    return res;
+}
+
+function parseFirestoreValue(val) {
+    if (!val || typeof val !== 'object') return null;
+    if ('stringValue' in val) return val.stringValue;
+    if ('integerValue' in val) return parseInt(val.integerValue, 10);
+    if ('doubleValue' in val) return parseFloat(val.doubleValue);
+    if ('booleanValue' in val) return val.booleanValue;
+    if ('nullValue' in val) return null;
+    if ('timestampValue' in val) return val.timestampValue;
+    if ('arrayValue' in val) return (val.arrayValue?.values || []).map(parseFirestoreValue);
+    if ('mapValue' in val) return parseFirestoreFields(val.mapValue?.fields);
+    return null;
+}
+
+// Подписки на push из Firestore (artistAccounts, type === 'push_sub').
+// Диск бесплатного Render стирается при каждом засыпании, поэтому после пробуждения
+// store.pushSubscriptions пуст, пока подписки не подтянуты отсюда. Раньше это делалось
+// в самом конце syncWithFirestore — уже ПОСЛЕ разбора очереди рассылки. Сервер, разбуженный
+// публикацией новости, отправлял push по пустому списку, помечал очередь обработанной,
+// и уведомление терялось: люди видели его только открыв сайт (через слушатель очереди
+// в data-service.js). Теперь подписки подтягиваются до любой рассылки.
+// Самый дорогой запрос (до 300 документов), поэтому без force — не чаще раза в 2 минуты.
+let pushSubsLoadedOnce = false;
+let pushSubSyncPromise = null;
+
+function syncPushSubscriptions(force = false) {
+    if (pushSubSyncPromise) return pushSubSyncPromise;
+    if (!force && Date.now() - lastPushSubSyncAt <= PUSH_SUB_SYNC_INTERVAL_MS) return Promise.resolve();
+    pushSubSyncPromise = (async () => {
+        const { apiKey, projectId } = getFirebaseServerConfig();
+        if (!apiKey) return;
+        const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+        try {
+            const res = await fsListAll(`${base}/artistAccounts?key=${apiKey}`);
+            lastPushSubSyncAt = Date.now();
+            pushDiag.lastRestore = { ok: res.ok, status: res.status, at: Date.now() };
+            if (res.ok) {
+                pushSubsLoadedOnce = true;
+                const data = await res.json();
+                const items = (data.documents || [])
+                    .map(d => parseFirestoreFields(d.fields))
+                    .filter(s => s && s.type === 'push_sub' && s.endpoint && s.keys && s.keys.p256dh && s.keys.auth);
+                pushDiag.lastRestore.found = items.length;
+                // Обратное дозаполнение: подписки, которые есть на сервере, но не сохранены в Firestore
+                // (например, запись не удалась в момент подписки), дописываем туда — иначе при
+                // следующем засыпании Render они пропадут навсегда.
+                try {
+                    const have = new Set(items.map(i => i.endpoint));
+                    const missing = (store.pushSubscriptions || []).filter(s => s && s.endpoint && s.keys && !have.has(s.endpoint)).slice(0, 30);
+                    for (const sub of missing) {
+                        if (await savePushSubscriptionToFirestore(sub)) pushDiag.backfilledTotal++;
+                    }
+                } catch (e) {}
+                if (items.length > 0) {
+                    if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
+                    let anyAdded = false;
+                    items.forEach(fsSub => {
+                        const existing = store.pushSubscriptions.find(s => s.endpoint === fsSub.endpoint);
+                        if (!existing) {
+                            store.pushSubscriptions.push({
+                                endpoint: fsSub.endpoint,
+                                keys: fsSub.keys,
+                                expirationTime: fsSub.expirationTime || null
+                            });
+                            anyAdded = true;
+                            pushDiag.restoredTotal++;
+                        } else if (existing.keys?.p256dh !== fsSub.keys.p256dh || existing.keys?.auth !== fsSub.keys.auth) {
+                            existing.keys = fsSub.keys;
+                            anyAdded = true;
+                        }
+                    });
+                    if (anyAdded) {
+                        saveStore(store);
+                        console.log(`[WebPush] Synchronized subscribers from Firestore. Total: ${store.pushSubscriptions.length}`);
+                    }
+                }
+            }
+        } catch (e) {
+            pushDiag.lastRestore = { ...(pushDiag.lastRestore || {}), ok: false, error: String(e && e.message || e).slice(0, 160) };
+        }
+    })().finally(() => { pushSubSyncPromise = null; });
+    return pushSubSyncPromise;
+}
+
 // Function to sync Firestore collection data into server store
 async function syncWithFirestore(isSubSyncOnly = false) {
     if (isSyncInProgress && !isSubSyncOnly) return;
@@ -438,34 +530,14 @@ async function syncWithFirestore(isSubSyncOnly = false) {
 
         const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
 
-        function parseFirestoreFields(fields) {
-            if (!fields) return {};
-            const res = {};
-            for (const [k, v] of Object.entries(fields)) {
-                res[k] = parseFirestoreValue(v);
-            }
-            return res;
-        }
-
-        function parseFirestoreValue(val) {
-            if (!val || typeof val !== 'object') return null;
-            if ('stringValue' in val) return val.stringValue;
-            if ('integerValue' in val) return parseInt(val.integerValue, 10);
-            if ('doubleValue' in val) return parseFloat(val.doubleValue);
-            if ('booleanValue' in val) return val.booleanValue;
-            if ('nullValue' in val) return null;
-            if ('timestampValue' in val) return val.timestampValue;
-            if ('arrayValue' in val) return (val.arrayValue?.values || []).map(parseFirestoreValue);
-            if ('mapValue' in val) return parseFirestoreFields(val.mapValue?.fields);
-            return null;
-        }
+        // Подписки — первыми: ниже есть шаги, которые сразу рассылают push
+        await syncPushSubscriptions(!pushSubsLoadedOnce);
 
         let updated = false;
 
         // 1. Sync contests directly from Firestore collection "contests"
         try {
             const res = await fsListAll(`${base}/contests?key=${apiKey}`);
-            pushDiag.lastRestore = { ok: res.ok, status: res.status, at: Date.now() };
             if (res.ok) {
                 const data = await res.json();
                 const items = (data.documents || []).map(d => ({
@@ -611,25 +683,29 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                 const item = parseFirestoreFields(doc.fields);
                 if (item && item.title && !item.processed && (Date.now() - (item.createdAt || 0) < 600000)) {
                     console.log('[Firestore Sync] Found pending broadcast in queue:', item.title);
-                    // Mark as processed in artistAccounts/broadcast_queue
-                    await fsFetch(`${base}/artistAccounts/broadcast_queue?key=${apiKey}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            fields: {
-                                ...doc.fields,
-                                processed: { booleanValue: true },
-                                processedAt: { integerValue: String(Date.now()) }
-                            }
-                        })
-                    }).catch(() => {});
-
-                    sendPushNotificationToAll({
+                    const result = await sendPushNotificationToAll({
                         title: item.title,
                         body: item.body || item.message || '',
                         url: item.url || '/',
                         tag: item.tag || ('broadcast_' + (item.createdAt || Date.now()))
-                    }, true).catch(() => {});
+                    }, true).catch(() => null);
+                    // Помечаем обработанной, только если рассылка действительно состоялась
+                    // (или подписчиков точно нет). Иначе следующий цикл попробует ещё раз,
+                    // пока запись не старше 10 минут.
+                    const delivered = result && (result.sent > 0 || result.duplicate || (result.total === 0 && pushSubsLoadedOnce));
+                    if (delivered) {
+                        await fsFetch(`${base}/artistAccounts/broadcast_queue?key=${apiKey}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                fields: {
+                                    ...doc.fields,
+                                    processed: { booleanValue: true },
+                                    processedAt: { integerValue: String(Date.now()) }
+                                }
+                            })
+                        }).catch(() => {});
+                    }
                 }
             }
         } catch (e) {}
@@ -667,63 +743,6 @@ async function syncWithFirestore(isSubSyncOnly = false) {
                 }
             }
         } catch (e) {}
-
-        // 6. Sync push subscriptions from Firestore collection "artistAccounts" (with type === 'push_sub')
-        // САМЫЙ дорогой запрос из всех (pageSize=300 — до 300 прочитанных документов за раз,
-        // тогда как у остальных блоков это обычно 1 документ). Раньше выполнялся при КАЖДОМ
-        // вызове syncWithFirestore — и по таймеру каждые 3 секунды, и при каждой отправке
-        // push. Это било по бесплатной суточной квоте чтений Firestore (50 000/сутки) в
-        // считанные часы; когда квота исчерпывалась, ВСЕ чтения Firestore начинали молча
-        // отваливаться — этим объяснялись сразу несколько симптомов (0 подписчиков в админке,
-        // мигание в заглушку "HBU Live Hub", неработающий push). Ограничиваем частоту отдельно.
-        if (Date.now() - lastPushSubSyncAt > PUSH_SUB_SYNC_INTERVAL_MS) {
-        try {
-            const res = await fsListAll(`${base}/artistAccounts?key=${apiKey}`);
-            lastPushSubSyncAt = Date.now();
-            if (res.ok) {
-                const data = await res.json();
-                const items = (data.documents || [])
-                    .map(d => parseFirestoreFields(d.fields))
-                    .filter(s => s && s.type === 'push_sub' && s.endpoint && s.keys && s.keys.p256dh && s.keys.auth);
-                pushDiag.lastRestore.found = items.length;
-                // Обратное дозаполнение: подписки, которые есть на сервере, но не сохранены в Firestore
-                // (например, запись не удалась в момент подписки), дописываем туда — иначе при
-                // следующем засыпании Render они пропадут навсегда.
-                try {
-                    const have = new Set(items.map(i => i.endpoint));
-                    const missing = (store.pushSubscriptions || []).filter(s => s && s.endpoint && s.keys && !have.has(s.endpoint)).slice(0, 30);
-                    for (const sub of missing) {
-                        if (await savePushSubscriptionToFirestore(sub)) pushDiag.backfilledTotal++;
-                    }
-                } catch (e) {}
-                if (items.length > 0) {
-                    if (!Array.isArray(store.pushSubscriptions)) store.pushSubscriptions = [];
-                    let anyAdded = false;
-                    items.forEach(fsSub => {
-                        const existing = store.pushSubscriptions.find(s => s.endpoint === fsSub.endpoint);
-                        if (!existing) {
-                            store.pushSubscriptions.push({
-                                endpoint: fsSub.endpoint,
-                                keys: fsSub.keys,
-                                expirationTime: fsSub.expirationTime || null
-                            });
-                            anyAdded = true;
-                            pushDiag.restoredTotal++;
-                        } else if (existing.keys?.p256dh !== fsSub.keys.p256dh || existing.keys?.auth !== fsSub.keys.auth) {
-                            existing.keys = fsSub.keys;
-                            anyAdded = true;
-                        }
-                    });
-                    if (anyAdded) {
-                        saveStore(store);
-                        console.log(`[WebPush] Synchronized subscribers from Firestore. Total: ${store.pushSubscriptions.length}`);
-                    }
-                }
-            }
-        } catch (e) {
-            pushDiag.lastRestore = { ...(pushDiag.lastRestore || {}), ok: false, error: String(e && e.message || e).slice(0, 160) };
-        }
-        }
 
         if (updated) {
             saveStore(store);
@@ -868,7 +887,7 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
         const lastSent = sentPushTags.get(tag);
         if (Date.now() - lastSent < 300000) {
             console.log(`[WebPush] Suppressing duplicate push with tag: "${tag}"`);
-            return { total: (store.pushSubscriptions || []).length, sent: 0 };
+            return { total: (store.pushSubscriptions || []).length, sent: 0, duplicate: true };
         }
     }
     if (tag) {
@@ -888,7 +907,13 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
             console.warn('[WebPush] syncWithFirestore error before send:', syncErr.message || syncErr);
         }
     }
+    // Сервер только что проснулся и ещё не подтянул подписки из Firestore — подтягиваем сейчас,
+    // иначе рассылка уйдёт в пустоту
+    if (!pushSubsLoadedOnce || !Array.isArray(store.pushSubscriptions) || store.pushSubscriptions.length === 0) {
+        await syncPushSubscriptions(true).catch(() => {});
+    }
     if (!Array.isArray(store.pushSubscriptions) || store.pushSubscriptions.length === 0) {
+        if (tag) sentPushTags.delete(tag); // ничего не отправлено — повторная попытка не должна считаться дублем
         console.log('[WebPush] No subscribers registered in store');
         return { total: 0, sent: 0, pushEnabled: true, error: 'В store.pushSubscriptions нет ни одной подписки (см. также синхронизацию с Firestore artistAccounts)' };
     }
@@ -953,6 +978,7 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
         deadEndpoints.forEach(ep => removePushSubscriptionFromFirestore(ep).catch(() => {}));
     }
 
+    if (tag && sentCount === 0) sentPushTags.delete(tag);
     console.log(`[WebPush] Sent to ${sentCount}/${store.pushSubscriptions.length} devices`);
     return {
         total: store.pushSubscriptions.length,
