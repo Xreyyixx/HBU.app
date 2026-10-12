@@ -961,10 +961,16 @@ function initFirestoreListeners() {
     } catch (e) {}
 }
 
+// ETag последнего полученного состояния: если на сервере ничего не изменилось, он отвечает
+// пустым 304 вместо всего состояния (~3 МБ с картинками), что бережёт трафик Render.
+let lastStateEtag = null;
+
 async function fetchState(isInitial = false) {
     try {
-        const res = await fetch('/api/state');
+        const res = await fetch('/api/state', lastStateEtag ? { headers: { 'If-None-Match': lastStateEtag } } : {});
+        if (res.status === 304) return;
         if (res.ok) {
+            lastStateEtag = res.headers.get('ETag') || null;
             const data = withoutServerSettings(await res.json());
             if (data && typeof data === 'object') {
                 let updated = false;
