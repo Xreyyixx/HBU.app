@@ -826,6 +826,7 @@ async function savePushSubscriptionToFirestore(subscription) {
             })
         });
         pushDiag.lastSave = { ok: res.ok, status: res.status, at: Date.now() };
+        if (!res.ok) pushDiag.lastSave.error = (await res.text().catch(() => '')).slice(0, 200);
         if (res.ok) {
             console.log('[Firestore] pushSub successfully persisted to artistAccounts doc:', docId);
         } else {
@@ -913,6 +914,7 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
         await syncPushSubscriptions(true).catch(() => {});
     }
     if (!Array.isArray(store.pushSubscriptions) || store.pushSubscriptions.length === 0) {
+        pushDiag.lastSend = { at: Date.now(), title: String(title || '').slice(0, 60), total: 0, sent: 0, note: 'нет подписок' };
         if (tag) sentPushTags.delete(tag); // ничего не отправлено — повторная попытка не должна считаться дублем
         console.log('[WebPush] No subscribers registered in store');
         return { total: 0, sent: 0, pushEnabled: true, error: 'В store.pushSubscriptions нет ни одной подписки (см. также синхронизацию с Firestore artistAccounts)' };
@@ -962,6 +964,7 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
             const isVapidMismatch = status === 403 && bodyText.includes('VAPID credentials');
             if (status === 404 || status === 410 || isVapidMismatch || (err.message && (err.message.includes('expired') || err.message.includes('unsubscribed')))) {
                 deadEndpoints.push(sub.endpoint);
+                if (errorSamples.length < 3) errorSamples.push(`удалена подписка: HTTP ${status || '?'}: ${bodyText.slice(0, 160)}`);
                 console.warn(`[WebPush] Pruning inactive subscriber (${status}${isVapidMismatch ? ', VAPID key mismatch' : ''}):`, sub.endpoint);
             } else {
                 console.warn('[WebPush] Send notification note:', err.message || err, 'status:', status);
@@ -980,6 +983,16 @@ async function sendPushNotificationToAll({ title, body, url = '/', tag = null },
 
     if (tag && sentCount === 0) sentPushTags.delete(tag);
     console.log(`[WebPush] Sent to ${sentCount}/${store.pushSubscriptions.length} devices`);
+    // Итог последней рассылки — виден без доступа к логам Render в GET /api/push/subscribers-count
+    pushDiag.lastSend = {
+        at: Date.now(),
+        title: String(title || '').slice(0, 60),
+        total: store.pushSubscriptions.length + deadEndpoints.length,
+        sent: sentCount,
+        pruned: deadEndpoints.length,
+        errors: errorSamples,
+        endpoints: store.pushSubscriptions.map(s => { try { return new URL(s.endpoint).host; } catch (e) { return '?'; } })
+    };
     return {
         total: store.pushSubscriptions.length,
         sent: sentCount,
