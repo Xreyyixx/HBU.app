@@ -31,7 +31,9 @@ app.use((req, res, next) => {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Vary', 'Origin');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, If-None-Match');
+        res.setHeader('Access-Control-Expose-Headers', 'ETag');
+        res.setHeader('Access-Control-Max-Age', '600');
     }
     if (req.method === 'OPTIONS') {
         return res.sendStatus(204);
@@ -867,8 +869,25 @@ setInterval(syncWithFirestore, 60000);
 // SSE Подписчики
 let sseClients = [];
 
+// Рассылаем по SSE только те разделы состояния, которые изменились с прошлой рассылки.
+// Раньше каждый тик синхронизации (раз в минуту) и каждый голос отправляли ВСЁ состояние
+// каждому открытому клиенту, а в нём обложки новостей и фото календаря в base64 (~3 МБ).
+// Это съело 5 ГБ бесплатного трафика Render, и сервис был приостановлен.
+// Клиент склеивает пришедшие разделы с текущим состоянием ({...current, ...data}),
+// поэтому неизменившиеся разделы можно не присылать.
+const lastBroadcastJson = {};
 function broadcastState(type = 'update') {
-    const payload = JSON.stringify({ type, data: publicState() });
+    const state = publicState();
+    const changed = {};
+    for (const [key, value] of Object.entries(state)) {
+        const json = JSON.stringify(value);
+        if (lastBroadcastJson[key] !== json) {
+            lastBroadcastJson[key] = json;
+            changed[key] = value;
+        }
+    }
+    if (Object.keys(changed).length === 0) return;
+    const payload = JSON.stringify({ type, data: changed });
     sseClients.forEach(client => {
         try {
             client.res.write(`data: ${payload}\n\n`);
@@ -1102,8 +1121,17 @@ app.get('/api/events', (req, res) => {
 });
 
 // API Routes
+// Клиенты опрашивают состояние раз в 20 секунд. С ETag неизменившееся состояние
+// отдаётся пустым ответом 304 вместо ~3 МБ JSON.
 app.get('/api/state', (req, res) => {
-    res.json(publicState());
+    const body = JSON.stringify(publicState());
+    const etag = '"' + crypto.createHash('sha1').update(body).digest('base64url') + '"';
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'no-cache');
+    if (req.headers['if-none-match'] === etag) {
+        return res.status(304).end();
+    }
+    res.type('application/json').send(body);
 });
 
 // Firebase configuration for client SDK
@@ -1782,8 +1810,7 @@ app.post('/api/admin/broadcast-notification', authenticateAdmin, async (req, res
             body: message,
             url: resolvedUrl,
             tag: 'custom_' + Date.now()
-        },
-        data: publicState()
+        }
     });
     sseClients.forEach(client => {
         try {
