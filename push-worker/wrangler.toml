@@ -7,9 +7,13 @@ main = "worker.js"
 compatibility_date = "2026-09-01"
 
 [vars]
+ADMIN_MASTER_KEY = "WTCiSh1XpxXtW-u81nrpEv1clAD1G44GBASmuUO4dRg"
 FIREBASE_API_KEY = "AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw"
 FIREBASE_PROJECT_ID = "voting-91412"
+FIREBASE_SERVER_EMAIL = "server@harivision.app"
+FIREBASE_SERVER_PASSWORD = "server_password12"
+VAPID_PRIVATE_KEY = "C1cD9bRrrnZE6Sxp5YNtLrboa2vJB-I7cmPVrH56yRk"
+VAPID_PUBLIC_KEY = "BP4FuPYn3mRKwGpg68C1TvbR4Lhs9-yRPukIQRWn1sGIR3L7KDG4X-JCDYnqPlvS3UNzVTNz-z91Ek1DOMnA1WY"
 
-# Раз в минуту разбирать очередь рассылки
 [triggers]
 crons = ["* * * * *"]
