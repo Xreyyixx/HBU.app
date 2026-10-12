@@ -131,6 +131,49 @@ export async function ensureFirebaseAuth() {
 //    чтобы их проверяли правила безопасности Firestore.
 // Уже указанный заголовок Authorization не перезаписывается.
 // -------------------------------------------------------------
+// Бесплатный Render стирает диск при засыпании, а с ним и сессии админов. После этого
+// сохранённый в браузере токен сервер уже не знает и отвечает 401 на всё: тестовый push,
+// рассылку, публикацию новости. Админ при этом остаётся вошедшим в Firebase, поэтому
+// молча получаем новую серверную сессию и повторяем запрос один раз. Отозванную сессию
+// (revoked) не трогаем — её обрабатывает admin.js.
+let _adminSessionRefresh = null;
+async function refreshAdminSessionAndRetry(response, input, init, origFetch) {
+    try {
+        if (response.status !== 401 || typeof input !== 'string') return response;
+        const url = input;
+        if (!/\/api\//.test(url) || /\/api\/admin\/register-session/.test(url)) return response;
+        const sentToken = new Headers((init && init.headers) || {}).get('Authorization');
+        const stored = localStorage.getItem('harivision_admin_token');
+        if (!stored || sentToken !== 'Bearer ' + stored) return response;
+        if (!auth || !auth.currentUser || auth.currentUser.isAnonymous) return response;
+        const body = await response.clone().json().catch(() => null);
+        if (body && body.revoked) return response;
+
+        if (!_adminSessionRefresh) {
+            _adminSessionRefresh = (async () => {
+                const idToken = await auth.currentUser.getIdToken();
+                const res = await window.fetch('/api/admin/register-session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+                    body: '{}'
+                });
+                const data = res.ok ? await res.json().catch(() => null) : null;
+                if (!data || !data.success || !data.token) return null;
+                localStorage.setItem('harivision_admin_token', data.token);
+                return data.token;
+            })().finally(() => { _adminSessionRefresh = null; });
+        }
+        const fresh = await _adminSessionRefresh;
+        if (!fresh) return response;
+        const headers = new Headers((init && init.headers) || {});
+        headers.set('Authorization', 'Bearer ' + fresh);
+        // Повтор — мимо обёртки, чтобы повторный 401 не запустил обновление по кругу
+        return await origFetch(url, { ...(init || {}), headers });
+    } catch (e) {
+        return response;
+    }
+}
+
 if (typeof window !== 'undefined' && typeof window.fetch === 'function' && !window.fetch.__hvAuthPatched) {
     const _origFetch = window.fetch.bind(window);
     const patchedFetch = async function(input, init = {}) {
@@ -162,7 +205,8 @@ if (typeof window !== 'undefined' && typeof window.fetch === 'function' && !wind
                 }
             }
         } catch (e) {}
-        return _origFetch(input, init);
+        const response = await _origFetch(input, init);
+        return refreshAdminSessionAndRetry(response, input, init, _origFetch);
     };
     patchedFetch.__hvAuthPatched = true;
     window.fetch = patchedFetch;
