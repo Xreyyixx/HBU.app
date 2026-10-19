@@ -3116,7 +3116,7 @@ function renderVotingCard() {
     // 4. Экран Recap
     else if (currentVotingSubPage === 'recap') {
         const recapUrl = (systemState.recapVideoUrl || 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA').replace(/"/g, '%22');
-        // Файл, загруженный из админки (лежит в R2 за воркером) или прямая ссылка на видео,
+        // Файл, загруженный из админки (лежит в KV за воркером) или прямая ссылка на видео,
         // играется обычным плеером; ссылки Rutube/YouTube по-прежнему встраиваются через iframe.
         const isDirectVideo = /\/recap\/[\w.-]+$/.test(recapUrl) || /\.(mp4|m4v|mov|webm)(\?.*)?$/i.test(recapUrl);
         const recapPlayer = isDirectVideo

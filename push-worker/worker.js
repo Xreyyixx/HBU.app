@@ -20,7 +20,7 @@
 // Адреса:
 //   GET  /        — состояние очереди и итог последней попытки (без секретов)
 //   POST /run     — разобрать очередь прямо сейчас, не дожидаясь минуты
-//   /recap/...    — загрузка видео-повтора из админки в R2 и его раздача (см. ниже)
+//   /recap/...    — загрузка видео-повтора из админки в KV и его раздача (см. ниже)
 // =====================================================================
 
 const QUEUE_MAX_AGE_MS = 10 * 60 * 1000;
@@ -330,104 +330,159 @@ function json(data, headers = {}, status = 200) {
 }
 
 // ---------------------------------------------------------------------
-// Видео-повтор в R2
+// Видео-повтор в Cloudflare KV
 // ---------------------------------------------------------------------
-// Админка режет файл на части и грузит их multipart-загрузкой: один запрос к
-// воркеру на бесплатном тарифе не может быть больше 100 МБ.
-//   POST   /recap/upload                       {name, type} → {key, uploadId}
-//   PUT    /recap/upload/<key>?uploadId=&part=N  тело — кусок файла → {partNumber, etag}
-//   POST   /recap/upload/<key>/complete?uploadId= {parts} → {url}
-//   DELETE /recap/upload/<key>?uploadId=        отмена
-//   GET    /recap/<key>                          раздача видео зрителям (с Range)
+// KV есть на бесплатном тарифе без карты: 1 ГБ, 1000 записей и 100 000 чтений в день.
+// Файл хранится кусками по 5 МБ (recap:<id>:<n>) плюс описание recap:<id>:meta.
+// Админка шлёт куски отдельными запросами, зрителям воркер отдаёт видео с Range,
+// по одному куску на ответ (браузер сам дозапрашивает следующий).
+//   POST   /recap/upload                          {name, type, size} → {key, chunkSize}
+//   PUT    /recap/upload/<key>?part=N              тело — кусок №N (с 0) → {part}
+//   POST   /recap/upload/<key>/complete            → {url}
+//   DELETE /recap/upload/<key>                     отмена
+//   GET    /recap/<key>                            раздача видео зрителям
 // Всё, кроме GET, требует ID-токен Firebase админа (Authorization: Bearer ...).
-// Бакет подключается в wrangler.toml как RECAPS.
+// Namespace подключается в wrangler.toml как RECAPS.
 
-const RECAP_PREFIX = 'recap/';
-const RECAP_KEEP = 2; // сколько последних видео хранить, остальные удаляются
+const RECAP_CHUNK = 5 * 1024 * 1024;
+const RECAP_MAX_SIZE = 900 * 1024 * 1024; // в бесплатный 1 ГБ должно влезать одно видео
 const adminTokenCache = new Map(); // idToken → время, до которого он проверен
 
 async function handleRecap(request, env, url, cors) {
-    if (!env.RECAPS) return json({ error: 'R2-бакет не подключён к воркеру (binding RECAPS)' }, cors, 503);
+    if (!env.RECAPS) return json({ error: 'Хранилище KV не подключено к воркеру (binding RECAPS)' }, cors, 503);
     const rest = url.pathname.slice('/recap/'.length);
 
     if (!rest.startsWith('upload')) {
         if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405, headers: cors });
-        return serveRecap(request, env, RECAP_PREFIX + decodeURIComponent(rest), cors);
+        return serveRecap(request, env, decodeURIComponent(rest), cors);
     }
 
     if (!await isAdminRequest(request, env)) return json({ error: 'Нужен вход администратора' }, cors, 401);
 
     if (rest === 'upload' && request.method === 'POST') {
         const body = await request.json().catch(() => ({}));
+        const size = Number(body.size) || 0;
+        if (size <= 0 || size > RECAP_MAX_SIZE) return json({ error: 'Файл должен быть не больше 900 МБ' }, cors, 400);
         const ext = (String(body.name || '').match(/\.([a-z0-9]{2,5})$/i) || [, 'mp4'])[1].toLowerCase();
-        const key = `${RECAP_PREFIX}${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
-        const contentType = /^video\/[\w.+-]+$/.test(body.type || '') ? body.type : 'video/mp4';
-        const upload = await env.RECAPS.createMultipartUpload(key, { httpMetadata: { contentType, cacheControl: 'public, max-age=31536000, immutable' } });
-        return json({ key: key.slice(RECAP_PREFIX.length), uploadId: upload.uploadId }, cors);
+        const key = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+        const type = /^video\/[\w.+-]+$/.test(body.type || '') ? body.type : 'video/mp4';
+        await env.RECAPS.put(`upload:${key}`, JSON.stringify({ size, type }), { expirationTtl: 24 * 3600 });
+        return json({ key, chunkSize: RECAP_CHUNK }, cors);
     }
 
     const m = rest.match(/^upload\/([\w.-]+)(\/complete)?$/);
-    const uploadId = url.searchParams.get('uploadId');
-    if (!m || !uploadId) return json({ error: 'Неверный адрес загрузки' }, cors, 400);
-    const key = RECAP_PREFIX + m[1];
-    const upload = env.RECAPS.resumeMultipartUpload(key, uploadId);
+    if (!m) return json({ error: 'Неверный адрес загрузки' }, cors, 400);
+    const key = m[1];
+    const pending = await env.RECAPS.get(`upload:${key}`, 'json');
+    if (!pending) return json({ error: 'Загрузка не найдена или устарела' }, cors, 404);
+    const chunks = Math.ceil(pending.size / RECAP_CHUNK);
 
     if (!m[2] && request.method === 'PUT') {
-        const partNumber = Number(url.searchParams.get('part'));
-        if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000) return json({ error: 'Неверный номер части' }, cors, 400);
-        const part = await upload.uploadPart(partNumber, request.body);
-        return json({ partNumber: part.partNumber, etag: part.etag }, cors);
+        const part = Number(url.searchParams.get('part'));
+        if (!Number.isInteger(part) || part < 0 || part >= chunks) return json({ error: 'Неверный номер куска' }, cors, 400);
+        const data = await request.arrayBuffer();
+        const expected = part === chunks - 1 ? pending.size - part * RECAP_CHUNK : RECAP_CHUNK;
+        if (data.byteLength !== expected) return json({ error: `Кусок ${part}: ${data.byteLength} байт вместо ${expected}` }, cors, 400);
+        await env.RECAPS.put(`recap:${key}:${part}`, data);
+        return json({ part }, cors);
     }
     if (m[2] && request.method === 'POST') {
-        const body = await request.json().catch(() => ({}));
-        const parts = (Array.isArray(body.parts) ? body.parts : []).map(p => ({ partNumber: Number(p.partNumber), etag: String(p.etag) }));
-        if (!parts.length) return json({ error: 'Нет загруженных частей' }, cors, 400);
-        await upload.complete(parts.sort((a, b) => a.partNumber - b.partNumber));
+        const stored = await listKeys(env, `recap:${key}:`);
+        const missing = [];
+        for (let i = 0; i < chunks; i++) if (!stored.includes(`recap:${key}:${i}`)) missing.push(i);
+        if (missing.length) return json({ error: 'Не хватает кусков', missing }, cors, 409);
+        await env.RECAPS.put(`recap:${key}:meta`, JSON.stringify({ size: pending.size, type: pending.type, chunks, uploadedAt: Date.now() }));
+        await env.RECAPS.delete(`upload:${key}`);
         await pruneOldRecaps(env, key).catch(e => console.warn('[recap] prune', e));
-        return json({ url: `${url.origin}/recap/${m[1]}` }, cors);
+        return json({ url: `${url.origin}/recap/${key}` }, cors);
     }
     if (!m[2] && request.method === 'DELETE') {
-        await upload.abort().catch(() => {});
+        await deleteRecap(env, key);
+        await env.RECAPS.delete(`upload:${key}`);
         return json({ aborted: true }, cors);
     }
     return new Response('Method not allowed', { status: 405, headers: cors });
 }
 
 async function serveRecap(request, env, key, cors) {
-    const obj = request.method === 'HEAD'
-        ? await env.RECAPS.head(key)
-        : await env.RECAPS.get(key, { range: request.headers, onlyIf: request.headers });
-    if (!obj) return new Response('Not found', { status: 404, headers: cors });
+    const meta = /^[\w.-]+$/.test(key) ? await env.RECAPS.get(`recap:${key}:meta`, { type: 'json', cacheTtl: 3600 }) : null;
+    if (!meta) return new Response('Not found', { status: 404, headers: cors });
 
     const headers = new Headers(cors);
-    obj.writeHttpMetadata(headers);
-    headers.set('ETag', obj.httpEtag);
+    headers.set('Content-Type', meta.type);
     headers.set('Accept-Ranges', 'bytes');
-    if (!('body' in obj) || request.method === 'HEAD') {
-        headers.set('Content-Length', String(obj.size));
-        return new Response(null, { status: request.method === 'HEAD' ? 200 : 304, headers });
+    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    headers.set('ETag', `"${key}"`);
+    if (request.method === 'HEAD') {
+        headers.set('Content-Length', String(meta.size));
+        return new Response(null, { status: 200, headers });
     }
-    // Safari на iPhone играет видео только с поддержкой Range (206 Partial Content)
-    const r = obj.range;
-    if (r && request.headers.has('Range')) {
-        const offset = r.offset != null ? r.offset : obj.size - r.suffix;
-        const length = r.length != null ? r.length : obj.size - offset;
-        headers.set('Content-Range', `bytes ${offset}-${offset + length - 1}/${obj.size}`);
-        headers.set('Content-Length', String(length));
-        return new Response(obj.body, { status: 206, headers });
+
+    // Отдаём не больше одного куска за ответ: это разрешено для Range (206 с меньшим
+    // диапазоном), а Safari и Chrome сами запрашивают продолжение.
+    const range = parseRange(request.headers.get('Range'), meta.size);
+    if (range === null) {
+        headers.set('Content-Range', `bytes */${meta.size}`);
+        return new Response(null, { status: 416, headers });
     }
-    headers.set('Content-Length', String(obj.size));
-    return new Response(obj.body, { status: 200, headers });
+    const start = range ? range.start : 0;
+    const part = Math.floor(start / RECAP_CHUNK);
+    const chunk = await env.RECAPS.get(`recap:${key}:${part}`, { type: 'arrayBuffer', cacheTtl: 3600 });
+    if (!chunk) return new Response('Not found', { status: 404, headers: cors });
+
+    if (!range) {
+        // Запрос без Range (редко, например скачивание): склеиваем куски потоком
+        headers.set('Content-Length', String(meta.size));
+        let i = 0;
+        const stream = new ReadableStream({
+            async pull(controller) {
+                const buf = i === 0 ? chunk : await env.RECAPS.get(`recap:${key}:${i}`, { type: 'arrayBuffer', cacheTtl: 3600 });
+                if (!buf) { controller.error(new Error('missing chunk ' + i)); return; }
+                controller.enqueue(new Uint8Array(buf));
+                if (++i >= meta.chunks) controller.close();
+            }
+        });
+        return new Response(stream, { status: 200, headers });
+    }
+    const chunkStart = part * RECAP_CHUNK;
+    const end = Math.min(range.end, chunkStart + chunk.byteLength - 1);
+    const body = chunk.slice(start - chunkStart, end - chunkStart + 1);
+    headers.set('Content-Range', `bytes ${start}-${end}/${meta.size}`);
+    headers.set('Content-Length', String(body.byteLength));
+    return new Response(body, { status: 206, headers });
 }
 
+// undefined — заголовка нет; null — диапазон за пределами файла
+function parseRange(header, size) {
+    if (!header) return undefined;
+    const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+    if (!m || (m[1] === '' && m[2] === '')) return undefined;
+    let start, end;
+    if (m[1] === '') { start = Math.max(0, size - Number(m[2])); end = size - 1; }
+    else { start = Number(m[1]); end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1); }
+    if (start >= size || start > end) return null;
+    return { start, end };
+}
+
+async function listKeys(env, prefix) {
+    const names = [];
+    let cursor;
+    do {
+        const page = await env.RECAPS.list({ prefix, cursor });
+        names.push(...page.keys.map(k => k.name));
+        cursor = page.list_complete ? null : page.cursor;
+    } while (cursor);
+    return names;
+}
+
+async function deleteRecap(env, key) {
+    for (const name of await listKeys(env, `recap:${key}:`)) await env.RECAPS.delete(name);
+}
+
+// Бесплатный KV — 1 ГБ, поэтому храним только последнее видео
 async function pruneOldRecaps(env, keepKey) {
-    const listed = await env.RECAPS.list({ prefix: RECAP_PREFIX });
-    const old = listed.objects
-        .filter(o => o.key !== keepKey)
-        .sort((a, b) => b.uploaded - a.uploaded)
-        .slice(RECAP_KEEP - 1)
-        .map(o => o.key);
-    if (old.length) await env.RECAPS.delete(old);
+    const ids = new Set((await listKeys(env, 'recap:')).map(n => n.split(':')[1]));
+    for (const id of ids) if (id !== keepKey) await deleteRecap(env, id);
 }
 
 // Админ = пользователь Firebase с документом admins/{uid} (как в server.js).

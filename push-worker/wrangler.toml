@@ -1,4 +1,4 @@
-# Cloudflare Worker, который отправляет Web Push вместо Render и хранит видео-повтор в R2.
+# Cloudflare Worker, который отправляет Web Push вместо Render и хранит видео-повтор в KV.
 # Деплой из этой папки: npx wrangler deploy
 #
 # Ключи и пароли НЕ пишите в этот файл: репозиторий публичный.
@@ -14,10 +14,11 @@ compatibility_date = "2026-09-01"
 FIREBASE_API_KEY = "AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw"
 FIREBASE_PROJECT_ID = "voting-91412"
 
-# Бакет для видео-повтора. Создайте его заранее: R2 → Create bucket → hbu-recaps
-[[r2_buckets]]
+# Хранилище для видео-повтора (Workers KV, бесплатно, карта не нужна).
+# Создайте его: Storage & Databases → KV → Create → hbu-recaps, и вставьте сюда его ID.
+[[kv_namespaces]]
 binding = "RECAPS"
-bucket_name = "hbu-recaps"
+id = "ВСТАВЬТЕ_ID_HBU_RECAPS"
 
 [triggers]
 crons = ["* * * * *"]

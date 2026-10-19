@@ -494,9 +494,9 @@ window.saveRecapUrlFromInput = async function() {
     showToast('Ссылка на повтор сохранена');
 };
 
-// ---------- Загрузка видео-повтора файлом в Cloudflare R2 (через push-worker) ----------
-// Файл режется на части по 50 МБ: один запрос к бесплатному воркеру не может быть больше 100 МБ.
-const RECAP_PART_SIZE = 50 * 1024 * 1024;
+// ---------- Загрузка видео-повтора файлом в Cloudflare KV (через push-worker) ----------
+// Воркер хранит видео кусками по 5 МБ; размер куска он сообщает при начале загрузки.
+const RECAP_PARALLEL = 3;
 let recapUploadAbort = null;
 
 function getRecapWorkerUrl() {
@@ -534,9 +534,9 @@ window.uploadRecapVideoFile = async function(fileInput) {
     };
 
     let cancelled = false;
-    let currentXhr = null;
-    let key = null, uploadId = null;
-    recapUploadAbort = () => { cancelled = true; if (currentXhr) currentXhr.abort(); };
+    const xhrs = new Set();
+    let key = null;
+    recapUploadAbort = () => { cancelled = true; xhrs.forEach(x => x.abort()); };
     const authHeader = async () => ({ 'Authorization': 'Bearer ' + await auth.currentUser.getIdToken() });
     const call = async (path, init = {}) => {
         const res = await fetch(base + path, { ...init, headers: { 'Content-Type': 'application/json', ...(await authHeader()) } });
@@ -547,10 +547,11 @@ window.uploadRecapVideoFile = async function(fileInput) {
     // XHR вместо fetch: только он показывает прогресс отправки
     const putPart = (url, blob, onProgress, token) => new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        currentXhr = xhr;
+        xhrs.add(xhr);
         xhr.open('PUT', url);
         xhr.setRequestHeader('Authorization', 'Bearer ' + token);
         xhr.upload.onprogress = e => onProgress(e.loaded);
+        xhr.onloadend = () => xhrs.delete(xhr);
         xhr.onload = () => {
             let data = {};
             try { data = JSON.parse(xhr.responseText); } catch (e) {}
@@ -566,36 +567,44 @@ window.uploadRecapVideoFile = async function(fileInput) {
     box.classList.remove('hidden');
     setProgress(0);
     try {
-        ({ key, uploadId } = await call('/recap/upload', { method: 'POST', body: JSON.stringify({ name: file.name, type: file.type }) }));
-        const parts = [];
-        const total = Math.max(1, Math.ceil(file.size / RECAP_PART_SIZE));
-        for (let i = 0; i < total; i++) {
-            if (cancelled) throw new Error('отменено');
-            const start = i * RECAP_PART_SIZE;
-            const blob = file.slice(start, Math.min(file.size, start + RECAP_PART_SIZE));
-            const url = `${base}/recap/upload/${encodeURIComponent(key)}?uploadId=${encodeURIComponent(uploadId)}&part=${i + 1}`;
-            let part = null;
-            for (let attempt = 1; !part; attempt++) {
-                try {
-                    const token = await auth.currentUser.getIdToken();
-                    part = await putPart(url, blob, loaded => setProgress(start + loaded), token);
-                } catch (e) {
-                    if (cancelled || attempt >= 3) throw e;
+        const started = await call('/recap/upload', { method: 'POST', body: JSON.stringify({ name: file.name, type: file.type, size: file.size }) });
+        key = started.key;
+        const chunkSize = started.chunkSize;
+        const total = Math.ceil(file.size / chunkSize);
+        const loaded = new Array(total).fill(0);
+        const report = () => setProgress(loaded.reduce((a, b) => a + b, 0));
+        let next = 0;
+        const worker = async () => {
+            while (!cancelled && next < total) {
+                const i = next++;
+                const blob = file.slice(i * chunkSize, Math.min(file.size, (i + 1) * chunkSize));
+                const url = `${base}/recap/upload/${encodeURIComponent(key)}?part=${i}`;
+                for (let attempt = 1; ; attempt++) {
+                    try {
+                        const token = await auth.currentUser.getIdToken();
+                        await putPart(url, blob, n => { loaded[i] = n; report(); }, token);
+                        loaded[i] = blob.size;
+                        report();
+                        break;
+                    } catch (e) {
+                        loaded[i] = 0;
+                        if (cancelled || attempt >= 3) throw e;
+                    }
                 }
             }
-            parts.push({ partNumber: part.partNumber, etag: part.etag });
-        }
-        label.innerText = 'Собираем файл…';
-        const done = await call(`/recap/upload/${encodeURIComponent(key)}/complete?uploadId=${encodeURIComponent(uploadId)}`, { method: 'POST', body: JSON.stringify({ parts }) });
+        };
+        await Promise.all(Array.from({ length: Math.min(RECAP_PARALLEL, total) }, worker));
+        if (cancelled) throw new Error('отменено');
+        label.innerText = 'Сохраняем…';
+        const done = await call(`/recap/upload/${encodeURIComponent(key)}/complete`, { method: 'POST', body: '{}' });
         await saveRecapVideoUrl(done.url);
         const input = document.getElementById('recap-video-url-input');
         if (input) input.value = done.url;
         showToast('Видео загружено и показано зрителям');
     } catch (e) {
-        if (key && uploadId) {
-            call(`/recap/upload/${encodeURIComponent(key)}?uploadId=${encodeURIComponent(uploadId)}`, { method: 'DELETE' }).catch(() => {});
-        }
-        showToast(cancelled ? 'Загрузка отменена' : 'Не удалось загрузить видео: ' + e.message, !cancelled);
+        recapUploadAbort(); // остановить остальные параллельные куски
+        if (key) call(`/recap/upload/${encodeURIComponent(key)}`, { method: 'DELETE' }).catch(() => {});
+        showToast(e.message === 'отменено' ? 'Загрузка отменена' : 'Не удалось загрузить видео: ' + e.message, e.message !== 'отменено');
     } finally {
         recapUploadAbort = null;
         btn.disabled = false;
