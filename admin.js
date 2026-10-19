@@ -1,4 +1,4 @@
-import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db } from './config.js';
+import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db, PUSH_WORKER_URL } from './config.js';
 import { syncPushSubscription } from './notifications.js';
 import { enhanceRichTextarea } from './rich-editor.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
@@ -492,6 +492,116 @@ window.saveRecapUrlFromInput = async function() {
         }, 4000);
     }
     showToast('Ссылка на повтор сохранена');
+};
+
+// ---------- Загрузка видео-повтора файлом в Cloudflare R2 (через push-worker) ----------
+// Файл режется на части по 50 МБ: один запрос к бесплатному воркеру не может быть больше 100 МБ.
+const RECAP_PART_SIZE = 50 * 1024 * 1024;
+let recapUploadAbort = null;
+
+function getRecapWorkerUrl() {
+    let base = PUSH_WORKER_URL;
+    try { base = base || localStorage.getItem('harivision_push_worker_url') || ''; } catch (e) {}
+    if (!base) {
+        base = (prompt('Адрес Cloudflare-воркера (например https://hbu-push.имя.workers.dev):') || '').trim();
+        if (!/^https:\/\/[\w.-]+(\/)?$/.test(base)) return '';
+        try { localStorage.setItem('harivision_push_worker_url', base); } catch (e) {}
+    }
+    return base.replace(/\/+$/, '');
+}
+
+window.cancelRecapUpload = function() {
+    if (recapUploadAbort) recapUploadAbort();
+};
+
+window.uploadRecapVideoFile = async function(fileInput) {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    const base = getRecapWorkerUrl();
+    if (!base) { showToast('Не указан адрес воркера', true); return; }
+    if (!auth || !auth.currentUser || auth.currentUser.isAnonymous) { showToast('Войдите как администратор', true); return; }
+
+    const btn = document.getElementById('recap-upload-btn');
+    const box = document.getElementById('recap-upload-progress');
+    const bar = document.getElementById('recap-upload-bar');
+    const label = document.getElementById('recap-upload-label');
+    const mb = n => (n / 1024 / 1024).toFixed(0);
+    const setProgress = (done) => {
+        const pct = Math.min(100, Math.round(done / file.size * 100));
+        bar.style.width = pct + '%';
+        label.innerText = `Загрузка ${pct}% · ${mb(done)} из ${mb(file.size)} МБ`;
+    };
+
+    let cancelled = false;
+    let currentXhr = null;
+    let key = null, uploadId = null;
+    recapUploadAbort = () => { cancelled = true; if (currentXhr) currentXhr.abort(); };
+    const authHeader = async () => ({ 'Authorization': 'Bearer ' + await auth.currentUser.getIdToken() });
+    const call = async (path, init = {}) => {
+        const res = await fetch(base + path, { ...init, headers: { 'Content-Type': 'application/json', ...(await authHeader()) } });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        return data;
+    };
+    // XHR вместо fetch: только он показывает прогресс отправки
+    const putPart = (url, blob, onProgress, token) => new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        currentXhr = xhr;
+        xhr.open('PUT', url);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+        xhr.upload.onprogress = e => onProgress(e.loaded);
+        xhr.onload = () => {
+            let data = {};
+            try { data = JSON.parse(xhr.responseText); } catch (e) {}
+            xhr.status >= 200 && xhr.status < 300 ? resolve(data) : reject(new Error(data.error || ('HTTP ' + xhr.status)));
+        };
+        xhr.onerror = () => reject(new Error('сетевая ошибка'));
+        xhr.onabort = () => reject(new Error('отменено'));
+        xhr.send(blob);
+    });
+
+    btn.disabled = true;
+    btn.classList.add('opacity-50');
+    box.classList.remove('hidden');
+    setProgress(0);
+    try {
+        ({ key, uploadId } = await call('/recap/upload', { method: 'POST', body: JSON.stringify({ name: file.name, type: file.type }) }));
+        const parts = [];
+        const total = Math.max(1, Math.ceil(file.size / RECAP_PART_SIZE));
+        for (let i = 0; i < total; i++) {
+            if (cancelled) throw new Error('отменено');
+            const start = i * RECAP_PART_SIZE;
+            const blob = file.slice(start, Math.min(file.size, start + RECAP_PART_SIZE));
+            const url = `${base}/recap/upload/${encodeURIComponent(key)}?uploadId=${encodeURIComponent(uploadId)}&part=${i + 1}`;
+            let part = null;
+            for (let attempt = 1; !part; attempt++) {
+                try {
+                    const token = await auth.currentUser.getIdToken();
+                    part = await putPart(url, blob, loaded => setProgress(start + loaded), token);
+                } catch (e) {
+                    if (cancelled || attempt >= 3) throw e;
+                }
+            }
+            parts.push({ partNumber: part.partNumber, etag: part.etag });
+        }
+        label.innerText = 'Собираем файл…';
+        const done = await call(`/recap/upload/${encodeURIComponent(key)}/complete?uploadId=${encodeURIComponent(uploadId)}`, { method: 'POST', body: JSON.stringify({ parts }) });
+        await saveRecapVideoUrl(done.url);
+        const input = document.getElementById('recap-video-url-input');
+        if (input) input.value = done.url;
+        showToast('Видео загружено и показано зрителям');
+    } catch (e) {
+        if (key && uploadId) {
+            call(`/recap/upload/${encodeURIComponent(key)}?uploadId=${encodeURIComponent(uploadId)}`, { method: 'DELETE' }).catch(() => {});
+        }
+        showToast(cancelled ? 'Загрузка отменена' : 'Не удалось загрузить видео: ' + e.message, !cancelled);
+    } finally {
+        recapUploadAbort = null;
+        btn.disabled = false;
+        btn.classList.remove('opacity-50');
+        box.classList.add('hidden');
+    }
 };
 
 window.confirmResetAllVotes = function() {

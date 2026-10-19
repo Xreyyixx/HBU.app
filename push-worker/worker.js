@@ -20,6 +20,7 @@
 // Адреса:
 //   GET  /        — состояние очереди и итог последней попытки (без секретов)
 //   POST /run     — разобрать очередь прямо сейчас, не дожидаясь минуты
+//   /recap/...    — загрузка видео-повтора из админки в R2 и его раздача (см. ниже)
 // =====================================================================
 
 const QUEUE_MAX_AGE_MS = 10 * 60 * 1000;
@@ -34,9 +35,20 @@ export default {
         const url = new URL(request.url);
         const origin = request.headers.get('Origin') || '';
         const cors = ALLOWED_ORIGINS.includes(origin)
-            ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Vary': 'Origin' }
+            ? {
+                'Access-Control-Allow-Origin': origin,
+                'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+                'Access-Control-Allow-Headers': 'Authorization, Content-Type, Range',
+                'Access-Control-Expose-Headers': 'ETag, Content-Range, Accept-Ranges, Content-Length',
+                'Access-Control-Max-Age': '600',
+                'Vary': 'Origin'
+            }
             : {};
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+
+        if (url.pathname.startsWith('/recap/')) {
+            return handleRecap(request, env, url, cors).catch(e => json({ error: String(e && e.message || e) }, cors, 500));
+        }
 
         if (url.pathname === '/run' && request.method === 'POST') {
             const result = await processQueue(env).catch(e => ({ error: String(e && e.message || e) }));
@@ -313,6 +325,132 @@ function hostOf(endpoint) {
 function countBy(list) {
     return list.reduce((acc, k) => { acc[k] = (acc[k] || 0) + 1; return acc; }, {});
 }
-function json(data, headers = {}) {
-    return new Response(JSON.stringify(data, null, 2), { headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers } });
+function json(data, headers = {}, status = 200) {
+    return new Response(JSON.stringify(data, null, 2), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers } });
+}
+
+// ---------------------------------------------------------------------
+// Видео-повтор в R2
+// ---------------------------------------------------------------------
+// Админка режет файл на части и грузит их multipart-загрузкой: один запрос к
+// воркеру на бесплатном тарифе не может быть больше 100 МБ.
+//   POST   /recap/upload                       {name, type} → {key, uploadId}
+//   PUT    /recap/upload/<key>?uploadId=&part=N  тело — кусок файла → {partNumber, etag}
+//   POST   /recap/upload/<key>/complete?uploadId= {parts} → {url}
+//   DELETE /recap/upload/<key>?uploadId=        отмена
+//   GET    /recap/<key>                          раздача видео зрителям (с Range)
+// Всё, кроме GET, требует ID-токен Firebase админа (Authorization: Bearer ...).
+// Бакет подключается в wrangler.toml как RECAPS.
+
+const RECAP_PREFIX = 'recap/';
+const RECAP_KEEP = 2; // сколько последних видео хранить, остальные удаляются
+const adminTokenCache = new Map(); // idToken → время, до которого он проверен
+
+async function handleRecap(request, env, url, cors) {
+    if (!env.RECAPS) return json({ error: 'R2-бакет не подключён к воркеру (binding RECAPS)' }, cors, 503);
+    const rest = url.pathname.slice('/recap/'.length);
+
+    if (!rest.startsWith('upload')) {
+        if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405, headers: cors });
+        return serveRecap(request, env, RECAP_PREFIX + decodeURIComponent(rest), cors);
+    }
+
+    if (!await isAdminRequest(request, env)) return json({ error: 'Нужен вход администратора' }, cors, 401);
+
+    if (rest === 'upload' && request.method === 'POST') {
+        const body = await request.json().catch(() => ({}));
+        const ext = (String(body.name || '').match(/\.([a-z0-9]{2,5})$/i) || [, 'mp4'])[1].toLowerCase();
+        const key = `${RECAP_PREFIX}${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+        const contentType = /^video\/[\w.+-]+$/.test(body.type || '') ? body.type : 'video/mp4';
+        const upload = await env.RECAPS.createMultipartUpload(key, { httpMetadata: { contentType, cacheControl: 'public, max-age=31536000, immutable' } });
+        return json({ key: key.slice(RECAP_PREFIX.length), uploadId: upload.uploadId }, cors);
+    }
+
+    const m = rest.match(/^upload\/([\w.-]+)(\/complete)?$/);
+    const uploadId = url.searchParams.get('uploadId');
+    if (!m || !uploadId) return json({ error: 'Неверный адрес загрузки' }, cors, 400);
+    const key = RECAP_PREFIX + m[1];
+    const upload = env.RECAPS.resumeMultipartUpload(key, uploadId);
+
+    if (!m[2] && request.method === 'PUT') {
+        const partNumber = Number(url.searchParams.get('part'));
+        if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000) return json({ error: 'Неверный номер части' }, cors, 400);
+        const part = await upload.uploadPart(partNumber, request.body);
+        return json({ partNumber: part.partNumber, etag: part.etag }, cors);
+    }
+    if (m[2] && request.method === 'POST') {
+        const body = await request.json().catch(() => ({}));
+        const parts = (Array.isArray(body.parts) ? body.parts : []).map(p => ({ partNumber: Number(p.partNumber), etag: String(p.etag) }));
+        if (!parts.length) return json({ error: 'Нет загруженных частей' }, cors, 400);
+        await upload.complete(parts.sort((a, b) => a.partNumber - b.partNumber));
+        await pruneOldRecaps(env, key).catch(e => console.warn('[recap] prune', e));
+        return json({ url: `${url.origin}/recap/${m[1]}` }, cors);
+    }
+    if (!m[2] && request.method === 'DELETE') {
+        await upload.abort().catch(() => {});
+        return json({ aborted: true }, cors);
+    }
+    return new Response('Method not allowed', { status: 405, headers: cors });
+}
+
+async function serveRecap(request, env, key, cors) {
+    const obj = request.method === 'HEAD'
+        ? await env.RECAPS.head(key)
+        : await env.RECAPS.get(key, { range: request.headers, onlyIf: request.headers });
+    if (!obj) return new Response('Not found', { status: 404, headers: cors });
+
+    const headers = new Headers(cors);
+    obj.writeHttpMetadata(headers);
+    headers.set('ETag', obj.httpEtag);
+    headers.set('Accept-Ranges', 'bytes');
+    if (!('body' in obj) || request.method === 'HEAD') {
+        headers.set('Content-Length', String(obj.size));
+        return new Response(null, { status: request.method === 'HEAD' ? 200 : 304, headers });
+    }
+    // Safari на iPhone играет видео только с поддержкой Range (206 Partial Content)
+    const r = obj.range;
+    if (r && request.headers.has('Range')) {
+        const offset = r.offset != null ? r.offset : obj.size - r.suffix;
+        const length = r.length != null ? r.length : obj.size - offset;
+        headers.set('Content-Range', `bytes ${offset}-${offset + length - 1}/${obj.size}`);
+        headers.set('Content-Length', String(length));
+        return new Response(obj.body, { status: 206, headers });
+    }
+    headers.set('Content-Length', String(obj.size));
+    return new Response(obj.body, { status: 200, headers });
+}
+
+async function pruneOldRecaps(env, keepKey) {
+    const listed = await env.RECAPS.list({ prefix: RECAP_PREFIX });
+    const old = listed.objects
+        .filter(o => o.key !== keepKey)
+        .sort((a, b) => b.uploaded - a.uploaded)
+        .slice(RECAP_KEEP - 1)
+        .map(o => o.key);
+    if (old.length) await env.RECAPS.delete(old);
+}
+
+// Админ = пользователь Firebase с документом admins/{uid} (как в server.js).
+// Документ читаем токеном самого пользователя: правила дают читать только свой.
+async function isAdminRequest(request, env) {
+    const idToken = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    if (!idToken) return false;
+    const cachedUntil = adminTokenCache.get(idToken);
+    if (cachedUntil && cachedUntil > Date.now()) return true;
+
+    const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${env.FIREBASE_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken })
+    });
+    const data = await r.json().catch(() => ({}));
+    const user = r.ok && Array.isArray(data.users) ? data.users[0] : null;
+    if (!user || !user.localId) return false;
+    const adminRes = await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/admins/${encodeURIComponent(user.localId)}`, {
+        headers: { Authorization: 'Bearer ' + idToken }
+    });
+    if (!adminRes.ok) return false;
+    if (adminTokenCache.size > 50) adminTokenCache.clear();
+    adminTokenCache.set(idToken, Date.now() + 5 * 60 * 1000);
+    return true;
 }

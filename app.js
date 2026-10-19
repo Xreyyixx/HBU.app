@@ -3115,7 +3115,13 @@ function renderVotingCard() {
     } 
     // 4. Экран Recap
     else if (currentVotingSubPage === 'recap') {
-        const recapUrl = systemState.recapVideoUrl || 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA';
+        const recapUrl = (systemState.recapVideoUrl || 'https://rutube.ru/play/embed/268273f0bf0a34f67bb27790b936619d/?p=NPhZUzeuVzQFYISUpH_dtA').replace(/"/g, '%22');
+        // Файл, загруженный из админки (лежит в R2 за воркером) или прямая ссылка на видео,
+        // играется обычным плеером; ссылки Rutube/YouTube по-прежнему встраиваются через iframe.
+        const isDirectVideo = /\/recap\/[\w.-]+$/.test(recapUrl) || /\.(mp4|m4v|mov|webm)(\?.*)?$/i.test(recapUrl);
+        const recapPlayer = isDirectVideo
+            ? `<video class="w-full h-full bg-black" src="${recapUrl}" controls playsinline preload="metadata"></video>`
+            : `<iframe class="w-full h-full" src="${recapUrl}" frameborder="0" allow="clipboard-write; autoplay" webkitAllowFullScreen mozallowfullscreen allowfullscreen></iframe>`;
         card.innerHTML = `
             <div class="flex flex-col h-full justify-between gap-6 page-fade">
                 <div class="flex items-center justify-between border-b border-amber-500/15 pb-4">
@@ -3123,7 +3129,7 @@ function renderVotingCard() {
                     <span class="text-[10px] font-bold uppercase tracking-widest text-amber-400">Длительность: ~02:00</span>
                 </div>
                 <div class="relative w-full aspect-video bg-[#0a0305] border border-amber-500/20 rounded-2xl overflow-hidden shadow-2xl">
-                    <iframe class="w-full h-full" src="${recapUrl}" frameborder="0" allow="clipboard-write; autoplay" webkitAllowFullScreen mozallowfullscreen allowfullscreen></iframe>
+                    ${recapPlayer}
                 </div>
                 <div class="flex flex-col md:flex-row gap-4 pt-2">
                     <button onclick="navigateToVotingSubPage('voting')" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-extrabold text-xs uppercase tracking-widest py-4 transition shadow-lg rounded-xl cursor-pointer">
