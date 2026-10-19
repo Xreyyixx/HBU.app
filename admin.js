@@ -1,4 +1,4 @@
-import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db } from './config.js';
+import { auth, PUBLIC_POINTS_SCALE, DEFAULT_PARTICIPANTS, db, PUSH_WORKER_URL } from './config.js';
 import { syncPushSubscription } from './notifications.js';
 import { enhanceRichTextarea } from './rich-editor.js';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
@@ -492,6 +492,125 @@ window.saveRecapUrlFromInput = async function() {
         }, 4000);
     }
     showToast('Ссылка на повтор сохранена');
+};
+
+// ---------- Загрузка видео-повтора файлом в Cloudflare KV (через push-worker) ----------
+// Воркер хранит видео кусками по 5 МБ; размер куска он сообщает при начале загрузки.
+const RECAP_PARALLEL = 3;
+let recapUploadAbort = null;
+
+function getRecapWorkerUrl() {
+    let base = PUSH_WORKER_URL;
+    try { base = base || localStorage.getItem('harivision_push_worker_url') || ''; } catch (e) {}
+    if (!base) {
+        base = (prompt('Адрес Cloudflare-воркера (например https://hbu-push.имя.workers.dev):') || '').trim();
+        if (!/^https:\/\/[\w.-]+(\/)?$/.test(base)) return '';
+        try { localStorage.setItem('harivision_push_worker_url', base); } catch (e) {}
+    }
+    return base.replace(/\/+$/, '');
+}
+
+window.cancelRecapUpload = function() {
+    if (recapUploadAbort) recapUploadAbort();
+};
+
+window.uploadRecapVideoFile = async function(fileInput) {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    const base = getRecapWorkerUrl();
+    if (!base) { showToast('Не указан адрес воркера', true); return; }
+    if (!auth || !auth.currentUser || auth.currentUser.isAnonymous) { showToast('Войдите как администратор', true); return; }
+
+    const btn = document.getElementById('recap-upload-btn');
+    const box = document.getElementById('recap-upload-progress');
+    const bar = document.getElementById('recap-upload-bar');
+    const label = document.getElementById('recap-upload-label');
+    const mb = n => (n / 1024 / 1024).toFixed(0);
+    const setProgress = (done) => {
+        const pct = Math.min(100, Math.round(done / file.size * 100));
+        bar.style.width = pct + '%';
+        label.innerText = `Загрузка ${pct}% · ${mb(done)} из ${mb(file.size)} МБ`;
+    };
+
+    let cancelled = false;
+    const xhrs = new Set();
+    let key = null;
+    recapUploadAbort = () => { cancelled = true; xhrs.forEach(x => x.abort()); };
+    const authHeader = async () => ({ 'Authorization': 'Bearer ' + await auth.currentUser.getIdToken() });
+    const call = async (path, init = {}) => {
+        const res = await fetch(base + path, { ...init, headers: { 'Content-Type': 'application/json', ...(await authHeader()) } });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        return data;
+    };
+    // XHR вместо fetch: только он показывает прогресс отправки
+    const putPart = (url, blob, onProgress, token) => new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhrs.add(xhr);
+        xhr.open('PUT', url);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+        xhr.upload.onprogress = e => onProgress(e.loaded);
+        xhr.onloadend = () => xhrs.delete(xhr);
+        xhr.onload = () => {
+            let data = {};
+            try { data = JSON.parse(xhr.responseText); } catch (e) {}
+            xhr.status >= 200 && xhr.status < 300 ? resolve(data) : reject(new Error(data.error || ('HTTP ' + xhr.status)));
+        };
+        xhr.onerror = () => reject(new Error('сетевая ошибка'));
+        xhr.onabort = () => reject(new Error('отменено'));
+        xhr.send(blob);
+    });
+
+    btn.disabled = true;
+    btn.classList.add('opacity-50');
+    box.classList.remove('hidden');
+    setProgress(0);
+    try {
+        const started = await call('/recap/upload', { method: 'POST', body: JSON.stringify({ name: file.name, type: file.type, size: file.size }) });
+        key = started.key;
+        const chunkSize = started.chunkSize;
+        const total = Math.ceil(file.size / chunkSize);
+        const loaded = new Array(total).fill(0);
+        const report = () => setProgress(loaded.reduce((a, b) => a + b, 0));
+        let next = 0;
+        const worker = async () => {
+            while (!cancelled && next < total) {
+                const i = next++;
+                const blob = file.slice(i * chunkSize, Math.min(file.size, (i + 1) * chunkSize));
+                const url = `${base}/recap/upload/${encodeURIComponent(key)}?part=${i}`;
+                for (let attempt = 1; ; attempt++) {
+                    try {
+                        const token = await auth.currentUser.getIdToken();
+                        await putPart(url, blob, n => { loaded[i] = n; report(); }, token);
+                        loaded[i] = blob.size;
+                        report();
+                        break;
+                    } catch (e) {
+                        loaded[i] = 0;
+                        if (cancelled || attempt >= 3) throw e;
+                    }
+                }
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(RECAP_PARALLEL, total) }, worker));
+        if (cancelled) throw new Error('отменено');
+        label.innerText = 'Сохраняем…';
+        const done = await call(`/recap/upload/${encodeURIComponent(key)}/complete`, { method: 'POST', body: '{}' });
+        await saveRecapVideoUrl(done.url);
+        const input = document.getElementById('recap-video-url-input');
+        if (input) input.value = done.url;
+        showToast('Видео загружено и показано зрителям');
+    } catch (e) {
+        recapUploadAbort(); // остановить остальные параллельные куски
+        if (key) call(`/recap/upload/${encodeURIComponent(key)}`, { method: 'DELETE' }).catch(() => {});
+        showToast(e.message === 'отменено' ? 'Загрузка отменена' : 'Не удалось загрузить видео: ' + e.message, e.message !== 'отменено');
+    } finally {
+        recapUploadAbort = null;
+        btn.disabled = false;
+        btn.classList.remove('opacity-50');
+        box.classList.add('hidden');
+    }
 };
 
 window.confirmResetAllVotes = function() {

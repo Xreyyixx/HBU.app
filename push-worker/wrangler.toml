@@ -1,19 +1,28 @@
-# Cloudflare Worker, который отправляет Web Push вместо Render.
+# Cloudflare Worker, который отправляет Web Push вместо Render и хранит видео-повтор в KV.
 # Деплой из этой папки: npx wrangler deploy
-# Секреты: npx wrangler secret put VAPID_PUBLIC_KEY
-#          npx wrangler secret put VAPID_PRIVATE_KEY
+#
+# Ключи и пароли НЕ пишите в этот файл: репозиторий публичный.
+# Задайте их в Cloudflare → Workers → hbu-push → Settings → Variables and Secrets
+# с типом Secret (или командой npx wrangler secret put ИМЯ):
+#   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY,
+#   FIREBASE_SERVER_EMAIL, FIREBASE_SERVER_PASSWORD (если нужны)
 name = "hbu-push"
 main = "worker.js"
 compatibility_date = "2026-09-01"
 
 [vars]
-ADMIN_MASTER_KEY = "WTCiSh1XpxXtW-u81nrpEv1clAD1G44GBASmuUO4dRg"
 FIREBASE_API_KEY = "AIzaSyAZ_vp4IovHZBON0GxSd9lcWt5TFC2mOQw"
 FIREBASE_PROJECT_ID = "voting-91412"
-FIREBASE_SERVER_EMAIL = "server@harivision.app"
-FIREBASE_SERVER_PASSWORD = "server_password12"
-VAPID_PRIVATE_KEY = "C1cD9bRrrnZE6Sxp5YNtLrboa2vJB-I7cmPVrH56yRk"
-VAPID_PUBLIC_KEY = "BP4FuPYn3mRKwGpg68C1TvbR4Lhs9-yRPukIQRWn1sGIR3L7KDG4X-JCDYnqPlvS3UNzVTNz-z91Ek1DOMnA1WY"
+
+# Хранилище для видео-повтора (Workers KV, бесплатно, карта не нужна).
+# Namespace hbu-recaps (Storage & Databases → KV).
+[[kv_namespaces]]
+binding = "RECAPS"
+id = "de0da6d139f94cddb1fb15b4414beab7"
 
 [triggers]
 crons = ["* * * * *"]
+
+# Сборки веток (preview) в Workers Builds требуют этот блок. Он пустой: превью не получает
+# ни хранилище видео, ни переменные, поэтому ничего не трогает в настоящих данных.
+[previews]

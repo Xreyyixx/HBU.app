@@ -241,15 +241,31 @@
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-500/15 pb-3">
                     <div>
                         <div class="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Видеоповтор выступлений</div>
-                        <h2 class="text-base font-bold text-white uppercase tracking-wider">Ссылка на повтор (Recap Video URL)</h2>
+                        <h2 class="text-base font-bold text-white uppercase tracking-wider">Видео-повтор (файл или ссылка)</h2>
                     </div>
                     <span class="text-xs font-mono text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">Экран Public Vote</span>
                 </div>
                 <div class="flex flex-col sm:flex-row gap-3">
-                    <input type="text" id="recap-video-url-input" placeholder="https://rutube.ru/play/embed/... или https://www.youtube.com/embed/..." class="flex-grow bg-[#16070b] border border-amber-500/20 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl">
+                    <input type="text" id="recap-video-url-input" placeholder="https://rutube.ru/play/embed/..., https://www.youtube.com/embed/... или ссылка на .mp4" class="flex-grow bg-[#16070b] border border-amber-500/20 px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-400 rounded-xl">
                     <button onclick="saveRecapUrlFromInput()" class="px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition shadow-lg shrink-0">
                         Сохранить ссылку
                     </button>
+                </div>
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <input type="file" id="recap-video-file-input" accept="video/*" class="hidden" onchange="uploadRecapVideoFile(this)">
+                    <button id="recap-upload-btn" onclick="document.getElementById('recap-video-file-input').click()" class="px-6 py-3 bg-[#16070b] border border-amber-500/40 hover:border-amber-400 text-amber-300 font-black text-xs uppercase tracking-wider rounded-xl transition shrink-0">
+                        Загрузить видео
+                    </button>
+                    <span class="text-[11px] text-slate-400">Файл с устройства (MP4 или MOV). После загрузки он сразу появится у зрителей вместо ссылки.</span>
+                </div>
+                <div id="recap-upload-progress" class="hidden flex flex-col gap-1">
+                    <div class="h-2 w-full bg-[#16070b] rounded-full overflow-hidden border border-amber-500/20">
+                        <div id="recap-upload-bar" class="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all" style="width:0%"></div>
+                    </div>
+                    <div class="flex justify-between items-center text-[11px] text-slate-300">
+                        <span id="recap-upload-label">Загрузка…</span>
+                        <button onclick="cancelRecapUpload()" class="text-red-400 hover:text-red-300 font-bold uppercase tracking-wider">Отменить</button>
+                    </div>
                 </div>
                 <div id="recap-save-status" class="text-xs text-green-400 hidden font-bold"></div>
             </div>
