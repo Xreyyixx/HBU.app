@@ -52,9 +52,8 @@ try {
 // ЗАПОЛНИТЕ после деплоя на Render (или другой Node-хостинг), например:
 // 'https://hbu-server.onrender.com'
 export const RENDER_API_BASE = 'https://hbu-app.onrender.com';
-// Адрес Cloudflare-воркера push-worker/ (Web Push и загрузка видео-повтора в KV),
-// например 'https://hbu-push.имя.workers.dev'. Пустой — админка спросит его один раз.
-export const PUSH_WORKER_URL = '';
+// Адрес Cloudflare-воркера push-worker/ (Web Push и загрузка видео-повтора в KV).
+export const PUSH_WORKER_URL = 'https://hbu-push.xreyixxrodion.workers.dev';
 export const API_BASE = (typeof window !== 'undefined' && /\.github\.io$/i.test(window.location.hostname))
     ? RENDER_API_BASE
     : '';
